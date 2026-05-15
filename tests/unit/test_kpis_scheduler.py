@@ -80,7 +80,7 @@ def test_start_is_no_op_when_disabled(monkeypatch):
     mod = _load()
     # Ensure clean state — _scheduler is module-global
     mod._scheduler = None
-    monkeypatch.setenv("ML_INTERN_KPIS_DISABLED", "1")
+    monkeypatch.setenv("AIDD_INTERN_KPIS_DISABLED", "1")
     mod.start()
     assert mod._scheduler is None  # never instantiated
 
@@ -88,7 +88,7 @@ def test_start_is_no_op_when_disabled(monkeypatch):
 def test_start_skips_cleanly_without_apscheduler(monkeypatch):
     mod = _load()
     mod._scheduler = None
-    monkeypatch.delenv("ML_INTERN_KPIS_DISABLED", raising=False)
+    monkeypatch.delenv("AIDD_INTERN_KPIS_DISABLED", raising=False)
 
     # Force the apscheduler import to fail — start() should log and return.
     real_import = (

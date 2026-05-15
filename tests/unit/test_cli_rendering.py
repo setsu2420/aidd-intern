@@ -104,7 +104,7 @@ def test_cli_forwards_model_flag_to_interactive_main(monkeypatch):
         seen["model"] = model
         seen["sandbox_tools"] = sandbox_tools
 
-    monkeypatch.setattr(sys, "argv", ["ml-intern", "--model", "openai/gpt-5.5"])
+    monkeypatch.setattr(sys, "argv", ["aidd-intern", "--model", "openai/gpt-5.5"])
     monkeypatch.setattr(main_mod, "main", fake_main)
 
     main_mod.cli()
@@ -120,7 +120,7 @@ def test_cli_forwards_sandbox_flag_to_interactive_main(monkeypatch):
         seen["model"] = model
         seen["sandbox_tools"] = sandbox_tools
 
-    monkeypatch.setattr(sys, "argv", ["ml-intern", "--sandbox-tools"])
+    monkeypatch.setattr(sys, "argv", ["aidd-intern", "--sandbox-tools"])
     monkeypatch.setattr(main_mod, "main", fake_main)
 
     main_mod.cli()
@@ -152,7 +152,7 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["ml-intern", "--sandbox-tools", "--no-stream", "train a model"],
+        ["aidd-intern", "--sandbox-tools", "--no-stream", "train a model"],
     )
     monkeypatch.setattr(main_mod, "headless_main", fake_headless_main)
 

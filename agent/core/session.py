@@ -637,7 +637,7 @@ class Session:
 
             env = os.environ.copy()
             if token_value:
-                env["_ML_INTERN_PERSONAL_TOKEN"] = token_value
+                env["_AIDD_INTERN_PERSONAL_TOKEN"] = token_value
 
             subprocess.Popen(
                 cmd,

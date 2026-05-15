@@ -1770,7 +1770,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ml-intern"
+name = "aidd-intern"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -1831,7 +1831,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=1.12.0" },
     { name = "inspect-ai", marker = "extra == 'eval'", specifier = ">=0.3.149" },
     { name = "litellm", specifier = ">=1.83.0" },
-    { name = "ml-intern", extras = ["eval", "dev"], marker = "extra == 'all'" },
+    { name = "aidd-intern", extras = ["eval", "dev"], marker = "extra == 'all'" },
     { name = "nbconvert", specifier = ">=7.16.6" },
     { name = "nbformat", specifier = ">=5.10.4" },
     { name = "pandas", marker = "extra == 'eval'", specifier = ">=2.3.3" },

@@ -150,7 +150,7 @@ def test_slack_mrkdwn_formatter_converts_common_markdown():
     formatted = _format_slack_mrkdwn(
         "# Result\n"
         "**Done** with *details* and ~~old text~~.\n"
-        "See [PR](https://github.com/huggingface/ml-intern/pull/116).\n"
+        "See [PR](https://github.com/huggingface/aidd-intern/pull/116).\n"
         "Keep `**literal**` and ```python\nx < 3\n``` untouched.\n"
         "Escape <raw> & text."
     )
@@ -159,7 +159,7 @@ def test_slack_mrkdwn_formatter_converts_common_markdown():
     assert "*Done*" in formatted
     assert "_details_" in formatted
     assert "~old text~" in formatted
-    assert "<https://github.com/huggingface/ml-intern/pull/116|PR>" in formatted
+    assert "<https://github.com/huggingface/aidd-intern/pull/116|PR>" in formatted
     assert "`**literal**`" in formatted
     assert "```python\nx < 3\n```" in formatted
     assert "Escape &lt;raw&gt; &amp; text." in formatted

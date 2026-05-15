@@ -7,17 +7,39 @@ from agent.tools import web_search_tool
 
 
 class _FakeResponse:
-    def __init__(self, text: str, url: str = "https://html.duckduckgo.com/html/?q=x"):
+    def __init__(
+        self,
+        text: str = "",
+        url: str = "https://html.duckduckgo.com/html/?q=x",
+        payload: dict | None = None,
+        status_code: int = 200,
+    ):
         self.text = text
         self.url = url
+        self._payload = payload or {}
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
 
 
 def _content_block(output: dict):
     return next(item for item in output["results"] if isinstance(item, dict))["content"]
 
 
+def _clear_google_search_env(monkeypatch):
+    monkeypatch.delenv(web_search_tool.GOOGLE_SEARCH_API_KEY_ENV, raising=False)
+    monkeypatch.delenv(web_search_tool.GOOGLE_API_KEY_ALIAS_ENV, raising=False)
+    monkeypatch.delenv(web_search_tool.GOOGLE_SEARCH_ENGINE_ID_ENV, raising=False)
+    monkeypatch.delenv(web_search_tool.GOOGLE_SEARCH_ENGINE_ID_ALIAS_ENV, raising=False)
+
+
 def test_web_search_extracts_duckduckgo_results_and_filters_domains(monkeypatch):
     seen = {}
+    _clear_google_search_env(monkeypatch)
 
     def fake_get(url, headers, timeout, allow_redirects):
         seen.update(
@@ -51,11 +73,12 @@ def test_web_search_extracts_duckduckgo_results_and_filters_domains(monkeypatch)
 
     assert seen == {
         "url": "http://search.test/search?q=rust+web+search",
-        "user_agent": "clawd-rust-tools/0.1",
+        "user_agent": "aidd-intern-tools/0.1",
         "timeout": 20,
         "allow_redirects": True,
     }
     assert output["query"] == "rust web search"
+    assert output["provider"] == "DuckDuckGo fallback"
     assert _content_block(output) == [
         {"title": "Reqwest docs", "url": "https://docs.rs/reqwest"}
     ]
@@ -81,6 +104,8 @@ def test_web_search_decodes_duckduckgo_redirects():
 
 
 def test_web_search_generic_fallback_dedupes_and_rejects_bad_base_url(monkeypatch):
+    _clear_google_search_env(monkeypatch)
+
     def fake_get(url, headers, timeout, allow_redirects):
         return _FakeResponse(
             """
@@ -108,6 +133,100 @@ def test_web_search_generic_fallback_dedupes_and_rejects_bad_base_url(monkeypatc
     monkeypatch.setenv(web_search_tool.WEB_SEARCH_BASE_URL_ENV, "://bad-base-url")
     with pytest.raises(ValueError):
         web_search_tool.execute_web_search("generic links")
+
+
+def test_web_search_uses_google_custom_search_when_configured(monkeypatch):
+    seen = {}
+
+    def fake_get(url, params, headers, timeout, allow_redirects):
+        seen.update(
+            {
+                "url": url,
+                "params": params,
+                "user_agent": headers["User-Agent"],
+                "timeout": timeout,
+                "allow_redirects": allow_redirects,
+            }
+        )
+        return _FakeResponse(
+            payload={
+                "items": [
+                    {
+                        "title": "RCSB Search API",
+                        "link": "https://search.rcsb.org/",
+                        "snippet": "Search API docs",
+                    },
+                    {
+                        "title": "Blocked",
+                        "link": "https://example.com/blocked",
+                        "snippet": "skip",
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setenv(web_search_tool.GOOGLE_SEARCH_API_KEY_ENV, "api-key")
+    monkeypatch.setenv(web_search_tool.GOOGLE_SEARCH_ENGINE_ID_ENV, "engine-id")
+    monkeypatch.setattr(web_search_tool.requests, "get", fake_get)
+
+    output = web_search_tool.execute_web_search(
+        "RCSB API",
+        allowed_domains=["search.rcsb.org"],
+        blocked_domains=["example.com"],
+    )
+
+    assert seen == {
+        "url": web_search_tool.GOOGLE_SEARCH_URL,
+        "params": {
+            "key": "api-key",
+            "cx": "engine-id",
+            "q": "RCSB API",
+            "num": 8,
+        },
+        "user_agent": "aidd-intern-tools/0.1",
+        "timeout": 20,
+        "allow_redirects": True,
+    }
+    assert output["provider"] == "Google"
+    assert _content_block(output) == [
+        {
+            "title": "RCSB Search API",
+            "url": "https://search.rcsb.org/",
+            "snippet": "Search API docs",
+        }
+    ]
+
+
+def test_web_search_google_errors_do_not_echo_credentials(monkeypatch):
+    def fake_get(url, params, headers, timeout, allow_redirects):
+        return _FakeResponse(
+            status_code=403,
+            payload={
+                "error": {
+                    "code": 403,
+                    "status": "PERMISSION_DENIED",
+                    "message": "Custom Search API is disabled.",
+                    "details": [
+                        {"reason": "SERVICE_DISABLED", "domain": "googleapis.com"}
+                    ],
+                }
+            },
+        )
+
+    monkeypatch.setenv(web_search_tool.GOOGLE_SEARCH_API_KEY_ENV, "api-key")
+    monkeypatch.setenv(web_search_tool.GOOGLE_SEARCH_ENGINE_ID_ENV, "engine-id")
+    monkeypatch.setattr(web_search_tool.requests, "get", fake_get)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        web_search_tool.execute_web_search("RCSB API")
+
+    message = str(excinfo.value)
+    assert "HTTP 403" in message
+    assert "PERMISSION_DENIED" in message
+    assert "SERVICE_DISABLED" in message
+    assert "api-key" not in message
+    assert "engine-id" not in message
+    assert "customsearch/v1?key" not in message
 
 
 @pytest.mark.asyncio

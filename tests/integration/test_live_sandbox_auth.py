@@ -3,7 +3,7 @@
 This test creates a real private Hugging Face Space sandbox, verifies that
 unauthenticated requests are rejected, then exercises the authenticated agent
 client end-to-end.
-It is skipped unless ``ML_INTERN_LIVE_SANDBOX_TESTS=1`` and ``HF_TOKEN`` are set.
+It is skipped unless ``AIDD_INTERN_LIVE_SANDBOX_TESTS=1`` and ``HF_TOKEN`` are set.
 """
 
 from __future__ import annotations
@@ -19,13 +19,13 @@ from huggingface_hub import HfApi
 from agent.tools.sandbox_client import Sandbox
 
 
-if env_file := os.environ.get("ML_INTERN_LIVE_ENV_FILE"):
+if env_file := os.environ.get("AIDD_INTERN_LIVE_ENV_FILE"):
     load_dotenv(Path(env_file))
 
 
 def _skip_without_live_sandbox() -> None:
-    if os.environ.get("ML_INTERN_LIVE_SANDBOX_TESTS") != "1":
-        pytest.skip("set ML_INTERN_LIVE_SANDBOX_TESTS=1 to create a real sandbox")
+    if os.environ.get("AIDD_INTERN_LIVE_SANDBOX_TESTS") != "1":
+        pytest.skip("set AIDD_INTERN_LIVE_SANDBOX_TESTS=1 to create a real sandbox")
     if not os.environ.get("HF_TOKEN"):
         pytest.skip("set HF_TOKEN to create a real sandbox")
 
@@ -40,7 +40,7 @@ def test_live_sandbox_authenticated_agent_communication():
     try:
         sandbox = Sandbox.create(
             owner=owner,
-            name="ml-intern-live-auth",
+            name="aidd-intern-live-auth",
             hardware="cpu-basic",
             private=True,
             token=token,
@@ -67,14 +67,14 @@ def test_live_sandbox_authenticated_agent_communication():
         assert bash.success, bash.error
         assert "sandbox-live-ok" in bash.output
 
-        write = sandbox.write("/tmp/ml_intern_live_auth.txt", "alpha\nbeta\n")
+        write = sandbox.write("/tmp/aidd_intern_live_auth.txt", "alpha\nbeta\n")
         assert write.success, write.error
 
-        exists = sandbox._call("exists", {"path": "/tmp/ml_intern_live_auth.txt"})
+        exists = sandbox._call("exists", {"path": "/tmp/aidd_intern_live_auth.txt"})
         assert exists.success, exists.error
         assert exists.output == "true"
 
-        read = sandbox.read("/tmp/ml_intern_live_auth.txt")
+        read = sandbox.read("/tmp/aidd_intern_live_auth.txt")
         assert read.success, read.error
         assert "alpha" in read.output
         assert "beta" in read.output
@@ -85,7 +85,7 @@ def test_live_sandbox_authenticated_agent_communication():
             api_token=sandbox.api_token,
         )
         try:
-            reread = reattached.read("/tmp/ml_intern_live_auth.txt")
+            reread = reattached.read("/tmp/aidd_intern_live_auth.txt")
             assert reread.success, reread.error
             assert "alpha" in reread.output
         finally:

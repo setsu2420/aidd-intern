@@ -23,8 +23,8 @@ Output row schema::
 Usage::
 
     python scripts/build_sft.py \\
-        --source smolagents/ml-intern-sessions \\
-        --target smolagents/ml-intern-sft \\
+        --source smolagents/aidd-intern-sessions \\
+        --target smolagents/aidd-intern-sft \\
         --days 7
 
 Env:
@@ -170,8 +170,8 @@ def run_for_day(
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="smolagents/ml-intern-sessions")
-    ap.add_argument("--target", default="smolagents/ml-intern-sft")
+    ap.add_argument("--source", default="smolagents/aidd-intern-sessions")
+    ap.add_argument("--target", default="smolagents/aidd-intern-sft")
     ap.add_argument(
         "--days",
         type=int,

@@ -73,3 +73,5 @@ checkpoint-*/
 runs/
 wandb/
 frontend/tsconfig.tsbuildinfo
+# CocoIndex Code (ccc)
+/.cocoindex_code/

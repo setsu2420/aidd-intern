@@ -426,8 +426,8 @@ async def test_create_session_schedules_cpu_sandbox_preload():
         assert scheduled == [session_id]
         assert session_id in manager.sessions
         runtime_session = manager.sessions[session_id].session
-        assert not hasattr(runtime_session, "_ml_intern_artifact_collection_task")
-        assert not hasattr(runtime_session, "_ml_intern_artifact_collection_slug")
+        assert not hasattr(runtime_session, "_aidd_intern_artifact_collection_task")
+        assert not hasattr(runtime_session, "_aidd_intern_artifact_collection_slug")
     finally:
         stop.set()
         await _cancel_runtime_tasks(manager)
@@ -452,8 +452,8 @@ async def test_lazy_restore_schedules_cpu_sandbox_preload():
         assert restored is not None
         assert scheduled == ["persisted-session"]
         assert "persisted-session" in manager.sessions
-        assert not hasattr(restored.session, "_ml_intern_artifact_collection_task")
-        assert not hasattr(restored.session, "_ml_intern_artifact_collection_slug")
+        assert not hasattr(restored.session, "_aidd_intern_artifact_collection_task")
+        assert not hasattr(restored.session, "_aidd_intern_artifact_collection_slug")
     finally:
         stop.set()
         await _cancel_runtime_tasks(manager)

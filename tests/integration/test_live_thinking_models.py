@@ -1,7 +1,7 @@
 """Opt-in live provider checks for thinking metadata replay.
 
 These tests intentionally call paid model APIs and are skipped unless
-``ML_INTERN_LIVE_LLM_TESTS=1`` plus the relevant provider key are set.
+``AIDD_INTERN_LIVE_LLM_TESTS=1`` plus the relevant provider key are set.
 They cover the concrete model families involved in #87 without making
 default CI depend on external credentials or provider availability.
 """
@@ -23,10 +23,10 @@ from agent.core.agent_loop import (
 from agent.core.llm_params import _resolve_llm_params
 
 
-if env_file := os.environ.get("ML_INTERN_LIVE_ENV_FILE"):
+if env_file := os.environ.get("AIDD_INTERN_LIVE_ENV_FILE"):
     load_dotenv(Path(env_file))
 
-LIVE_TESTS_ENABLED = os.environ.get("ML_INTERN_LIVE_LLM_TESTS") == "1"
+LIVE_TESTS_ENABLED = os.environ.get("AIDD_INTERN_LIVE_LLM_TESTS") == "1"
 OPUS_47_MODEL = "anthropic/claude-opus-4-7"
 LATEST_GPT_MODEL = "openai/gpt-5.2"
 REPORT_RESULT_TOOL = [
@@ -52,7 +52,7 @@ REPORT_RESULT_TOOL = [
 
 def _skip_without_live_flag() -> None:
     if not LIVE_TESTS_ENABLED:
-        pytest.skip("set ML_INTERN_LIVE_LLM_TESTS=1 to run paid live LLM tests")
+        pytest.skip("set AIDD_INTERN_LIVE_LLM_TESTS=1 to run paid live LLM tests")
 
 
 def _skip_without_env(name: str) -> None:

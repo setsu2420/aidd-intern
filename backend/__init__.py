@@ -1,1 +1,1 @@
-# Backend package for HF Agent web interface
+# Backend package for the aidd-intern web interface

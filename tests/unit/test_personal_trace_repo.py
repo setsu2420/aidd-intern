@@ -14,8 +14,8 @@ def _session(*, user_id: str | None, hf_username: str | None) -> Session:
         model_name="moonshotai/Kimi-K2.6",
         save_sessions=True,
         share_traces=True,
-        personal_trace_repo_template="{hf_user}/ml-intern-sessions",
-        session_dataset_repo="smolagents/ml-intern-sessions",
+        personal_trace_repo_template="{hf_user}/aidd-intern-sessions",
+        session_dataset_repo="smolagents/aidd-intern-sessions",
         auto_save_interval=1,
         heartbeat_interval_s=0,
         reasoning_effort=None,
@@ -34,10 +34,10 @@ def _session(*, user_id: str | None, hf_username: str | None) -> Session:
 def test_personal_trace_repo_uses_hf_username_before_oauth_subject():
     session = _session(user_id="oauth-subject", hf_username="lewtun")
 
-    assert session._personal_trace_repo_id() == "lewtun/ml-intern-sessions"
+    assert session._personal_trace_repo_id() == "lewtun/aidd-intern-sessions"
 
 
 def test_personal_trace_repo_falls_back_to_user_id_for_cli():
     session = _session(user_id="lewtun", hf_username=None)
 
-    assert session._personal_trace_repo_id() == "lewtun/ml-intern-sessions"
+    assert session._personal_trace_repo_id() == "lewtun/aidd-intern-sessions"

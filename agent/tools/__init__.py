@@ -1,7 +1,6 @@
-"""
-Hugging Face tools for the agent
-"""
+"""AIDD-Intern tools for the agent."""
 
+from agent.tools.aidd_bio_tool import AIDD_BIO_TOOL_SPEC, aidd_bio_handler
 from agent.tools.dataset_tools import (
     HF_INSPECT_DATASET_TOOL_SPEC,
     hf_inspect_dataset_handler,
@@ -24,6 +23,8 @@ from agent.tools.web_search_tool import WEB_SEARCH_TOOL_SPEC, web_search_handler
 
 __all__ = [
     "ToolResult",
+    "AIDD_BIO_TOOL_SPEC",
+    "aidd_bio_handler",
     "HF_JOBS_TOOL_SPEC",
     "hf_jobs_handler",
     "HfJobsTool",

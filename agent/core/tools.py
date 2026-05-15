@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent.config import MCPServerConfig
+from agent.tools.aidd_bio_tool import AIDD_BIO_TOOL_SPEC, aidd_bio_handler
 from agent.tools.dataset_tools import (
     HF_INSPECT_DATASET_TOOL_SPEC,
     hf_inspect_dataset_handler,
@@ -326,6 +327,12 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             description=WEB_SEARCH_TOOL_SPEC["description"],
             parameters=WEB_SEARCH_TOOL_SPEC["parameters"],
             handler=web_search_handler,
+        ),
+        ToolSpec(
+            name=AIDD_BIO_TOOL_SPEC["name"],
+            description=AIDD_BIO_TOOL_SPEC["description"],
+            parameters=AIDD_BIO_TOOL_SPEC["parameters"],
+            handler=aidd_bio_handler,
         ),
         # Dataset inspection tool (unified)
         ToolSpec(

@@ -1,4 +1,4 @@
-"""FastAPI application for HF Agent web interface."""
+"""FastAPI application for the aidd-intern web interface."""
 
 import logging
 import os
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    logger.info("Starting HF Agent backend...")
+    logger.info("Starting aidd-intern backend...")
     await session_manager.start()
     # Start in-process hourly KPI rollup. Replaces an external cron so the
     # rollup lives next to the data and reuses the Space's HF token.
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
         logger.warning("KPI scheduler failed to start: %s", e)
     yield
 
-    logger.info("Shutting down HF Agent backend...")
+    logger.info("Shutting down aidd-intern backend...")
     try:
         import kpis_scheduler
 
@@ -71,8 +71,8 @@ async def lifespan(app: FastAPI):
 _DOCS_DISABLED = os.environ.get("SPACE_ID") is not None
 
 app = FastAPI(
-    title="HF Agent",
-    description="ML Engineering Assistant API",
+    title="aidd-intern",
+    description="AI drug discovery engineering assistant API",
     version="1.0.0",
     lifespan=lifespan,
     docs_url=None if _DOCS_DISABLED else "/docs",
@@ -111,7 +111,7 @@ else:
 async def api_root():
     """API root endpoint."""
     return {
-        "name": "HF Agent API",
+        "name": "aidd-intern API",
         "version": "1.0.0",
         "docs": "/docs",
     }

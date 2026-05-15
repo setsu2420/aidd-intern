@@ -73,7 +73,7 @@ def test_dataset_format_rejects_unsupported_extension():
 
 def test_dataset_repo_card_exposes_each_upload_as_config():
     card = dataset_uploads.dataset_repo_card(
-        "alice/ml-intern-s1-datasets",
+        "alice/aidd-intern-s1-datasets",
         [
             "README.md",
             "uploads/oldabc/rows.jsonl",
@@ -157,7 +157,7 @@ async def test_push_dataset_upload_creates_private_repo_and_uploads_file(monkeyp
     assert api.token == "hf-token"
     assert api.create_calls == [
         {
-            "repo_id": "alice/ml-intern-12345678-datasets",
+            "repo_id": "alice/aidd-intern-12345678-datasets",
             "repo_type": "dataset",
             "private": True,
             "exist_ok": True,
@@ -165,14 +165,14 @@ async def test_push_dataset_upload_creates_private_repo_and_uploads_file(monkeyp
     ]
     assert api.settings_calls == [
         {
-            "repo_id": "alice/ml-intern-12345678-datasets",
+            "repo_id": "alice/aidd-intern-12345678-datasets",
             "repo_type": "dataset",
             "private": True,
         }
     ]
     assert api.list_calls == [
         {
-            "repo_id": "alice/ml-intern-12345678-datasets",
+            "repo_id": "alice/aidd-intern-12345678-datasets",
             "repo_type": "dataset",
         }
     ]
@@ -185,12 +185,12 @@ async def test_push_dataset_upload_creates_private_repo_and_uploads_file(monkeyp
     assert '    path: "uploads/oldupload/old.jsonl"' in readme
     assert "- config_name: upload_feedfacecafe" in readme
     assert '    path: "uploads/feedfacecafe/Data-Set.csv"' in readme
-    assert result.repo_id == "alice/ml-intern-12345678-datasets"
+    assert result.repo_id == "alice/aidd-intern-12345678-datasets"
     assert result.config_name == "upload_feedfacecafe"
     assert result.format == "csv"
     assert result.load_dataset_snippet == (
         "from datasets import load_dataset\n\n"
-        'dataset = load_dataset("alice/ml-intern-12345678-datasets", '
+        'dataset = load_dataset("alice/aidd-intern-12345678-datasets", '
         '"upload_feedfacecafe", split="train", token=True)'
     )
 
@@ -317,7 +317,7 @@ async def test_upload_route_appends_context_note_and_persists(monkeypatch):
     )
     uploaded = dataset_uploads.DatasetUpload(
         session_id="s1",
-        repo_id="alice/ml-intern-s1-datasets",
+        repo_id="alice/aidd-intern-s1-datasets",
         repo_type="dataset",
         private=True,
         upload_id="abc123",
@@ -327,7 +327,7 @@ async def test_upload_route_appends_context_note_and_persists(monkeypatch):
         path_in_repo="uploads/abc123/rows.jsonl",
         size_bytes=14,
         format="jsonl",
-        hub_url="https://huggingface.co/datasets/alice/ml-intern-s1-datasets/blob/main/uploads/abc123/rows.jsonl",
+        hub_url="https://huggingface.co/datasets/alice/aidd-intern-s1-datasets/blob/main/uploads/abc123/rows.jsonl",
         load_dataset_snippet='dataset = load_dataset("json")',
     )
 

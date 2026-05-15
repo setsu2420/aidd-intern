@@ -26,14 +26,14 @@ class Config(BaseModel):
     model_name: str
     mcpServers: dict[str, MCPServerConfig] = {}
     save_sessions: bool = True
-    session_dataset_repo: str = "smolagents/ml-intern-sessions"
+    session_dataset_repo: str = "smolagents/aidd-intern-sessions"
     # Per-user private dataset that mirrors each session in Claude Code JSONL
     # format so the HF Agent Trace Viewer auto-renders it
     # (https://huggingface.co/changelog/agent-trace-viewer). Created private
     # on first use; user flips it public via /share-traces. ``{hf_user}`` is
     # substituted at upload time from the authenticated HF username.
     share_traces: bool = True
-    personal_trace_repo_template: str = "{hf_user}/ml-intern-sessions"
+    personal_trace_repo_template: str = "{hf_user}/aidd-intern-sessions"
     auto_save_interval: int = 1  # Save every N user turns (0 = disabled)
     # Mid-turn heartbeat: save + upload every N seconds while events are being
     # emitted. Guards against losing trace data on long-running turns that
@@ -60,9 +60,9 @@ class Config(BaseModel):
     messaging: MessagingConfig = MessagingConfig()
 
 
-USER_CONFIG_ENV_VAR = "ML_INTERN_CLI_CONFIG"
+USER_CONFIG_ENV_VAR = "AIDD_INTERN_CLI_CONFIG"
 DEFAULT_USER_CONFIG_PATH = (
-    Path.home() / ".config" / "ml-intern" / "cli_agent_config.json"
+    Path.home() / ".config" / "aidd-intern" / "cli_agent_config.json"
 )
 SLACK_DEFAULT_DESTINATION = "slack.default"
 SLACK_DEFAULT_AUTO_EVENT_TYPES = ["approval_required", "error", "turn_complete"]
@@ -125,7 +125,7 @@ def _env_list(name: str) -> list[str] | None:
 
 def apply_slack_user_defaults(raw_config: dict[str, Any]) -> dict[str, Any]:
     """Enable a default Slack destination from user env vars, when present."""
-    if not _env_bool("ML_INTERN_SLACK_NOTIFICATIONS", True):
+    if not _env_bool("AIDD_INTERN_SLACK_NOTIFICATIONS", True):
         return raw_config
 
     token = os.environ.get("SLACK_BOT_TOKEN")
@@ -137,7 +137,7 @@ def apply_slack_user_defaults(raw_config: dict[str, Any]) -> dict[str, Any]:
     messaging = dict(config.get("messaging") or {})
     destinations = dict(messaging.get("destinations") or {})
     destination_name = (
-        os.environ.get("ML_INTERN_SLACK_DESTINATION") or SLACK_DEFAULT_DESTINATION
+        os.environ.get("AIDD_INTERN_SLACK_DESTINATION") or SLACK_DEFAULT_DESTINATION
     ).strip()
 
     if destination_name not in destinations:
@@ -145,11 +145,11 @@ def apply_slack_user_defaults(raw_config: dict[str, Any]) -> dict[str, Any]:
             "provider": "slack",
             "token": token,
             "channel": channel,
-            "allow_agent_tool": _env_bool("ML_INTERN_SLACK_ALLOW_AGENT_TOOL", True),
-            "allow_auto_events": _env_bool("ML_INTERN_SLACK_ALLOW_AUTO_EVENTS", True),
+            "allow_agent_tool": _env_bool("AIDD_INTERN_SLACK_ALLOW_AGENT_TOOL", True),
+            "allow_auto_events": _env_bool("AIDD_INTERN_SLACK_ALLOW_AUTO_EVENTS", True),
         }
 
-    auto_events = _env_list("ML_INTERN_SLACK_AUTO_EVENTS")
+    auto_events = _env_list("AIDD_INTERN_SLACK_AUTO_EVENTS")
     if auto_events is not None:
         messaging["auto_event_types"] = auto_events
     elif "auto_event_types" not in messaging:

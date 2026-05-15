@@ -313,7 +313,7 @@ def test_hf_discussion_event_normalization():
     mod = _load()
     discussion = SimpleNamespace(
         num=7,
-        repo_id="smolagents/ml-intern",
+        repo_id="smolagents/aidd-intern",
         repo_type="space",
         title="Space fails",
         status="open",
@@ -353,7 +353,7 @@ def test_hf_discussion_event_normalization():
 
     assert record["id"] == "hf_discussion#7"
     assert record["url"] == (
-        "https://huggingface.co/spaces/smolagents/ml-intern/discussions/7"
+        "https://huggingface.co/spaces/smolagents/aidd-intern/discussions/7"
     )
     assert record["body"] == "Initial report"
     assert len(record["comments"]) == 1
@@ -694,7 +694,7 @@ def test_render_markdown_report_from_sample_ranking():
         model="openai/gpt-5.5",
     )
 
-    assert "# ML Intern Backlog Prioritization" in report
+    assert "# AIDD-Intern Backlog Prioritization" in report
     assert "## Can Be Closed" in report
     assert "PR already landed on main." in report
     assert "## Highest Impact Next" in report
@@ -709,8 +709,8 @@ def test_cli_defaults_without_live_network_or_llm():
         None, now=datetime(2026, 5, 4, 12, 30, tzinfo=timezone.utc)
     )
 
-    assert args.github_repo == "huggingface/ml-intern"
-    assert args.hf_space == "smolagents/ml-intern"
+    assert args.github_repo == "huggingface/aidd-intern"
+    assert args.hf_space == "smolagents/aidd-intern"
     assert args.config == "configs/cli_agent_config.json"
     assert args.resolution_ref == "main"
     assert args.create_github_issue is False

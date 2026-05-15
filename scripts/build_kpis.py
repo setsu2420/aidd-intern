@@ -703,8 +703,8 @@ def _parse_hour_arg(s: str) -> datetime:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="smolagents/ml-intern-sessions")
-    ap.add_argument("--target", default="smolagents/ml-intern-kpis")
+    ap.add_argument("--source", default="smolagents/aidd-intern-sessions")
+    ap.add_argument("--target", default="smolagents/aidd-intern-kpis")
     ap.add_argument(
         "--hours",
         type=int,

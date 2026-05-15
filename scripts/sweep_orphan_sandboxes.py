@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backstop sweeper for orphan ml-intern sandbox Spaces.
+"""Backstop sweeper for orphan aidd-intern sandbox Spaces.
 
 ================================================================================
  Why this script exists
@@ -23,7 +23,7 @@ and delete it.
  Identification rules
 ================================================================================
 
-A Space is considered an orphan ml-intern sandbox iff ALL hold:
+A Space is considered an orphan aidd-intern sandbox iff ALL hold:
 
 1. Repo type = ``space``
 2. Name matches ``<owner>/sandbox-[a-f0-9]{8}$`` (the agent's naming convention)
@@ -79,7 +79,7 @@ def log(record: dict) -> None:
 
 
 def is_sandbox_fork(space) -> bool:
-    """Filter: matches the ml-intern sandbox naming pattern.
+    """Filter: matches the aidd-intern sandbox naming pattern.
 
     NOTE: We initially tried filtering on ``duplicated_from == burtenshaw/sandbox``
     too, for extra safety. That doesn't work — the HF REST API does not expose

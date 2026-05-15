@@ -1,8 +1,9 @@
-"""DuckDuckGo HTML web search tool.
+"""Web search tool with first-class Google Search support.
 
-This mirrors Claw Code's Rust WebSearch behavior: fetch DuckDuckGo's HTML
-endpoint, extract result links, optionally filter domains, and return a
-JSON payload the model can cite.
+When ``GOOGLE_SEARCH_API_KEY`` and ``GOOGLE_SEARCH_ENGINE_ID`` are configured,
+the tool uses Google's Custom Search JSON API. For local development without
+Google credentials, it falls back to the existing DuckDuckGo HTML parser so the
+agent still has a usable search path.
 """
 
 from __future__ import annotations
@@ -19,9 +20,14 @@ from urllib.parse import parse_qsl, parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 
+GOOGLE_SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
+GOOGLE_SEARCH_API_KEY_ENV = "GOOGLE_SEARCH_API_KEY"
+GOOGLE_SEARCH_ENGINE_ID_ENV = "GOOGLE_SEARCH_ENGINE_ID"
+GOOGLE_SEARCH_ENGINE_ID_ALIAS_ENV = "GOOGLE_CSE_ID"
+GOOGLE_API_KEY_ALIAS_ENV = "GOOGLE_API_KEY"
 DEFAULT_SEARCH_URL = "https://html.duckduckgo.com/html/"
 WEB_SEARCH_BASE_URL_ENV = "CLAWD_WEB_SEARCH_BASE_URL"
-USER_AGENT = "clawd-rust-tools/0.1"
+USER_AGENT = "aidd-intern-tools/0.1"
 REQUEST_TIMEOUT_SECONDS = 20
 MAX_RESULTS = 8
 
@@ -30,9 +36,13 @@ MAX_RESULTS = 8
 class SearchHit:
     title: str
     url: str
+    snippet: str | None = None
 
     def as_json(self) -> dict[str, str]:
-        return {"title": self.title, "url": self.url}
+        data = {"title": self.title, "url": self.url}
+        if self.snippet:
+            data["snippet"] = self.snippet
+        return data
 
 
 class _AnchorParser(HTMLParser):
@@ -85,6 +95,19 @@ def build_search_url(query: str) -> str:
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     query_pairs.append(("q", query))
     return urlunparse(parsed._replace(query=urlencode(query_pairs)))
+
+
+def google_search_credentials() -> tuple[str, str] | None:
+    """Return Google Custom Search credentials when configured."""
+    api_key = os.environ.get(GOOGLE_SEARCH_API_KEY_ENV) or os.environ.get(
+        GOOGLE_API_KEY_ALIAS_ENV
+    )
+    engine_id = os.environ.get(GOOGLE_SEARCH_ENGINE_ID_ENV) or os.environ.get(
+        GOOGLE_SEARCH_ENGINE_ID_ALIAS_ENV
+    )
+    if api_key and engine_id:
+        return api_key, engine_id
+    return None
 
 
 def collapse_whitespace(value: str) -> str:
@@ -165,7 +188,129 @@ def dedupe_hits(hits: list[SearchHit]) -> list[SearchHit]:
     return deduped
 
 
-def execute_web_search(
+def _apply_domain_filters(
+    hits: list[SearchHit],
+    allowed_domains: list[str] | None,
+    blocked_domains: list[str] | None,
+) -> list[SearchHit]:
+    if allowed_domains is not None:
+        hits = [hit for hit in hits if host_matches_list(hit.url, allowed_domains)]
+    if blocked_domains is not None:
+        hits = [hit for hit in hits if not host_matches_list(hit.url, blocked_domains)]
+    return dedupe_hits(hits)[:MAX_RESULTS]
+
+
+def _google_error_message(response: requests.Response) -> str:
+    """Build a diagnostic Google API error without echoing the request URL."""
+    parts = [f"Google Custom Search API returned HTTP {response.status_code}"]
+    try:
+        payload = response.json()
+    except ValueError:
+        return parts[0]
+
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return parts[0]
+
+    if status := error.get("status"):
+        parts.append(f"status={status}")
+
+    reason = None
+    for detail in error.get("details") or []:
+        if isinstance(detail, dict) and detail.get("reason"):
+            reason = detail["reason"]
+            break
+    if reason:
+        parts.append(f"reason={reason}")
+
+    if message := error.get("message"):
+        parts.append(f"message={message}")
+
+    return "; ".join(parts)
+
+
+def _render_search_result(
+    *,
+    query: str,
+    provider: str,
+    hits: list[SearchHit],
+    started: float,
+    tool_use_id: str,
+) -> dict[str, Any]:
+    rendered_hits = "\n".join(f"- [{hit.title}]({hit.url})" for hit in hits)
+    if hits:
+        summary = (
+            f"{provider} search results for {query!r}. Include a Sources section "
+            f"in the final answer.\n{rendered_hits}"
+        )
+    else:
+        summary = f"No {provider} search results matched the query {query!r}."
+
+    return {
+        "query": query,
+        "provider": provider,
+        "results": [
+            summary,
+            {
+                "tool_use_id": tool_use_id,
+                "content": [hit.as_json() for hit in hits],
+            },
+        ],
+        "durationSeconds": time.monotonic() - started,
+    }
+
+
+def execute_google_search(
+    query: str,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+    tool_use_id: str = "web_search_1",
+) -> dict[str, Any]:
+    started = time.monotonic()
+    credentials = google_search_credentials()
+    if credentials is None:
+        raise RuntimeError(
+            f"Google Search requires {GOOGLE_SEARCH_API_KEY_ENV} and "
+            f"{GOOGLE_SEARCH_ENGINE_ID_ENV}."
+        )
+
+    api_key, engine_id = credentials
+    response = requests.get(
+        GOOGLE_SEARCH_URL,
+        params={
+            "key": api_key,
+            "cx": engine_id,
+            "q": query,
+            "num": min(MAX_RESULTS, 10),
+        },
+        headers={"User-Agent": USER_AGENT},
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        allow_redirects=True,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(_google_error_message(response))
+
+    payload = response.json()
+    hits = [
+        SearchHit(
+            title=collapse_whitespace(str(item.get("title") or "")),
+            url=str(item.get("link") or ""),
+            snippet=collapse_whitespace(str(item.get("snippet") or "")) or None,
+        )
+        for item in payload.get("items") or []
+        if item.get("title") and item.get("link")
+    ]
+    hits = _apply_domain_filters(hits, allowed_domains, blocked_domains)
+    return _render_search_result(
+        query=query,
+        provider="Google",
+        hits=hits,
+        started=started,
+        tool_use_id=tool_use_id,
+    )
+
+
+def execute_duckduckgo_search(
     query: str,
     allowed_domains: list[str] | None = None,
     blocked_domains: list[str] | None = None,
@@ -184,37 +329,45 @@ def execute_web_search(
     if not hits and urlparse(response.url or search_url).hostname:
         hits = extract_search_hits_from_generic_links(response.text)
 
-    if allowed_domains is not None:
-        hits = [hit for hit in hits if host_matches_list(hit.url, allowed_domains)]
-    if blocked_domains is not None:
-        hits = [hit for hit in hits if not host_matches_list(hit.url, blocked_domains)]
+    hits = _apply_domain_filters(hits, allowed_domains, blocked_domains)
+    return _render_search_result(
+        query=query,
+        provider="DuckDuckGo fallback",
+        hits=hits,
+        started=started,
+        tool_use_id=tool_use_id,
+    )
 
-    hits = dedupe_hits(hits)[:MAX_RESULTS]
-    rendered_hits = "\n".join(f"- [{hit.title}]({hit.url})" for hit in hits)
-    if hits:
-        summary = (
-            f"Search results for {query!r}. Include a Sources section in the final answer.\n"
-            f"{rendered_hits}"
+
+def execute_web_search(
+    query: str,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+    tool_use_id: str = "web_search_1",
+) -> dict[str, Any]:
+    if google_search_credentials() is not None:
+        return execute_google_search(
+            query=query,
+            allowed_domains=allowed_domains,
+            blocked_domains=blocked_domains,
+            tool_use_id=tool_use_id,
         )
-    else:
-        summary = f"No web search results matched the query {query!r}."
-
-    return {
-        "query": query,
-        "results": [
-            summary,
-            {
-                "tool_use_id": tool_use_id,
-                "content": [hit.as_json() for hit in hits],
-            },
-        ],
-        "durationSeconds": time.monotonic() - started,
-    }
+    return execute_duckduckgo_search(
+        query=query,
+        allowed_domains=allowed_domains,
+        blocked_domains=blocked_domains,
+        tool_use_id=tool_use_id,
+    )
 
 
 WEB_SEARCH_TOOL_SPEC = {
     "name": "web_search",
-    "description": "Search the web for current information and return cited results.",
+    "description": (
+        "Search the web for current information and return cited results. Uses "
+        "Google Custom Search when GOOGLE_SEARCH_API_KEY and "
+        "GOOGLE_SEARCH_ENGINE_ID are configured; otherwise falls back to the "
+        "local development search backend."
+    ),
     "parameters": {
         "type": "object",
         "properties": {

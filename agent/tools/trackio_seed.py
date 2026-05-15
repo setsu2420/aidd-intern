@@ -9,7 +9,7 @@ so the dashboard never materializes.
 This helper writes the three files trackio's runtime expects (README.md,
 requirements.txt, app.py) into the Space, idempotently, BEFORE the job that
 will call `trackio.init()` runs. We deliberately omit `hf_oauth: true` from
-the README so the embedded iframe in ml-intern renders without a login click —
+the README so the embedded iframe in aidd-intern renders without a login click —
 per-user privacy is enforced by namespace ownership instead.
 
 Beyond the dashboard files, the helper also creates the metrics bucket and
@@ -45,19 +45,19 @@ tags:
   - trackio
 ---
 
-Embedded trackio dashboard for ml-intern runs.
+Embedded trackio dashboard for aidd-intern runs.
 """
 
 _REQUIREMENTS = "trackio\n"
 _APP_PY = "import trackio\ntrackio.show()\n"
 
-# ml-intern brand mark surfaced inside the trackio dashboard. Trackio reads
+# aidd-intern brand mark surfaced inside the trackio dashboard. Trackio reads
 # `TRACKIO_LOGO_LIGHT_URL` / `TRACKIO_LOGO_DARK_URL` from Space variables and
 # renders them in place of its own logo. We point at the publicly-resolvable
-# copy on the smolagents/ml-intern Space repo so any seeded dashboard inherits
-# the ml-intern branding without each user having to host the asset.
+# copy on the smolagents/aidd-intern Space repo so any seeded dashboard inherits
+# the aidd-intern branding without each user having to host the asset.
 _LOGO_URL = (
-    "https://huggingface.co/spaces/smolagents/ml-intern/"
+    "https://huggingface.co/spaces/smolagents/aidd-intern/"
     "resolve/main/frontend/public/smolagents.webp"
 )
 
@@ -193,7 +193,7 @@ def ensure_trackio_dashboard(
                 path_in_repo=path_in_repo,
                 repo_id=space_id,
                 repo_type="space",
-                commit_message=f"ml-intern: seed trackio dashboard ({path_in_repo})",
+                commit_message=f"aidd-intern: seed trackio dashboard ({path_in_repo})",
             )
         seeded_files = True
 

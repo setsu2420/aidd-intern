@@ -73,7 +73,7 @@ def _claude_picker_model_id() -> str:
     """Return the model ID used by the Claude option in the UI.
 
     The frontend config sets ``session_manager.config.model_name`` from
-    ``ML_INTERN_CLAUDE_MODEL_ID`` when that env var is present, otherwise it
+    ``AIDD_INTERN_CLAUDE_MODEL_ID`` when that env var is present, otherwise it
     falls back to the production Bedrock Claude model. This function only
     exposes that resolved config value for the Claude picker; non-Claude models
     are listed separately in the model switcher.

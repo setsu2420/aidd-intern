@@ -5,7 +5,7 @@ import pytest
 
 from agent.core import hub_artifacts
 from agent.core.hub_artifacts import (
-    ML_INTERN_TAG,
+    AIDD_INTERN_TAG,
     PROVENANCE_MARKER,
     artifact_collection_title,
     augment_repo_card_content,
@@ -32,7 +32,7 @@ def _session() -> SimpleNamespace:
 def test_artifact_collection_title_uses_session_date_and_id():
     assert (
         artifact_collection_title(_session())
-        == "ml-intern-artifacts-2026-05-05-session-123"
+        == "aidd-intern-artifacts-2026-05-05-session-123"
     )
 
 
@@ -44,7 +44,7 @@ def test_artifact_collection_title_uses_short_uuid_fragment():
 
     title = artifact_collection_title(session)
 
-    assert title == "ml-intern-artifacts-2026-05-05-fadcbc77"
+    assert title == "aidd-intern-artifacts-2026-05-05-fadcbc77"
     assert len(title) < 60
 
 
@@ -56,7 +56,7 @@ def test_artifact_collection_title_still_truncates_long_non_uuid_ids():
 
     title = artifact_collection_title(session)
 
-    assert title.startswith("ml-intern-artifacts-2026-05-05-custom-session-id")
+    assert title.startswith("aidd-intern-artifacts-2026-05-05-custom-session-id")
     assert len(title) < 60
 
 
@@ -76,7 +76,7 @@ Existing details stay here.
 
     assert "license: apache-2.0" in updated
     assert "- text-generation" in updated
-    assert f"- {ML_INTERN_TAG}" in updated
+    assert f"- {AIDD_INTERN_TAG}" in updated
     assert "# Existing Model" in updated
     assert "Existing details stay here." in updated
     assert PROVENANCE_MARKER in updated
@@ -90,7 +90,7 @@ Existing details stay here.
 def test_dataset_card_adds_load_dataset_usage():
     updated = augment_repo_card_content("", "alice/dataset", "dataset")
 
-    assert f"- {ML_INTERN_TAG}" in updated
+    assert f"- {AIDD_INTERN_TAG}" in updated
     assert "# alice/dataset" in updated
     assert "from datasets import load_dataset" in updated
     assert 'load_dataset("alice/dataset")' in updated
@@ -114,7 +114,7 @@ Use the custom loader in this repository.
 def test_space_card_gets_metadata_without_provenance_body():
     updated = augment_repo_card_content("# Existing Space\n", "alice/space", "space")
 
-    assert f"- {ML_INTERN_TAG}" in updated
+    assert f"- {AIDD_INTERN_TAG}" in updated
     assert "# Existing Space" in updated
     assert PROVENANCE_MARKER not in updated
 
@@ -134,7 +134,7 @@ def test_register_hub_artifact_creates_private_collection_and_adds_item_once(
 
         def create_collection(self, **kwargs):
             self.created_collections.append(kwargs)
-            return SimpleNamespace(slug="alice/ml-intern-artifacts")
+            return SimpleNamespace(slug="alice/aidd-intern-artifacts")
 
         def add_collection_item(self, **kwargs):
             self.collection_items.append(kwargs)
@@ -157,7 +157,7 @@ def test_register_hub_artifact_creates_private_collection_and_adds_item_once(
     assert api.collection_items[0]["item_type"] == "model"
     assert api.collection_items[0]["exists_ok"] is True
     assert len(api.uploads) == 1
-    assert b"ml-intern" in api.uploads[0]["path_or_fileobj"]
+    assert b"aidd-intern" in api.uploads[0]["path_or_fileobj"]
 
 
 def test_register_hub_artifact_skips_sandbox_spaces(monkeypatch):
@@ -458,7 +458,7 @@ def test_sitecustomize_bootstrap_is_valid_python():
     code = build_hub_artifact_sitecustomize(_session())
 
     compile(code, "sitecustomize.py", "exec")
-    assert "ml-intern-artifacts-2026-05-05-session-123" in code
+    assert "aidd-intern-artifacts-2026-05-05-session-123" in code
 
 
 def test_sitecustomize_bootstrap_reuses_existing_collection_slug():
@@ -466,14 +466,14 @@ def test_sitecustomize_bootstrap_reuses_existing_collection_slug():
     setattr(
         session,
         hub_artifacts._COLLECTION_SLUG_ATTR,
-        "alice/ml-intern-artifacts-2026-05-05-session-123",
+        "alice/aidd-intern-artifacts-2026-05-05-session-123",
     )
 
     code = build_hub_artifact_sitecustomize(session)
 
     compile(code, "sitecustomize.py", "exec")
     assert (
-        "collection_slug = 'alice/ml-intern-artifacts-2026-05-05-session-123'" in code
+        "collection_slug = 'alice/aidd-intern-artifacts-2026-05-05-session-123'" in code
     )
 
 
@@ -487,7 +487,7 @@ def test_sitecustomize_caches_lazy_collection_slug_across_bootstraps(
     readme_path = tmp_path / "README.md"
     readme_path.write_text("# Existing Model\n", encoding="utf-8")
     cache_path = tmp_path / "collection-slug.txt"
-    collection_slug = "alice/ml-intern-artifacts-2026-05-05-session-123"
+    collection_slug = "alice/aidd-intern-artifacts-2026-05-05-session-123"
     uploads = []
     downloads = []
     collection_creates = []
@@ -508,7 +508,7 @@ def test_sitecustomize_caches_lazy_collection_slug_across_bootstraps(
     def fake_add_collection_item(self, **kwargs):
         collection_items.append(kwargs)
 
-    monkeypatch.setenv("ML_INTERN_ARTIFACT_COLLECTION_CACHE", str(cache_path))
+    monkeypatch.setenv("AIDD_INTERN_ARTIFACT_COLLECTION_CACHE", str(cache_path))
     code = build_hub_artifact_sitecustomize(_session())
 
     def install_fresh_bootstrap():
@@ -574,13 +574,13 @@ def test_sitecustomize_skips_sandbox_space_registration(monkeypatch, tmp_path):
 
     def fake_create_collection(self, **kwargs):
         collection_creates.append(kwargs)
-        return SimpleNamespace(slug="alice/ml-intern-artifacts")
+        return SimpleNamespace(slug="alice/aidd-intern-artifacts")
 
     def fake_add_collection_item(self, **kwargs):
         collection_items.append(kwargs)
 
     monkeypatch.setenv(
-        "ML_INTERN_ARTIFACT_COLLECTION_CACHE",
+        "AIDD_INTERN_ARTIFACT_COLLECTION_CACHE",
         str(tmp_path / "collection-slug.txt"),
     )
     monkeypatch.setattr(HfApi, "upload_file", fake_upload_file)

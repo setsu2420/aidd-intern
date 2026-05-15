@@ -117,7 +117,7 @@ def print_banner(
     dim_gold = "rgb(180,140,40)"
 
     boot_lines = [
-        (f"{_I}Initializing agent runtime...", gold),
+        (f"{_I}aidd-intern runtime starting...", gold),
         (f"{_I}  User: {user_label}", dim_gold),
         (f"{_I}  Model: {model_label}", dim_gold),
         (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", dim_gold),

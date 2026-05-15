@@ -47,7 +47,7 @@ def _safe_message_doc(message: dict[str, Any]) -> dict[str, Any]:
             "[SYSTEM: A single persisted message exceeded MongoDB's document "
             "size/encoding limit and was replaced by this marker.]"
         ),
-        "ml_intern_persistence_error": "message_too_large_or_invalid",
+        "aidd_intern_persistence_error": "message_too_large_or_invalid",
     }
 
 
@@ -497,7 +497,7 @@ def get_session_store() -> NoopSessionStore | MongoSessionStore:
     global _store
     if _store is None:
         uri = os.environ.get("MONGODB_URI")
-        db_name = os.environ.get("MONGODB_DB", "ml-intern")
+        db_name = os.environ.get("MONGODB_DB", "aidd-intern")
         _store = MongoSessionStore(uri, db_name) if uri else NoopSessionStore()
     return _store
 

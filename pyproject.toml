@@ -1,5 +1,5 @@
 [project]
-name = "ml-intern"
+name = "aidd-intern"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -50,11 +50,11 @@ dev = [
 
 # All dependencies (eval + dev)
 all = [
-    "ml-intern[eval,dev]",
+    "aidd-intern[eval,dev]",
 ]
 
 [project.scripts]
-ml-intern = "agent.main:cli"
+aidd-intern = "agent.main:cli"
 
 [build-system]
 requires = ["setuptools>=64"]

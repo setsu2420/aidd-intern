@@ -7,12 +7,12 @@ Uses individual file uploads to avoid race conditions.
 Two formats are supported:
 
 * ``row`` — single-line JSONL row used by the existing org telemetry/KPI
-  pipeline (``smolagents/ml-intern-sessions``). Compatible with
+  pipeline (``smolagents/aidd-intern-sessions``). Compatible with
   ``backend/kpis_scheduler.py``.
 * ``claude_code`` — one event per line in the Claude Code JSONL schema,
   auto-detected by the HF Agent Trace Viewer
   (https://huggingface.co/changelog/agent-trace-viewer). Used for the
-  per-user private dataset (default ``{hf_user}/ml-intern-sessions``).
+  per-user private dataset (default ``{hf_user}/aidd-intern-sessions``).
 """
 
 import argparse
@@ -36,7 +36,7 @@ _ORG_TOKEN_FALLBACK_CHAIN = (
     "HF_TOKEN",
     "HF_ADMIN_TOKEN",
 )
-_PERSONAL_TOKEN_ENV = "_ML_INTERN_PERSONAL_TOKEN"
+_PERSONAL_TOKEN_ENV = "_AIDD_INTERN_PERSONAL_TOKEN"
 
 
 def _resolve_token(token_env: str | None) -> str:
@@ -345,9 +345,9 @@ def _update_upload_status(
 
 
 def dataset_card_readme(repo_id: str) -> str:
-    """Dataset card for personal ML Intern session trace repos."""
+    """Dataset card for personal AIDD-Intern session trace repos."""
     return """---
-pretty_name: "ML Intern Session Traces"
+pretty_name: "AIDD-Intern Session Traces"
 language:
 - en
 license: other
@@ -356,7 +356,7 @@ task_categories:
 tags:
 - agent-traces
 - coding-agent
-- ml-intern
+- aidd-intern
 - session-traces
 - claude-code
 - hf-agent-trace-viewer
@@ -367,20 +367,20 @@ configs:
     path: "sessions/**/*.jsonl"
 ---
 
-# ML Intern session traces
+# AIDD-Intern session traces
 
-This dataset contains ML Intern coding agent session traces uploaded from local
-ML Intern runs. The traces are stored as JSON Lines files under `sessions/`,
+This dataset contains AIDD-Intern coding agent session traces uploaded from local
+AIDD-Intern runs. The traces are stored as JSON Lines files under `sessions/`,
 with one file per session.
 
 ## Links
 
-- ML Intern demo: https://smolagents-ml-intern.hf.space
-- ML Intern CLI: https://github.com/huggingface/ml-intern
+- AIDD-Intern demo: https://smolagents-aidd-intern.hf.space
+- AIDD-Intern CLI: https://github.com/huggingface/aidd-intern
 
 ## Data description
 
-Each `*.jsonl` file contains a single ML Intern session converted to a
+Each `*.jsonl` file contains a single AIDD-Intern session converted to a
 Claude-Code-style event stream for the Hugging Face Agent Trace Viewer. Entries
 can include user messages, assistant messages, tool calls, tool results, model
 metadata, and timestamps.
@@ -395,7 +395,7 @@ sessions/YYYY-MM-DD/<session_id>.jsonl
 
 **WARNING: no comprehensive redaction or human review has been performed for this dataset.**
 
-ML Intern applies automated best-effort scrubbing for common secret patterns
+AIDD-Intern applies automated best-effort scrubbing for common secret patterns
 such as Hugging Face, Anthropic, OpenAI, GitHub, and AWS tokens before upload.
 This is not a privacy guarantee.
 

@@ -36,7 +36,7 @@ def test_load_config_does_not_apply_slack_user_defaults_by_default(
 def test_load_config_applies_slack_user_defaults_from_env(tmp_path, monkeypatch):
     config_path = tmp_path / "config.json"
     _write_json(config_path, {"model_name": "moonshotai/Kimi-K2.6"})
-    monkeypatch.delenv("ML_INTERN_CLI_CONFIG", raising=False)
+    monkeypatch.delenv("AIDD_INTERN_CLI_CONFIG", raising=False)
     monkeypatch.setattr(
         config_module,
         "DEFAULT_USER_CONFIG_PATH",
@@ -82,8 +82,8 @@ def test_load_config_merges_user_config_before_env_substitution(tmp_path, monkey
             },
         },
     )
-    monkeypatch.setenv("ML_INTERN_CLI_CONFIG", str(user_config_path))
-    monkeypatch.setenv("ML_INTERN_SLACK_NOTIFICATIONS", "0")
+    monkeypatch.setenv("AIDD_INTERN_CLI_CONFIG", str(user_config_path))
+    monkeypatch.setenv("AIDD_INTERN_SLACK_NOTIFICATIONS", "0")
     monkeypatch.setenv("USER_SLACK_TOKEN", "xoxb-user")
 
     config = config_module.load_config(str(config_path), include_user_defaults=True)
@@ -110,13 +110,13 @@ def test_slack_user_defaults_can_be_disabled(tmp_path, monkeypatch):
             },
         },
     )
-    monkeypatch.delenv("ML_INTERN_CLI_CONFIG", raising=False)
+    monkeypatch.delenv("AIDD_INTERN_CLI_CONFIG", raising=False)
     monkeypatch.setattr(
         config_module,
         "DEFAULT_USER_CONFIG_PATH",
         tmp_path / "missing-user-config.json",
     )
-    monkeypatch.setenv("ML_INTERN_SLACK_NOTIFICATIONS", "false")
+    monkeypatch.setenv("AIDD_INTERN_SLACK_NOTIFICATIONS", "false")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
     monkeypatch.setenv("SLACK_CHANNEL_ID", "C123")
 
@@ -140,7 +140,7 @@ def test_user_config_can_set_sandbox_tool_runtime(tmp_path, monkeypatch):
     user_config_path = tmp_path / "user-config.json"
     _write_json(config_path, {"model_name": "moonshotai/Kimi-K2.6"})
     _write_json(user_config_path, {"tool_runtime": "sandbox"})
-    monkeypatch.setenv("ML_INTERN_CLI_CONFIG", str(user_config_path))
+    monkeypatch.setenv("AIDD_INTERN_CLI_CONFIG", str(user_config_path))
 
     config = config_module.load_config(str(config_path), include_user_defaults=True)
 

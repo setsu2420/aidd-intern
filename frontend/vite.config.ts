@@ -13,12 +13,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:7860',
+        target: 'http://[::1]:7860',
         changeOrigin: true,
         ws: true, // Proxy WebSocket connections (/api/ws/...)
       },
       '/auth': {
-        target: 'http://localhost:7860',
+        target: 'http://[::1]:7860',
         changeOrigin: true,
       },
     },

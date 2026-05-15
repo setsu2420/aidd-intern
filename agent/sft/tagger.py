@@ -69,6 +69,7 @@ _RESEARCH_ONLY_TOOLS = {
     "plan",
     "hf_inspect_dataset",
     "web_search",
+    "aidd_bio",
 }
 
 # Tool names that signal data manipulation workflows.

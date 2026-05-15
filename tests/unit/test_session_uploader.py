@@ -17,17 +17,17 @@ GITHUB_SECRET = "ghp_" + "c" * 36
 
 
 def test_dataset_card_readme_has_metadata_and_public_warning():
-    readme = dataset_card_readme("lewtun/ml-intern-sessions")
+    readme = dataset_card_readme("lewtun/aidd-intern-sessions")
 
     assert readme.startswith("---\n")
-    assert 'pretty_name: "ML Intern Session Traces"' in readme
+    assert 'pretty_name: "AIDD-Intern Session Traces"' in readme
     assert "task_categories:\n- text-generation" in readme
     assert "- agent-traces" in readme
     assert "- coding-agent" in readme
-    assert "- ml-intern" in readme
+    assert "- aidd-intern" in readme
     assert 'path: "sessions/**/*.jsonl"' in readme
-    assert "ML Intern demo: https://smolagents-ml-intern.hf.space" in readme
-    assert "ML Intern CLI: https://github.com/huggingface/ml-intern" in readme
+    assert "AIDD-Intern demo: https://smolagents-aidd-intern.hf.space" in readme
+    assert "AIDD-Intern CLI: https://github.com/huggingface/aidd-intern" in readme
     assert "Repository: https://huggingface.co/datasets/" not in readme
     assert (
         "**WARNING: no comprehensive redaction or human review has been performed for this dataset.**"
@@ -47,13 +47,13 @@ def test_upload_dataset_card_only_for_claude_code_format():
 
     api = FakeApi()
 
-    _upload_dataset_card(api, "lewtun/ml-intern-sessions", "hf_token", "row")
+    _upload_dataset_card(api, "lewtun/aidd-intern-sessions", "hf_token", "row")
     assert api.calls == []
 
-    _upload_dataset_card(api, "lewtun/ml-intern-sessions", "hf_token", "claude_code")
+    _upload_dataset_card(api, "lewtun/aidd-intern-sessions", "hf_token", "claude_code")
     assert len(api.calls) == 1
     assert api.calls[0]["path_in_repo"] == "README.md"
-    assert api.calls[0]["repo_id"] == "lewtun/ml-intern-sessions"
+    assert api.calls[0]["repo_id"] == "lewtun/aidd-intern-sessions"
     assert api.calls[0]["repo_type"] == "dataset"
     assert api.calls[0]["token"] == "hf_token"
     assert (
@@ -86,7 +86,7 @@ def test_update_upload_status_preserves_other_uploader_fields(tmp_path):
         "personal_upload_status",
         "personal_upload_url",
         "success",
-        "https://huggingface.co/datasets/user/ml-intern-sessions",
+        "https://huggingface.co/datasets/user/aidd-intern-sessions",
     )
 
     data = json.loads(session_file.read_text())
@@ -95,7 +95,7 @@ def test_update_upload_status_preserves_other_uploader_fields(tmp_path):
     assert data["personal_upload_status"] == "success"
     assert (
         data["personal_upload_url"]
-        == "https://huggingface.co/datasets/user/ml-intern-sessions"
+        == "https://huggingface.co/datasets/user/aidd-intern-sessions"
     )
 
 

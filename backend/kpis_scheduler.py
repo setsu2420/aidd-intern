@@ -16,9 +16,9 @@ Environment::
 
     HF_KPI_WRITE_TOKEN | HF_SESSION_UPLOAD_TOKEN | HF_TOKEN | HF_ADMIN_TOKEN
         First one found is used. Least-privilege first.
-    KPI_SOURCE_REPO     default smolagents/ml-intern-sessions
-    KPI_TARGET_REPO     default smolagents/ml-intern-kpis
-    ML_INTERN_KPIS_DISABLED  if truthy, the scheduler is not started
+    KPI_SOURCE_REPO     default smolagents/aidd-intern-sessions
+    KPI_TARGET_REPO     default smolagents/aidd-intern-kpis
+    AIDD_INTERN_KPIS_DISABLED  if truthy, the scheduler is not started
 """
 
 from __future__ import annotations
@@ -78,8 +78,8 @@ async def _run_hour(hour_dt: datetime) -> None:
         from huggingface_hub import HfApi
 
         api = HfApi()
-        source = os.environ.get("KPI_SOURCE_REPO", "smolagents/ml-intern-sessions")
-        target = os.environ.get("KPI_TARGET_REPO", "smolagents/ml-intern-kpis")
+        source = os.environ.get("KPI_SOURCE_REPO", "smolagents/aidd-intern-sessions")
+        target = os.environ.get("KPI_TARGET_REPO", "smolagents/aidd-intern-kpis")
         await asyncio.to_thread(mod.run_for_hour, api, source, target, hour_dt, token)
     except Exception as e:
         logger.warning("kpis_scheduler: rollup for %s failed: %s", hour_dt, e)
@@ -101,8 +101,8 @@ async def backfill(hours: int = 6) -> None:
 def start(backfill_hours: int = 6) -> None:
     """Called from FastAPI lifespan startup."""
     global _scheduler
-    if os.environ.get("ML_INTERN_KPIS_DISABLED"):
-        logger.info("kpis_scheduler: disabled via ML_INTERN_KPIS_DISABLED")
+    if os.environ.get("AIDD_INTERN_KPIS_DISABLED"):
+        logger.info("kpis_scheduler: disabled via AIDD_INTERN_KPIS_DISABLED")
         return
     if _scheduler is not None:
         return

@@ -99,7 +99,7 @@ def session_dataset_repo_id(hf_username: str | None, session_id: str) -> str:
     safe_session_id = re.sub(r"[^A-Za-z0-9]+", "-", session_id).strip("-")
     if not safe_session_id:
         safe_session_id = uuid.uuid4().hex[:8]
-    return f"{namespace}/ml-intern-{safe_session_id[:8]}-datasets"
+    return f"{namespace}/aidd-intern-{safe_session_id[:8]}-datasets"
 
 
 async def upload_size_bytes(upload: UploadFile) -> int:
@@ -191,16 +191,16 @@ def dataset_repo_card(repo_id: str, upload_paths: list[str]) -> bytes:
 
     content = f"""---
 tags:
-- ml-intern
+- aidd-intern
 - uploaded-dataset
 {configs}---
 
 # {repo_id}
 
-Private dataset files uploaded through ML Intern.
+Private dataset files uploaded through AIDD-Intern.
 
 Files are stored under `uploads/<upload_id>/` and are attached to the
-corresponding ML Intern session context by Hub reference, not by copying file
+corresponding AIDD-Intern session context by Hub reference, not by copying file
 contents into the chat.
 
 Each uploaded file is exposed as its own dataset config so files with different
@@ -285,7 +285,7 @@ async def push_dataset_upload_to_hub(
         path_in_repo="README.md",
         repo_id=repo_id,
         repo_type="dataset",
-        commit_message="Update ML Intern dataset upload configs",
+        commit_message="Update AIDD-Intern dataset upload configs",
     )
 
     return DatasetUpload(

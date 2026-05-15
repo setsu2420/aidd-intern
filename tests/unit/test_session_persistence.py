@@ -32,7 +32,7 @@ def test_unsafe_message_payload_is_replaced_with_marker():
     marker = _safe_message_doc({"role": "assistant", "content": object()})
 
     assert marker["role"] == "tool"
-    assert marker["ml_intern_persistence_error"] == "message_too_large_or_invalid"
+    assert marker["aidd_intern_persistence_error"] == "message_too_large_or_invalid"
 
 
 # ── mark_pro_seen ─────────────────────────────────────────────────────────

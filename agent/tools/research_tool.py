@@ -35,6 +35,7 @@ RESEARCH_TOOL_NAMES = {
     "explore_hf_docs",
     "fetch_hf_docs",
     "find_hf_api",
+    "aidd_bio",
     "hf_papers",
     "github_find_examples",
     "github_list_repos",
@@ -110,6 +111,11 @@ tell you what actually works.
 
 ## Hub repo inspection
 - `hf_repo_files`: List/read files in any HF repo (model, dataset, space)
+
+## AIDD biomedical information sources
+- `aidd_bio`: Search/fetch RCSB PDB, AlphaFold DB, UniProt, and Foldseek.
+  Use it for protein sequences, experimental structures, predicted structures,
+  and structure-similarity searches before AIDD implementation work.
 
 # Correct research pattern
 

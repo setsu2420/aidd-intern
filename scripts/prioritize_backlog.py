@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prioritize the open ML Intern backlog with a product-manager prompt.
+"""Prioritize the open AIDD-Intern backlog with a product-manager prompt.
 
 Collects open GitHub issues, open GitHub pull requests, and open Hugging Face
 Space discussions, then asks an LLM to classify, cluster, and rank them by
@@ -34,8 +34,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 GITHUB_API = "https://api.github.com"
-DEFAULT_GITHUB_REPO = "huggingface/ml-intern"
-DEFAULT_HF_SPACE = "smolagents/ml-intern"
+DEFAULT_GITHUB_REPO = "huggingface/aidd-intern"
+DEFAULT_HF_SPACE = "smolagents/aidd-intern"
 DEFAULT_CONFIG = "configs/cli_agent_config.json"
 DEFAULT_BATCH_SIZE = 12
 DEFAULT_MAX_COMMENTS = 8
@@ -50,7 +50,7 @@ DEFAULT_GITHUB_REPORT_LABEL = "backlog-prioritization-report"
 
 logger = logging.getLogger("prioritize_backlog")
 
-PM_SYSTEM_PROMPT = """You are a senior product manager for ML Intern.
+PM_SYSTEM_PROMPT = """You are a senior product manager for AIDD-Intern.
 
 Your job is to turn messy public feedback into a pragmatic implementation
 priority list. Optimize for:
@@ -59,7 +59,7 @@ priority list. Optimize for:
 - recency and severity
 - PR readiness and whether an open PR should be reviewed/merged/fixed forward
 - resolved-in-main signals from the local codebase check
-- implementation effort, risk, and strategic fit for ML Intern
+- implementation effort, risk, and strategic fit for AIDD-Intern
 
 Separate user-facing features from bug fixes. Treat open PRs as possible
 ready-made implementations rather than duplicate feature requests. Every
@@ -228,7 +228,7 @@ def _github_headers(token: str | None) -> dict[str, str]:
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "ml-intern-backlog-prioritizer",
+        "User-Agent": "aidd-intern-backlog-prioritizer",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -1644,7 +1644,7 @@ def render_markdown_report(
         source = str(record.get("source") or "unknown")
         source_counts[source] = source_counts.get(source, 0) + 1
 
-    lines = ["# ML Intern Backlog Prioritization", ""]
+    lines = ["# AIDD-Intern Backlog Prioritization", ""]
     if generated_at:
         lines.append(f"Generated: {generated_at}")
     if model:
@@ -1725,7 +1725,7 @@ def default_github_issue_title(generated_at: str) -> str:
         date_text = datetime.fromisoformat(generated_at).date().isoformat()
     except ValueError:
         date_text = generated_at[:10] or "latest"
-    return f"ML Intern backlog prioritization report - {date_text}"
+    return f"AIDD-Intern backlog prioritization report - {date_text}"
 
 
 def _github_issue_labels(raw_labels: list[str]) -> list[str]:

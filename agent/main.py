@@ -1607,7 +1607,7 @@ async def headless_main(
 
 
 def cli():
-    """Entry point for the ml-intern CLI command."""
+    """Entry point for the aidd-intern CLI command."""
     import logging as _logging
     import warnings
 
@@ -1619,7 +1619,7 @@ def cli():
     # Suppress whoosh invalid escape sequence warnings (third-party, unfixed upstream)
     warnings.filterwarnings("ignore", category=SyntaxWarning, module="whoosh")
 
-    parser = argparse.ArgumentParser(description="Hugging Face Agent CLI")
+    parser = argparse.ArgumentParser(description="aidd-intern CLI")
     parser.add_argument(
         "prompt", nargs="?", default=None, help="Run headlessly with this prompt"
     )

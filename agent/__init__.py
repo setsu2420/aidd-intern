@@ -1,6 +1,4 @@
-"""
-HF Agent - Main agent module
-"""
+"""aidd-intern agent package."""
 
 import litellm
 

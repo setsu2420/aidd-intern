@@ -224,12 +224,12 @@ export default function WelcomeScreen() {
   const signInStatus: StepStatus = isAuthenticated ? 'completed' : 'active';
   const startStatus: StepStatus = isAuthenticated ? 'active' : 'locked';
 
-  // Space URL for iframe "Open ML Intern" step
+  // Space URL for iframe "Open aidd-intern" step
   const spaceHost =
     typeof window !== 'undefined'
       ? window.location.hostname.includes('.hf.space')
         ? window.location.origin
-        : 'https://smolagents-ml-intern.hf.space'
+        : 'https://smolagents-aidd-intern.hf.space'
       : '';
 
   return (
@@ -279,7 +279,7 @@ export default function WelcomeScreen() {
             fontSize: { xs: '1.8rem', md: '2.4rem' },
           }}
         >
-          ML Intern
+          aidd-intern
         </Typography>
 
         {/* Description */}
@@ -296,7 +296,7 @@ export default function WelcomeScreen() {
             '& strong': { color: 'var(--text)', fontWeight: 600 },
           }}
         >
-          Your personal <strong>ML agent</strong>. It reads <strong>papers</strong>, finds <strong>datasets</strong>, trains <strong>models</strong>, and iterates until the numbers go up. Instructions in. Trained model out.
+          Your personal <strong>AIDD agent</strong>. It reads <strong>papers</strong>, validates <strong>protein records</strong>, trains <strong>models</strong>, and iterates until the numbers go up. Instructions in. Verified output out.
         </Typography>
 
         {/* ── Checklist ──────────────────────────────────────────── */}
@@ -328,10 +328,10 @@ export default function WelcomeScreen() {
             /* Iframe: open in a full tab */
             <ChecklistStep
               stepNumber={1}
-              title="Open ML Intern"
+              title="Open aidd-intern"
               description="Open the agent in a full browser tab to get started."
               status="active"
-              actionLabel="Open ML Intern"
+              actionLabel="Open aidd-intern"
               actionIcon={<OpenInNewIcon sx={{ fontSize: 16 }} />}
               actionHref={spaceHost}
               isLast

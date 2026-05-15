@@ -281,7 +281,7 @@ export default function AppLayout() {
                 fontSize: { xs: '0.88rem', md: '0.95rem' },
               }}
             >
-              ML Intern
+              aidd-intern
             </Typography>
           </Box>
 
