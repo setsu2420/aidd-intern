@@ -26,6 +26,10 @@ from agent.core.local_models import (
     is_local_model_id,
     is_reserved_local_model_id,
 )
+from agent.core.openai_compatible_models import (
+    OPENAI_COMPATIBLE_MODEL_PREFIXES,
+    is_openai_compatible_model_id,
+)
 
 
 # Suggested models shown by `/model` (not a gate). Users can paste any HF
@@ -46,11 +50,21 @@ SUGGESTED_MODELS = [
     {"id": "moonshotai/Kimi-K2.6", "label": "Kimi K2.6"},
     {"id": "zai-org/GLM-5.1", "label": "GLM 5.1"},
     {"id": "deepseek-ai/DeepSeek-V4-Pro:deepinfra", "label": "DeepSeek V4 Pro"},
+    {"id": "openrouter/openai/gpt-5.2", "label": "GPT-5.2 via OpenRouter"},
+    {
+        "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+        "label": "DeepSeek V4 Flash via SiliconFlow",
+    },
 ]
 
 
 _ROUTING_POLICIES = {"fastest", "cheapest", "preferred"}
-_DIRECT_PREFIXES = ("anthropic/", "openai/", *LOCAL_MODEL_PREFIXES)
+_DIRECT_PREFIXES = (
+    "anthropic/",
+    "openai/",
+    *LOCAL_MODEL_PREFIXES,
+    *OPENAI_COMPATIBLE_MODEL_PREFIXES,
+)
 _LOCAL_PROBE_TIMEOUT = 15.0
 
 
@@ -61,6 +75,7 @@ def is_valid_model_id(model_id: str) -> bool:
       • anthropic/<model>
       • openai/<model>
       • ollama/<model>, vllm/<model>, lm_studio/<model>, llamacpp/<model>
+      • openrouter/<model>, siliconflow/<model>
       • <org>/<model>[:<tag>]            (HF router; tag = provider or policy)
       • huggingface/<org>/<model>[:<tag>] (same, accepts legacy prefix)
 
@@ -71,9 +86,13 @@ def is_valid_model_id(model_id: str) -> bool:
         return False
     if is_local_model_id(model_id):
         return True
+    if is_openai_compatible_model_id(model_id):
+        return True
     if is_reserved_local_model_id(model_id):
         return False
     if any(model_id.startswith(prefix) for prefix in LOCAL_MODEL_PREFIXES):
+        return False
+    if any(model_id.startswith(prefix) for prefix in OPENAI_COMPATIBLE_MODEL_PREFIXES):
         return False
     if "/" not in model_id:
         return False
@@ -164,7 +183,9 @@ def print_model_listing(config, console) -> None:
         "Add ':fastest', ':cheapest', ':preferred', or ':<provider>' to override routing.\n"
         "Use 'anthropic/<model>' or 'openai/<model>' for direct API access.\n"
         "Use 'ollama/<model>', 'vllm/<model>', 'lm_studio/<model>', or "
-        "'llamacpp/<model>' for local OpenAI-compatible endpoints.[/dim]"
+        "'llamacpp/<model>' for local OpenAI-compatible endpoints.\n"
+        "Use 'openrouter/<model>' or 'siliconflow/<model>' for remote "
+        "OpenAI-compatible endpoints.[/dim]"
     )
 
 
@@ -175,11 +196,25 @@ def print_invalid_id(arg: str, console) -> None:
         "  • <org>/<model>[:tag]    (HF router — paste from huggingface.co)\n"
         "  • anthropic/<model>\n"
         "  • openai/<model>\n"
-        "  • ollama/<model> | vllm/<model> | lm_studio/<model> | llamacpp/<model>[/dim]"
+        "  • ollama/<model> | vllm/<model> | lm_studio/<model> | llamacpp/<model>\n"
+        "  • openrouter/<model> | siliconflow/<model>[/dim]"
     )
 
 
 async def _probe_local_model(model_id: str) -> None:
+    params = _resolve_llm_params(model_id)
+    await asyncio.wait_for(
+        acompletion(
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+            stream=False,
+            **params,
+        ),
+        timeout=_LOCAL_PROBE_TIMEOUT,
+    )
+
+
+async def _probe_openai_compatible_model(model_id: str) -> None:
     params = _resolve_llm_params(model_id)
     await asyncio.wait_for(
         acompletion(
@@ -219,6 +254,21 @@ async def probe_and_switch_model(
         console.print(f"[dim]checking local model {model_id}...[/dim]")
         try:
             await _probe_local_model(model_id)
+        except Exception as e:
+            console.print(f"[bold red]Switch failed:[/bold red] {e}")
+            console.print(f"[dim]Keeping current model: {config.model_name}[/dim]")
+            return
+
+        _commit_switch(model_id, config, session, effective=None, cache=True)
+        console.print(
+            f"[green]Model switched to {model_id}[/green] [dim](effort: off)[/dim]"
+        )
+        return
+
+    if is_openai_compatible_model_id(model_id):
+        console.print(f"[dim]checking {model_id}...[/dim]")
+        try:
+            await _probe_openai_compatible_model(model_id)
         except Exception as e:
             console.print(f"[bold red]Switch failed:[/bold red] {e}")
             console.print(f"[dim]Keeping current model: {config.model_name}[/dim]")

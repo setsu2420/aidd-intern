@@ -28,6 +28,7 @@ from agent.core.agent_loop import submission_loop
 from agent.core import model_switcher
 from agent.core.hf_tokens import resolve_hf_token
 from agent.core.local_models import is_local_model_id
+from agent.core.openai_compatible_models import is_openai_compatible_model_id
 from agent.core.session import OpType
 from agent.core.tools import ToolRouter
 from agent.messaging.gateway import NotificationGateway
@@ -1156,9 +1157,12 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
     local_mode = _is_local_tool_runtime(config)
 
     # HF token — required for Hub-backed models/tools and sandbox tools, but
-    # not for local LLMs using only local filesystem tools.
+    # not for non-HF LLMs using only local filesystem tools.
     hf_token = resolve_hf_token()
-    if not hf_token and (not is_local_model_id(config.model_name) or not local_mode):
+    non_hf_model = is_local_model_id(
+        config.model_name
+    ) or is_openai_compatible_model_id(config.model_name)
+    if not hf_token and (not non_hf_model or not local_mode):
         hf_token = await _prompt_and_save_hf_token(prompt_session)
 
     # Resolve username for banner
@@ -1402,7 +1406,10 @@ async def headless_main(
     local_mode = _is_local_tool_runtime(config)
 
     hf_token = resolve_hf_token()
-    if not hf_token and (not is_local_model_id(config.model_name) or not local_mode):
+    non_hf_model = is_local_model_id(
+        config.model_name
+    ) or is_openai_compatible_model_id(config.model_name)
+    if not hf_token and (not non_hf_model or not local_mode):
         print(
             "ERROR: No HF token found. Set HF_TOKEN or run `hf auth login`.",
             file=sys.stderr,

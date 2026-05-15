@@ -1,5 +1,5 @@
 {
-  "model_name": "anthropic/claude-opus-4-6",
+  "model_name": "${AIDD_INTERN_DEFAULT_MODEL_ID:-siliconflow/deepseek-ai/DeepSeek-V4-Flash}",
   "save_sessions": true,
   "session_dataset_repo": "smolagents/aidd-intern-sessions",
   "share_traces": true,

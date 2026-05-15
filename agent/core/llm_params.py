@@ -16,6 +16,10 @@ from agent.core.local_models import (
     local_model_name,
     local_model_provider,
 )
+from agent.core.openai_compatible_models import (
+    openai_compatible_model_name,
+    openai_compatible_model_provider,
+)
 
 
 def _resolve_hf_router_token(session_hf_token: str | None = None) -> str | None:
@@ -146,6 +150,35 @@ def _resolve_local_model_params(
     }
 
 
+def _resolve_openai_compatible_model_params(
+    model_name: str,
+    reasoning_effort: str | None = None,
+    strict: bool = False,
+) -> dict:
+    if reasoning_effort and strict:
+        raise UnsupportedEffortError(
+            "Remote OpenAI-compatible endpoints don't accept reasoning_effort"
+        )
+
+    provider_model = openai_compatible_model_name(model_name)
+    if provider_model is None:
+        raise ValueError(f"Unsupported OpenAI-compatible model id: {model_name}")
+
+    provider = openai_compatible_model_provider(model_name)
+    assert provider is not None
+    api_key = os.environ.get(provider["api_key_env"], "").strip()
+    if not api_key:
+        raise ValueError(
+            f"Missing {provider['api_key_env']} for model id {model_name!r}"
+        )
+    raw_base = os.environ.get(provider["base_url_env"]) or provider["base_url_default"]
+    return {
+        "model": f"openai/{provider_model}",
+        "api_base": _local_api_base(raw_base),
+        "api_key": api_key,
+    }
+
+
 def _resolve_llm_params(
     model_name: str,
     session_hf_token: str | None = None,
@@ -176,6 +209,10 @@ def _resolve_llm_params(
       selects a configurable localhost base URL, and the model suffix is sent
       to LiteLLM as ``openai/<model>``. These endpoints don't receive
       ``reasoning_effort``.
+
+    • ``openrouter/<model>`` and ``siliconflow/<model>`` — remote
+      OpenAI-compatible endpoints. The app prefix selects the base URL and API
+      key env var; the model suffix is sent on the wire unchanged.
 
     • Anything else is treated as a HuggingFace router id. We hit the
       auto-routing OpenAI-compatible endpoint at
@@ -248,6 +285,13 @@ def _resolve_llm_params(
 
     if local_model_provider(model_name) is not None:
         return _resolve_local_model_params(model_name, reasoning_effort, strict)
+
+    if openai_compatible_model_provider(model_name) is not None:
+        return _resolve_openai_compatible_model_params(
+            model_name,
+            reasoning_effort,
+            strict,
+        )
 
     hf_model = model_name.removeprefix("huggingface/")
     api_key = _resolve_hf_router_token(session_hf_token)

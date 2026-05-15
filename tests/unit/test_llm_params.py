@@ -92,6 +92,62 @@ def test_resolve_llamacpp_params_strips_provider_prefix(monkeypatch):
     assert params["api_base"] == "http://localhost:8080/v1"
 
 
+def test_resolve_openrouter_params_strips_app_prefix(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+
+    params = _resolve_llm_params("openrouter/openai/gpt-5.2")
+
+    assert params == {
+        "model": "openai/openai/gpt-5.2",
+        "api_base": "https://openrouter.ai/api/v1",
+        "api_key": "openrouter-secret",
+    }
+
+
+def test_resolve_siliconflow_params_uses_cn_default(monkeypatch):
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "siliconflow-secret")
+    monkeypatch.delenv("SILICONFLOW_BASE_URL", raising=False)
+
+    params = _resolve_llm_params("siliconflow/deepseek-ai/DeepSeek-V4-Flash")
+
+    assert params == {
+        "model": "openai/deepseek-ai/DeepSeek-V4-Flash",
+        "api_base": "https://api.siliconflow.cn/v1",
+        "api_key": "siliconflow-secret",
+    }
+
+
+def test_openai_compatible_params_use_base_url_override(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://example.test/api/v1/")
+
+    params = _resolve_llm_params("openrouter/anthropic/claude-sonnet-4.5")
+
+    assert params["model"] == "openai/anthropic/claude-sonnet-4.5"
+    assert params["api_base"] == "https://example.test/api/v1"
+
+
+def test_openai_compatible_params_require_provider_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="Missing OPENROUTER_API_KEY"):
+        _resolve_llm_params("openrouter/openai/gpt-5.2")
+
+
+def test_openai_compatible_params_reject_reasoning_effort_in_strict_mode(
+    monkeypatch,
+):
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "siliconflow-secret")
+
+    with pytest.raises(UnsupportedEffortError, match="reasoning_effort"):
+        _resolve_llm_params(
+            "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+            reasoning_effort="high",
+            strict=True,
+        )
+
+
 def test_local_params_reject_reasoning_effort_in_strict_mode():
     with pytest.raises(UnsupportedEffortError, match="reasoning_effort"):
         _resolve_llm_params("ollama/llama3.1", reasoning_effort="high", strict=True)

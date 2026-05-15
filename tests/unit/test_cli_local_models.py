@@ -2,6 +2,7 @@ import pytest
 
 from agent.core import model_switcher
 from agent.core.local_models import is_local_model_id
+from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
 
 def test_local_model_helper_accepts_supported_prefixes():
@@ -18,12 +19,25 @@ def test_model_switcher_accepts_supported_local_prefixes():
     assert model_switcher.is_valid_model_id("llamacpp/llama-3.1-8b")
 
 
+def test_openai_compatible_model_helper_accepts_supported_prefixes():
+    assert is_openai_compatible_model_id("openrouter/openai/gpt-5.2")
+    assert is_openai_compatible_model_id("siliconflow/deepseek-ai/DeepSeek-V4-Flash")
+
+
+def test_model_switcher_accepts_openai_compatible_prefixes():
+    assert model_switcher.is_valid_model_id("openrouter/openai/gpt-5.2")
+    assert model_switcher.is_valid_model_id("siliconflow/deepseek-ai/DeepSeek-V4-Flash")
+
+
 def test_model_switcher_rejects_empty_or_whitespace_local_ids():
     assert not model_switcher.is_valid_model_id("ollama/")
     assert not model_switcher.is_valid_model_id("vllm/")
     assert not model_switcher.is_valid_model_id("lm_studio/")
     assert not model_switcher.is_valid_model_id("llamacpp/")
     assert not model_switcher.is_valid_model_id("ollama/llama 3.1")
+    assert not model_switcher.is_valid_model_id("openrouter/")
+    assert not model_switcher.is_valid_model_id("siliconflow/")
+    assert not model_switcher.is_valid_model_id("openrouter/openai/gpt 5.2")
 
 
 def test_openai_compat_prefix_is_not_supported():
@@ -37,6 +51,17 @@ def test_local_models_skip_hf_router_catalog_output():
 
     assert model_switcher._print_hf_routing_info(
         "ollama/llama3.1:8b",
+        NoPrintConsole(),
+    )
+
+
+def test_openai_compatible_models_skip_hf_router_catalog_output():
+    class NoPrintConsole:
+        def print(self, *args, **kwargs):
+            raise AssertionError("OpenAI-compatible models should not print HF info")
+
+    assert model_switcher._print_hf_routing_info(
+        "openrouter/openai/gpt-5.2",
         NoPrintConsole(),
     )
 
@@ -79,6 +104,53 @@ async def test_probe_and_switch_local_model_uses_no_effort(monkeypatch):
     assert session.model_id == "ollama/llama3.1:8b"
     assert session.model_effective_effort["ollama/llama3.1:8b"] is None
     assert calls[0]["model"] == "openai/llama3.1:8b"
+    assert "reasoning_effort" not in calls[0]
+    assert "extra_body" not in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_probe_and_switch_openai_compatible_model_uses_no_effort(
+    monkeypatch,
+):
+    calls = []
+
+    async def fake_acompletion(**kwargs):
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-secret")
+    monkeypatch.setattr(model_switcher, "acompletion", fake_acompletion)
+
+    class Config:
+        model_name = "openai/gpt-5.5"
+        reasoning_effort = "max"
+
+    class Session:
+        def __init__(self):
+            self.model_id = None
+            self.model_effective_effort = {}
+
+        def update_model(self, model_id):
+            self.model_id = model_id
+
+    class Console:
+        def print(self, *args, **kwargs):
+            pass
+
+    session = Session()
+    await model_switcher.probe_and_switch_model(
+        "openrouter/openai/gpt-5.2",
+        Config(),
+        session,
+        Console(),
+        hf_token=None,
+    )
+
+    assert session.model_id == "openrouter/openai/gpt-5.2"
+    assert session.model_effective_effort["openrouter/openai/gpt-5.2"] is None
+    assert calls[0]["model"] == "openai/openai/gpt-5.2"
+    assert calls[0]["api_base"] == "https://openrouter.ai/api/v1"
+    assert calls[0]["api_key"] == "openrouter-secret"
     assert "reasoning_effort" not in calls[0]
     assert "extra_body" not in calls[0]
 

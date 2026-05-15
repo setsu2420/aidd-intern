@@ -93,6 +93,20 @@ const DEFAULT_MODEL_OPTIONS: ModelOption[] = [
     modelPath: 'deepseek-ai/DeepSeek-V4-Pro:deepinfra',
     avatarUrl: getHfAvatarUrl('deepseek-ai/DeepSeek-V4-Pro'),
   },
+  {
+    id: 'openrouter-gpt-5.2',
+    name: 'GPT-5.2',
+    description: 'OpenRouter',
+    modelPath: 'openrouter/openai/gpt-5.2',
+    avatarUrl: 'https://openrouter.ai/favicon.ico',
+  },
+  {
+    id: 'siliconflow-deepseek-v4-flash',
+    name: 'DeepSeek V4 Flash',
+    description: 'SiliconFlow',
+    modelPath: 'siliconflow/deepseek-ai/DeepSeek-V4-Flash',
+    avatarUrl: getHfAvatarUrl('deepseek-ai/DeepSeek-V4-Flash'),
+  },
 ];
 
 const findModelByPath = (path: string, options: ModelOption[]): ModelOption | undefined => {

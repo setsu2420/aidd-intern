@@ -78,7 +78,10 @@ def _claude_picker_model_id() -> str:
     exposes that resolved config value for the Claude picker; non-Claude models
     are listed separately in the model switcher.
     """
-    return session_manager.config.model_name
+    configured = session_manager.config.model_name
+    if configured.startswith(("anthropic/", "bedrock/")) and "anthropic" in configured:
+        return configured
+    return DEFAULT_CLAUDE_MODEL_ID
 
 
 def _available_models() -> list[dict[str, Any]]:
@@ -120,6 +123,18 @@ def _available_models() -> list[dict[str, Any]]:
             "label": "DeepSeek V4 Pro",
             "provider": "huggingface",
             "tier": "free",
+        },
+        {
+            "id": "openrouter/openai/gpt-5.2",
+            "label": "GPT-5.2",
+            "provider": "openrouter",
+            "tier": "external",
+        },
+        {
+            "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+            "label": "DeepSeek V4 Flash",
+            "provider": "siliconflow",
+            "tier": "external",
         },
     ]
     return models

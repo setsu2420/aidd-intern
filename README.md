@@ -33,6 +33,9 @@ Create a `.env` file in the project root (or export these in your shell):
 ```bash
 ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using anthropic models
 OPENAI_API_KEY=<your-openai-api-key> # if using openai models
+OPENROUTER_API_KEY=<your-openrouter-api-key> # if using openrouter/<model>
+SILICONFLOW_API_KEY=<your-siliconflow-api-key> # if using siliconflow/<model>
+AIDD_INTERN_DEFAULT_MODEL_ID=siliconflow/deepseek-ai/DeepSeek-V4-Flash
 LOCAL_LLM_BASE_URL=http://localhost:8000 # shared fallback for local model prefixes
 LOCAL_LLM_API_KEY=<optional-local-api-key> # optional shared local API key
 HF_TOKEN=<your-hugging-face-token>
@@ -86,6 +89,8 @@ aidd-intern "fine-tune llama on my dataset"
 ```bash
 aidd-intern --model anthropic/claude-opus-4-7 "your prompt"   # requires ANTHROPIC_API_KEY
 aidd-intern --model openai/gpt-5.5 "your prompt"              # requires OPENAI_API_KEY
+aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"   # requires OPENROUTER_API_KEY
+aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt" # requires SILICONFLOW_API_KEY
 aidd-intern --model ollama/llama3.1:8b "your prompt"
 aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 aidd-intern --sandbox-tools "your prompt"                         # use HF Space sandbox tools
