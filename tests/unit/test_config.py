@@ -156,3 +156,38 @@ def test_invalid_tool_runtime_is_rejected(tmp_path):
 
     with pytest.raises(ValidationError):
         config_module.load_config(str(config_path))
+
+
+def test_default_cli_config_registers_proteinmcp_and_local_model(monkeypatch):
+    monkeypatch.setenv("AIDD_INTERN_DEFAULT_MODEL_ID", "vllm/huihui-26b")
+    monkeypatch.delenv("AIDD_INTERN_WORKDIR", raising=False)
+
+    config = config_module.load_config("configs/cli_agent_config.json")
+
+    assert config.model_name == "vllm/huihui-26b"
+    assert config.domain_pack == "aidd_binder"
+    bindcraft = config.mcpServers["proteinmcp-bindcraft"]
+    boltzgen = config.mcpServers["proteinmcp-boltzgen"]
+    pxdesign = config.mcpServers["proteinmcp-pxdesign"]
+    assert bindcraft.transport == "stdio"
+    assert boltzgen.transport == "stdio"
+    assert pxdesign.transport == "stdio"
+    assert bindcraft.command == "bash"
+    assert bindcraft.args[0] == "./scripts/run-proteinmcp-local.sh"
+    assert boltzgen.args[0] == "./scripts/run-proteinmcp-local.sh"
+    assert pxdesign.args[0] == "./scripts/run-proteinmcp-local.sh"
+    assert bindcraft.args[-1] == "bindcraft_mcp"
+    assert boltzgen.args[-1] == "boltzgen_mcp"
+    assert pxdesign.args[-1] == "pxdesign_mcp"
+
+
+def test_domain_pack_none_is_accepted(tmp_path):
+    config_path = tmp_path / "config.json"
+    _write_json(
+        config_path,
+        {"model_name": "moonshotai/Kimi-K2.6", "domain_pack": "none"},
+    )
+
+    config = config_module.load_config(str(config_path))
+
+    assert config.domain_pack == "none"

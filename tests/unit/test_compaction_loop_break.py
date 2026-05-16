@@ -36,6 +36,7 @@ from agent.context_manager.manager import (
     CompactionFailedError,
     ContextManager,
     _MAX_TOKENS_PER_MESSAGE,
+    context_policy_for_window,
 )
 
 
@@ -61,6 +62,15 @@ def _make_cm(
 
 def _msg(role: str, content: str | None = "x", **extra) -> Message:
     return Message(role=role, content=content, **extra)
+
+
+def test_context_policy_for_65k_models_compacts_early():
+    policy = context_policy_for_window(65_536)
+
+    assert policy["threshold_ratio"] < 0.75
+    assert policy["compact_size"] <= 1500
+    assert policy["untouched_messages"] == 3
+    assert policy["max_tokens_per_message"] < _MAX_TOKENS_PER_MESSAGE
 
 
 # ── _truncate_oversized ────────────────────────────────────────────────

@@ -11,6 +11,7 @@ from fastmcp.mcp_config import (
 )
 from pydantic import BaseModel
 
+from agent.domain_packs import DEFAULT_DOMAIN_PACK
 from agent.messaging.models import MessagingConfig
 
 # These two are the canonical server config types for MCP servers.
@@ -24,6 +25,7 @@ class Config(BaseModel):
     """Configuration manager"""
 
     model_name: str
+    domain_pack: Literal["aidd_binder", "none", "protein_design"] = DEFAULT_DOMAIN_PACK
     mcpServers: dict[str, MCPServerConfig] = {}
     save_sessions: bool = True
     session_dataset_repo: str = "smolagents/aidd-intern-sessions"

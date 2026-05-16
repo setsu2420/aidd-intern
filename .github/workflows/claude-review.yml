@@ -16,16 +16,19 @@ concurrency:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # On pull_request_target, keep checkout on the trusted base-repo ref.
-          # The Claude action can review the PR via GitHub context/API without
-          # executing untrusted fork code with repository secrets.
-          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Keep credentials available for claude-code-action. The action
+          # fetches the PR branch itself, and private or token-required repos
+          # fail with "could not read Username" if checkout strips credentials.
+          persist-credentials: true
 
       - name: Compose review prompt
         id: compose

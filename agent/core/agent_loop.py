@@ -29,7 +29,13 @@ from agent.core import telemetry
 from agent.core.doom_loop import check_for_doom_loop
 from agent.core.llm_params import _resolve_llm_params
 from agent.core.prompt_caching import with_prompt_caching
-from agent.core.session import DEFAULT_SESSION_LOG_DIR, Event, OpType, Session
+from agent.core.session import (
+    DEFAULT_SESSION_LOG_DIR,
+    Event,
+    OpType,
+    Session,
+    _get_max_tokens_safe,
+)
 from agent.core.tools import ToolRouter
 from agent.tools.jobs_tool import CPU_FLAVORS
 from agent.tools.sandbox_tool import (
@@ -228,6 +234,12 @@ def _base_needs_approval(
 
         return True
 
+    if tool_name in {"run_pxdesign", "run_boltzgen"}:
+        return int(tool_args.get("num_samples") or 0) > 200
+
+    if tool_name == "run_bindcraft":
+        return int(tool_args.get("iterations") or 0) > 100
+
     # Check for file upload operations (hf_private_repos or other tools)
     if tool_name == "hf_private_repos":
         operation = tool_args.get("operation", "")
@@ -406,6 +418,8 @@ async def _record_manual_approved_spend_if_needed(
 _MAX_LLM_RETRIES = 3
 _LLM_RETRY_DELAYS = [5, 15, 30]  # seconds between retries
 _LLM_RATE_LIMIT_RETRY_DELAYS = [30, 60]  # exceed Bedrock's ~60s TPM bucket window
+_DEFAULT_MAX_COMPLETION_TOKENS = 4096
+_MIN_MAX_COMPLETION_TOKENS = 512
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
@@ -439,6 +453,88 @@ def _is_context_overflow_error(error: Exception) -> bool:
         "input is too long",
     ]
     return any(pattern in err_str for pattern in overflow_patterns)
+
+
+def _context_window_from_error(error: Exception) -> int | None:
+    """Extract the provider-reported context window from overflow errors."""
+    import re
+
+    err = str(error)
+    patterns = [
+        r"maximum context length is\s+(\d+)",
+        r"model maximum context length:\s*(\d+)",
+        r"max(?:imum)? context length(?: is|:)?\s*(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, err, flags=re.IGNORECASE)
+        if match:
+            try:
+                value = int(match.group(1))
+            except ValueError:
+                continue
+            if value > 0:
+                return value
+    return None
+
+
+def _apply_context_window_hint(session: Session, error: Exception) -> None:
+    """Shrink local budgeting when the provider reports a smaller window."""
+    window = _context_window_from_error(error)
+    if not window:
+        return
+    cm = session.context_manager
+    if window < cm.model_max_tokens:
+        logger.warning(
+            "Provider reported smaller context window for %s: %d -> %d",
+            session.config.model_name,
+            cm.model_max_tokens,
+            window,
+        )
+        cm.apply_context_policy(window)
+    else:
+        cm.apply_context_policy(cm.model_max_tokens)
+
+
+def _with_safe_completion_budget(
+    session: Session,
+    messages: list,
+    llm_params: dict,
+) -> dict:
+    """Set max_completion_tokens so prompt + output stays inside the window."""
+    from litellm import token_counter
+
+    params = dict(llm_params)
+    if "max_completion_tokens" in params or "max_tokens" in params:
+        return params
+
+    cm = getattr(session, "context_manager", None)
+    model_max_tokens = getattr(cm, "model_max_tokens", None) or _get_max_tokens_safe(
+        getattr(session.config, "model_name", "")
+    )
+    prompt_tokens = getattr(cm, "running_context_usage", 0) or 0
+    try:
+        prompt_tokens = token_counter(
+            model=params.get("model", session.config.model_name),
+            messages=[
+                msg.model_dump() if hasattr(msg, "model_dump") else msg
+                for msg in messages
+            ],
+        )
+    except Exception:
+        pass
+
+    # Keep a small reserve for provider/tool-call overhead not counted by
+    # litellm.token_counter. This matters for OpenAI-compatible local servers
+    # that hard-fail at exactly 65,536 tokens.
+    reserve = max(256, int(model_max_tokens * 0.02))
+    headroom = model_max_tokens - prompt_tokens - reserve
+    max_completion = min(_DEFAULT_MAX_COMPLETION_TOKENS, max(0, headroom))
+    if max_completion < _MIN_MAX_COMPLETION_TOKENS:
+        if cm is not None:
+            cm.running_context_usage = model_max_tokens + 1
+        max_completion = _MIN_MAX_COMPLETION_TOKENS
+    params["max_completion_tokens"] = int(max_completion)
+    return params
 
 
 def _retry_delay_for(error: Exception, attempt_index: int) -> int | None:
@@ -855,6 +951,7 @@ async def _call_llm_streaming(
     response = None
     _healed_effort = False  # one-shot safety net per call
     _healed_thinking_signature = False
+    llm_params = _with_safe_completion_budget(session, messages, llm_params)
     messages, tools = with_prompt_caching(messages, tools, llm_params.get("model"))
     t_start = time.monotonic()
     for _llm_attempt in range(_MAX_LLM_RETRIES):
@@ -869,10 +966,12 @@ async def _call_llm_streaming(
                 **llm_params,
             )
             break
-        except ContextWindowExceededError:
+        except ContextWindowExceededError as e:
+            _apply_context_window_hint(session, e)
             raise
         except Exception as e:
             if _is_context_overflow_error(e):
+                _apply_context_window_hint(session, e)
                 raise ContextWindowExceededError(str(e)) from e
             if not _healed_effort and _is_effort_config_error(e):
                 _healed_effort = True
@@ -1013,6 +1112,7 @@ async def _call_llm_non_streaming(
     response = None
     _healed_effort = False
     _healed_thinking_signature = False
+    llm_params = _with_safe_completion_budget(session, messages, llm_params)
     messages, tools = with_prompt_caching(messages, tools, llm_params.get("model"))
     t_start = time.monotonic()
     for _llm_attempt in range(_MAX_LLM_RETRIES):
@@ -1026,10 +1126,12 @@ async def _call_llm_non_streaming(
                 **llm_params,
             )
             break
-        except ContextWindowExceededError:
+        except ContextWindowExceededError as e:
+            _apply_context_window_hint(session, e)
             raise
         except Exception as e:
             if _is_context_overflow_error(e):
+                _apply_context_window_hint(session, e)
                 raise ContextWindowExceededError(str(e)) from e
             if not _healed_effort and _is_effort_config_error(e):
                 _healed_effort = True
@@ -1689,9 +1791,10 @@ class Handlers:
 
                 iteration += 1
 
-            except ContextWindowExceededError:
+            except ContextWindowExceededError as e:
                 # Force compact and retry this iteration.
                 cm = session.context_manager
+                _apply_context_window_hint(session, e)
                 logger.warning(
                     "ContextWindowExceededError at iteration %d — forcing compaction "
                     "(usage=%d, model_max_tokens=%d, messages=%d)",

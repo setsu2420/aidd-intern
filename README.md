@@ -9,7 +9,16 @@
 
 # AIDD-Intern
 
-An ML intern that autonomously researches, writes, and ships good quality ML related code using the Hugging Face ecosystem — with deep access to docs, papers, datasets, and cloud compute.
+An ML intern that autonomously researches, writes, and ships good quality ML
+related code using the Hugging Face ecosystem, with deep access to docs,
+papers, datasets, cloud compute, and domain-specific AI drug discovery
+workflows.
+
+The project is organized as a reusable agent harness. The generic runtime owns
+sessions, model calls, tool routing, approvals, persistence, telemetry, and UI
+events; domain packs add specialized prompts and tools. The default domain pack
+supports AIDD binder workflows, and the optional `protein_design` pack adds
+protein binder generation, orthogonal validation, and ACE playbook memory.
 
 ## Quick Start
 
@@ -35,7 +44,9 @@ ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using anthropic models
 OPENAI_API_KEY=<your-openai-api-key> # if using openai models
 OPENROUTER_API_KEY=<your-openrouter-api-key> # if using openrouter/<model>
 SILICONFLOW_API_KEY=<your-siliconflow-api-key> # if using siliconflow/<model>
-AIDD_INTERN_DEFAULT_MODEL_ID=siliconflow/deepseek-ai/DeepSeek-V4-Flash
+AIDD_INTERN_DEFAULT_MODEL_ID=vllm/huihui-26b # replace suffix with /v1/models id if needed
+VLLM_BASE_URL=http://192.168.4.6:8108 # vLLM OpenAI-compatible endpoint on peacock05
+AIDD_INTERN_PROTEINMCP_HOME=~/.cache/aidd-intern/proteinmcp # local ProteinMCP installs
 LOCAL_LLM_BASE_URL=http://localhost:8000 # shared fallback for local model prefixes
 LOCAL_LLM_API_KEY=<optional-local-api-key> # optional shared local API key
 HF_TOKEN=<your-hugging-face-token>
@@ -92,6 +103,7 @@ aidd-intern --model openai/gpt-5.5 "your prompt"              # requires OPENAI_
 aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"   # requires OPENROUTER_API_KEY
 aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt" # requires SILICONFLOW_API_KEY
 aidd-intern --model ollama/llama3.1:8b "your prompt"
+aidd-intern --model vllm/huihui-26b "your prompt"
 aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 aidd-intern --sandbox-tools "your prompt"                         # use HF Space sandbox tools
 aidd-intern --max-iterations 100 "your prompt"
@@ -110,6 +122,7 @@ server first, then select it with a provider-specific model prefix:
 
 ```bash
 aidd-intern --model ollama/llama3.1:8b "your prompt"
+aidd-intern --model vllm/huihui-26b "your prompt"
 aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 ```
 
@@ -127,6 +140,114 @@ one shared local endpoint, or override a specific provider with its matching
 `*_BASE_URL` / `*_API_KEY` variable, such as `OLLAMA_BASE_URL` or
 `VLLM_API_KEY`. Provider-specific variables take precedence over the shared
 local variables. Base URLs may include or omit `/v1`.
+
+For a vLLM server, the suffix after `vllm/` must match one of the model ids
+returned by the server's OpenAI-compatible `GET /v1/models` endpoint. If the
+server was launched with `--served-model-name huihui-26b`, use
+`AIDD_INTERN_DEFAULT_MODEL_ID=vllm/huihui-26b`; otherwise set it to the exact
+returned id, for example `vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct`.
+
+Unknown local and OpenAI-compatible models default to a conservative 65,536
+token context policy. The session context manager tightens compaction
+thresholds, keeps fewer untouched turns, and truncates oversized messages for
+65K models so long autonomous runs do not fail with provider context-window
+errors. Override the detected window when your serving stack exposes a
+different limit:
+
+```bash
+AIDD_INTERN_MODEL_MAX_TOKENS=32768 aidd-intern --model vllm/my-small-model
+AIDD_INTERN_MODEL_MAX_TOKENS=131072 aidd-intern --model ollama/qwen-long
+```
+
+**ProteinMCP tools:**
+
+The default CLI and web configs register ProteinMCP's BindCraft, BoltzGen, and PXDesign
+MCP servers through local stdio launchers. They do not use Docker. Install the
+local source repos and conda environments once:
+
+```bash
+scripts/setup-proteinmcp-local.sh all
+```
+
+The setup installs under `AIDD_INTERN_PROTEINMCP_HOME`, defaulting to
+`~/.cache/aidd-intern/proteinmcp`. To install only one server, pass
+`bindcraft_mcp`, `boltzgen_mcp`, or `pxdesign_mcp`. BoltzGen setup defaults to `--skip-models`
+so it does not block on the model download prompt; set
+`AIDD_INTERN_BOLTZGEN_SETUP_ARGS=--download-models` if you want to fetch them
+during setup. BindCraft setup downloads AlphaFold2 weights by default; set
+`AIDD_INTERN_BINDCRAFT_SETUP_ARGS=--skip-weights` for a lighter setup that can
+start the MCP but cannot run full designs until weights are installed. PXDesign
+uses the official Conda installer by default; set `PXDESIGN_BIN` if you already
+have a working PXDesign CLI elsewhere.
+
+Do not commit model weights, checkpoints, databases, or generated structure
+batches to GitHub. Keep large scientific assets in a local cache, shared
+filesystem, object store, Hugging Face Hub repo, or container volume, then
+point tools at them with environment variables. Common examples:
+
+```bash
+AIDD_INTERN_PROTEINMCP_HOME=/data/aidd-intern/proteinmcp
+AIDD_INTERN_BINDCRAFT_SETUP_ARGS=--skip-weights
+AIDD_INTERN_BOLTZGEN_SETUP_ARGS=--skip-models
+PROTEIN_DESIGN_BINDCRAFT_CMD=/opt/bindcraft/run_bindcraft.sh
+PROTEIN_DESIGN_BOLTZGEN_CMD=/opt/boltzgen/bin/boltzgen
+PROTEIN_DESIGN_PXDESIGN_CMD=/opt/pxdesign/bin/pxdesign
+```
+
+If your cluster or container image already provides weights, set the command
+variables to wrappers that export the tool-specific weight paths before
+launching the underlying program.
+
+The stdio launcher auto-clones missing MCP repos, but it does not run the heavy
+`quick_setup.sh` step unless `AIDD_INTERN_PROTEINMCP_AUTO_SETUP=1` is set.
+
+**Domain packs:**
+
+AIDD-Intern defaults to the `aidd_binder` domain pack. The generic agent
+runtime owns sessions, tool routing, approvals, persistence, and UI events; the
+domain pack contributes binder-specific workflow tools and prompt policy.
+
+Supported values:
+
+- `aidd_binder`: default AIDD binder workflow pack. Registers `binder_design`,
+  which creates project manifests, inspects generator outputs, and ranks
+  candidates from BindCraft, BoltzGen, PXDesign, or compatible CSV metric files.
+- `protein_design`: protein binder design pack. Registers generation tools for
+  PXdesign, BoltzGen, and BindCraft; validation helpers for Chai-1, Protenix,
+  and Foldseek; approval thresholds for expensive GPU runs; and an ACE playbook
+  tool for campaign memory.
+- `none`: generic runtime without domain-specific workflow tools.
+
+Example config override:
+
+```json
+{
+  "domain_pack": "protein_design"
+}
+```
+
+Protein design details:
+
+- `agent/domain_packs/protein_design/tools.py` wraps generator command
+  boundaries.
+- `agent/domain_packs/protein_design/validation.py` wraps Chai-1, Protenix, and
+  Foldseek validation boundaries.
+- `agent/domain_packs/protein_design/ace.py` implements ACE-style structured
+  playbooks for incremental context engineering.
+- `agent/roles/` and `agent/tools/role_handoff_tool.py` provide structured
+  role handoffs for supervisor, researcher, executor, verifier, reviewer, and
+  protein-design specialist roles.
+- `evals/protein_design/` contains a headless benchmark scaffold and container
+  environment templates.
+
+Useful docs:
+
+- `docs/context-management-guide.md`
+- `docs/multi-agent-collaboration-guide.md`
+- `docs/protein-design-domain-pack-guide.md`
+- `docs/protein-design-optimization-roadmap.md`
+- `docs/pd-l1-binder-design-report.md`
+- `docs/aidd-intern-architecture-harness-guide.md`
 
 **CLI tool runtime:**
 
@@ -170,6 +291,35 @@ The built-in `aidd_bio` tool searches and fetches records from RCSB PDB,
 AlphaFold DB, UniProt, and Foldseek. It supports bounded previews for
 PDB/mmCIF/FASTA/JSON content so long structure files do not flood the model
 context.
+
+**Protein design execution boundaries:**
+
+The protein-design pack keeps heavyweight scientific tooling outside the Python
+agent process. Local runs expect tool commands to be available on `PATH` or
+configured through environment variables:
+
+```bash
+PROTEIN_DESIGN_PXDESIGN_CMD=pxdesign
+PROTEIN_DESIGN_BOLTZGEN_CMD=boltzgen
+PROTEIN_DESIGN_BINDCRAFT_CMD=bindcraft
+PROTEIN_DESIGN_CHAI1_CMD=chai1
+PROTEIN_DESIGN_PROTENIX_CMD=protenix
+PROTEIN_DESIGN_FOLDSEEK_CMD=foldseek
+```
+
+Generator wrappers inspect available GPU memory before launching heavy work.
+When GPU headroom is low, the pack downscales sampling budgets or blocks the
+run before allocation, returning a `gpu_plan` that explains the selected device,
+free memory, and any adjustments. In environments without `nvidia-smi`, set a
+test or scheduler-provided memory hint:
+
+```bash
+PROTEIN_DESIGN_GPU_FREE_MB=24000
+```
+
+For containerized runs, use the generation and validation Dockerfile scaffolds
+under `evals/protein_design/environments/` and keep licensed packages such as
+PyRosetta on approved internal distribution channels.
 
 ## Sharing Traces
 
@@ -399,6 +549,21 @@ uv run ruff format --check .
 If the format check fails, run `uv run ruff format .` and re-run the checks
 before committing.
 
+For domain-pack changes, also run:
+
+```bash
+uv run pytest tests/unit/test_protein_design_domain_pack.py
+uv run pytest tests/unit
+```
+
+To smoke-test the protein-design evaluation scaffold:
+
+```bash
+uv run python evals/protein_design/runner.py \
+  --model test-model \
+  --output /tmp/protein_design_eval_results.json
+```
+
 ### Adding Built-in Tools
 
 Edit `agent/core/tools.py`:
@@ -421,6 +586,20 @@ def create_builtin_tools() -> list[ToolSpec]:
         # ... existing tools
     ]
 ```
+
+### Adding or Updating Domain Packs
+
+Domain-specific code should live under `agent/domain_packs/<name>/`. A domain
+pack should expose its tools through `agent/domain_packs/__init__.py` so the
+generic `ToolRouter` can load them when `Config.domain_pack` matches.
+
+Keep these boundaries intact:
+
+- generic runtime behavior belongs in `agent/core/`;
+- domain prompts and domain tools belong in `agent/domain_packs/`;
+- long-running scientific or GPU workloads should stay behind subprocess,
+  container, MCP, or HF Jobs boundaries;
+- benchmark tasks and environment scaffolds belong in `evals/<domain>/`.
 
 ### Adding MCP Servers
 

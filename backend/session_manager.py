@@ -175,7 +175,11 @@ class SessionManager:
         import time as _time
 
         t0 = _time.monotonic()
-        tool_router = ToolRouter(self.config.mcpServers, hf_token=hf_token)
+        tool_router = ToolRouter(
+            self.config.mcpServers,
+            hf_token=hf_token,
+            domain_pack=self.config.domain_pack,
+        )
         # Deep-copy config so each session's model switches independently —
         # tab A picking GLM doesn't flip tab B off Claude.
         session_config = self.config.model_copy(deep=True)

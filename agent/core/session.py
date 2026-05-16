@@ -21,6 +21,7 @@ from agent.messaging.models import NotificationRequest
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_TOKENS = 200_000
+_DEFAULT_LOCAL_MAX_TOKENS = 65_536
 _TURN_COMPLETE_NOTIFICATION_CHARS = 39000
 
 DEFAULT_SESSION_LOG_DIR = Path("session_logs")
@@ -38,6 +39,16 @@ def _get_max_tokens_safe(model_name: str) -> int:
     """
     from litellm import get_model_info
 
+    override = os.environ.get("AIDD_INTERN_MODEL_MAX_TOKENS")
+    if override:
+        try:
+            value = int(override)
+        except ValueError:
+            logger.warning("Ignoring invalid AIDD_INTERN_MODEL_MAX_TOKENS=%r", override)
+        else:
+            if value > 0:
+                return value
+
     candidates = [model_name]
     stripped = model_name.removeprefix("huggingface/").split(":", 1)[0]
     if stripped != model_name:
@@ -50,6 +61,19 @@ def _get_max_tokens_safe(model_name: str) -> int:
                 return max_input
         except Exception:
             continue
+    try:
+        from agent.core.local_models import is_local_model_id
+        from agent.core.openai_compatible_models import is_openai_compatible_model_id
+
+        if is_local_model_id(model_name) or is_openai_compatible_model_id(model_name):
+            logger.info(
+                "No litellm.get_model_info entry for %s, falling back to local/compatible %d",
+                model_name,
+                _DEFAULT_LOCAL_MAX_TOKENS,
+            )
+            return _DEFAULT_LOCAL_MAX_TOKENS
+    except Exception:
+        pass
     logger.info(
         "No litellm.get_model_info entry for %s, falling back to %d",
         model_name,
@@ -326,7 +350,7 @@ class Session:
     def update_model(self, model_name: str) -> None:
         """Switch the active model and update the context window limit."""
         self.config.model_name = model_name
-        self.context_manager.model_max_tokens = _get_max_tokens_safe(model_name)
+        self.context_manager.apply_context_policy(_get_max_tokens_safe(model_name))
 
     def set_auto_approval_policy(
         self, *, enabled: bool, cost_cap_usd: float | None

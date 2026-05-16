@@ -54,6 +54,7 @@ import user_quotas
 from agent.core.hf_access import get_jobs_access
 from agent.core.hf_tokens import resolve_hf_request_token, resolve_hf_router_token
 from agent.core.llm_params import _resolve_llm_params
+from agent.core.local_models import is_local_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ router = APIRouter(prefix="/api", tags=["agent"])
 _background_teardown_tasks: set[asyncio.Task] = set()
 
 DEFAULT_CLAUDE_MODEL_ID = "bedrock/us.anthropic.claude-opus-4-6-v1"
+DEFAULT_LOCAL_MODEL_ID = "vllm/huihui-26b"
 DEFAULT_FREE_MODEL_ID = "moonshotai/Kimi-K2.6"
 PREMIUM_MODEL_IDS = {
     DEFAULT_CLAUDE_MODEL_ID,
@@ -84,14 +86,28 @@ def _claude_picker_model_id() -> str:
     return DEFAULT_CLAUDE_MODEL_ID
 
 
+def _local_picker_model_id() -> str:
+    """Return the configured local model id, or a sane vLLM placeholder."""
+    configured = session_manager.config.model_name
+    if is_local_model_id(configured):
+        return configured
+    return DEFAULT_LOCAL_MODEL_ID
+
+
 def _available_models() -> list[dict[str, Any]]:
     models = [
+        {
+            "id": _local_picker_model_id(),
+            "label": "Local vLLM",
+            "provider": "vllm",
+            "tier": "local",
+            "recommended": True,
+        },
         {
             "id": "moonshotai/Kimi-K2.6",
             "label": "Kimi K2.6",
             "provider": "huggingface",
             "tier": "free",
-            "recommended": True,
         },
         {
             "id": _claude_picker_model_id(),

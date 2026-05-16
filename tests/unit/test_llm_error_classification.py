@@ -16,6 +16,7 @@ from agent.core.agent_loop import (
     _MAX_LLM_RETRIES,
     _LLM_RATE_LIMIT_RETRY_DELAYS,
     _LLM_RETRY_DELAYS,
+    _context_window_from_error,
     _is_context_overflow_error,
     _is_rate_limit_error,
     _is_transient_error,
@@ -38,6 +39,23 @@ def test_kimi_prompt_too_long_is_context_overflow():
 def test_openai_context_length_exceeded_is_context_overflow():
     err = Exception("Error: This model's maximum context length is 8192 tokens.")
     assert _is_context_overflow_error(err)
+
+
+def test_provider_context_window_is_extracted_from_openai_error():
+    err = Exception(
+        "This model's maximum context length is 65536 tokens. "
+        "However, you requested 20000 output tokens."
+    )
+
+    assert _context_window_from_error(err) == 65536
+
+
+def test_provider_context_window_is_extracted_from_kimi_error():
+    err = Exception(
+        "The prompt is too long: 365407, model maximum context length: 262143"
+    )
+
+    assert _context_window_from_error(err) == 262143
 
 
 def test_random_error_is_not_context_overflow():

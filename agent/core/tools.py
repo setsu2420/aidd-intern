@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent.config import MCPServerConfig
+from agent.domain_packs import DEFAULT_DOMAIN_PACK, create_domain_tools
 from agent.tools.aidd_bio_tool import AIDD_BIO_TOOL_SPEC, aidd_bio_handler
 from agent.tools.dataset_tools import (
     HF_INSPECT_DATASET_TOOL_SPEC,
@@ -49,6 +50,10 @@ from agent.tools.notify_tool import NOTIFY_TOOL_SPEC, notify_handler
 from agent.tools.papers_tool import HF_PAPERS_TOOL_SPEC, hf_papers_handler
 from agent.tools.plan_tool import PLAN_TOOL_SPEC, plan_tool_handler
 from agent.tools.research_tool import RESEARCH_TOOL_SPEC, research_handler
+from agent.tools.role_handoff_tool import (
+    ROLE_HANDOFF_TOOL_SPEC,
+    role_handoff_handler,
+)
 from agent.tools.sandbox_tool import get_sandbox_tools
 from agent.tools.web_search_tool import WEB_SEARCH_TOOL_SPEC, web_search_handler
 
@@ -137,11 +142,14 @@ class ToolRouter:
         mcp_servers: dict[str, MCPServerConfig],
         hf_token: str | None = None,
         local_mode: bool = False,
+        domain_pack: str = DEFAULT_DOMAIN_PACK,
     ):
         self.tools: dict[str, ToolSpec] = {}
         self.mcp_servers: dict[str, dict[str, Any]] = {}
 
-        for tool in create_builtin_tools(local_mode=local_mode):
+        for tool in create_builtin_tools(
+            local_mode=local_mode, domain_pack=domain_pack
+        ):
             self.register_tool(tool)
 
         self.mcp_client: Client | None = None
@@ -291,7 +299,9 @@ class ToolRouter:
 # ============================================================================
 
 
-def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
+def create_builtin_tools(
+    local_mode: bool = False, domain_pack: str = DEFAULT_DOMAIN_PACK
+) -> list[ToolSpec]:
     """Create built-in tool specifications"""
     # in order of importance
     tools = [
@@ -349,6 +359,12 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             handler=plan_tool_handler,
         ),
         ToolSpec(
+            name=ROLE_HANDOFF_TOOL_SPEC["name"],
+            description=ROLE_HANDOFF_TOOL_SPEC["description"],
+            parameters=ROLE_HANDOFF_TOOL_SPEC["parameters"],
+            handler=role_handoff_handler,
+        ),
+        ToolSpec(
             name=NOTIFY_TOOL_SPEC["name"],
             description=NOTIFY_TOOL_SPEC["description"],
             parameters=NOTIFY_TOOL_SPEC["parameters"],
@@ -392,6 +408,7 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             handler=github_read_file_handler,
         ),
     ]
+    tools.extend(create_domain_tools(domain_pack, ToolSpec))
 
     # Sandbox or local tools (highest priority)
     if local_mode:

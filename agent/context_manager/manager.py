@@ -86,6 +86,35 @@ _COMPACT_PROMPT = (
 _MAX_TOKENS_PER_MESSAGE = 50_000
 
 
+def context_policy_for_window(model_max_tokens: int) -> dict[str, int | float]:
+    """Return context-management knobs for a model context window.
+
+    Small local models fail hard near 65k, so they need earlier compaction,
+    shorter summaries, and fewer untouched tail messages. Larger hosted models
+    can afford a wider tail and bigger summaries.
+    """
+    if model_max_tokens <= 70_000:
+        return {
+            "threshold_ratio": 0.68,
+            "compact_size": 1_500,
+            "untouched_messages": 3,
+            "max_tokens_per_message": 12_000,
+        }
+    if model_max_tokens <= 131_072:
+        return {
+            "threshold_ratio": 0.75,
+            "compact_size": 2_500,
+            "untouched_messages": 4,
+            "max_tokens_per_message": 20_000,
+        }
+    return {
+        "threshold_ratio": 0.9,
+        "compact_size": min(8_000, max(2_000, int(model_max_tokens * 0.05))),
+        "untouched_messages": 5,
+        "max_tokens_per_message": _MAX_TOKENS_PER_MESSAGE,
+    }
+
+
 class CompactionFailedError(Exception):
     """Raised when compaction can't reduce context below the threshold.
 
@@ -194,11 +223,14 @@ class ContextManager:
             hf_token=hf_token,
             local_mode=local_mode,
         )
-        # The model's real input-token ceiling (from litellm.get_model_info).
-        # Compaction triggers at _COMPACT_THRESHOLD_RATIO below it — see
-        # the compaction_threshold property.
+        # The model's real input-token ceiling (from litellm.get_model_info or
+        # conservative local defaults). Context policy is window-aware so 65k
+        # local models compact much earlier than 200k+ hosted models.
         self.model_max_tokens = model_max_tokens
+        self._compaction_threshold_ratio = self._COMPACT_THRESHOLD_RATIO
+        self.max_tokens_per_message = _MAX_TOKENS_PER_MESSAGE
         self.compact_size = int(model_max_tokens * compact_size)
+        self.apply_context_policy(model_max_tokens)
         # Running count of tokens the last LLM call reported. Drives the
         # compaction gate; updated in add_message() with each response's
         # usage.total_tokens.
@@ -206,6 +238,15 @@ class ContextManager:
         self.untouched_messages = untouched_messages
         self.items: list[Message] = [Message(role="system", content=self.system_prompt)]
         self.on_message_added = None
+
+    def apply_context_policy(self, model_max_tokens: int) -> None:
+        """Apply model-window-specific context and compaction settings."""
+        policy = context_policy_for_window(model_max_tokens)
+        self.model_max_tokens = model_max_tokens
+        self._compaction_threshold_ratio = float(policy["threshold_ratio"])
+        self.compact_size = int(policy["compact_size"])
+        self.untouched_messages = int(policy["untouched_messages"])
+        self.max_tokens_per_message = int(policy["max_tokens_per_message"])
 
     def refresh_system_prompt(
         self,
@@ -418,7 +459,10 @@ class ContextManager:
     @property
     def compaction_threshold(self) -> int:
         """Token count at which `compact()` kicks in."""
-        return int(self.model_max_tokens * self._COMPACT_THRESHOLD_RATIO)
+        ratio = getattr(
+            self, "_compaction_threshold_ratio", self._COMPACT_THRESHOLD_RATIO
+        )
+        return int(self.model_max_tokens * ratio)
 
     @property
     def needs_compaction(self) -> bool:
@@ -454,7 +498,8 @@ class ContextManager:
                 # don't drop the message, just keep it as-is.
                 out.append(msg)
                 continue
-            if n <= _MAX_TOKENS_PER_MESSAGE:
+            limit = getattr(self, "max_tokens_per_message", _MAX_TOKENS_PER_MESSAGE)
+            if n <= limit:
                 out.append(msg)
                 continue
             placeholder = (

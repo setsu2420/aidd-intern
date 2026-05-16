@@ -3,6 +3,7 @@ import pytest
 from agent.core import model_switcher
 from agent.core.local_models import is_local_model_id
 from agent.core.openai_compatible_models import is_openai_compatible_model_id
+from agent.core.session import _get_max_tokens_safe
 
 
 def test_local_model_helper_accepts_supported_prefixes():
@@ -53,6 +54,22 @@ def test_local_models_skip_hf_router_catalog_output():
         "ollama/llama3.1:8b",
         NoPrintConsole(),
     )
+
+
+def test_unknown_local_model_context_defaults_to_65k(monkeypatch):
+    def missing_model_info(_model):
+        raise Exception("unknown model")
+
+    monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setattr("litellm.get_model_info", missing_model_info)
+
+    assert _get_max_tokens_safe("vllm/local-small") == 65_536
+
+
+def test_context_window_env_override(monkeypatch):
+    monkeypatch.setenv("AIDD_INTERN_MODEL_MAX_TOKENS", "32768")
+
+    assert _get_max_tokens_safe("vllm/local-small") == 32_768
 
 
 def test_openai_compatible_models_skip_hf_router_catalog_output():

@@ -31,6 +31,7 @@ from agent.core.local_models import is_local_model_id
 from agent.core.openai_compatible_models import is_openai_compatible_model_id
 from agent.core.session import OpType
 from agent.core.tools import ToolRouter
+from agent.domain_packs import DEFAULT_DOMAIN_PACK
 from agent.messaging.gateway import NotificationGateway
 from agent.utils.reliability_checks import check_training_script_save_pattern
 from agent.utils.terminal_display import (
@@ -73,6 +74,30 @@ def _is_local_tool_runtime(config: Any) -> bool:
 
 def _tool_runtime_label(local_mode: bool) -> str:
     return "local filesystem" if local_mode else "HF sandbox"
+
+
+def _create_tool_router(
+    mcp_servers: dict[str, Any],
+    *,
+    hf_token: str | None,
+    local_mode: bool,
+    domain_pack: str,
+) -> ToolRouter:
+    try:
+        return ToolRouter(
+            mcp_servers,
+            hf_token=hf_token,
+            local_mode=local_mode,
+            domain_pack=domain_pack,
+        )
+    except TypeError as exc:
+        if "domain_pack" not in str(exc):
+            raise
+        return ToolRouter(
+            mcp_servers,
+            hf_token=hf_token,
+            local_mode=local_mode,
+        )
 
 
 async def _wait_for_initial_sandbox_preload(session_holder: list | None) -> None:
@@ -1192,8 +1217,11 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
     notification_gateway = NotificationGateway(config.messaging)
     await notification_gateway.start()
     # Create tool router with the selected CLI tool runtime.
-    tool_router = ToolRouter(
-        config.mcpServers, hf_token=hf_token, local_mode=local_mode
+    tool_router = _create_tool_router(
+        config.mcpServers,
+        hf_token=hf_token,
+        local_mode=local_mode,
+        domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
     )
 
     # Session holder for interrupt/model/status access
@@ -1435,8 +1463,11 @@ async def headless_main(
     submission_queue: asyncio.Queue = asyncio.Queue()
     event_queue: asyncio.Queue = asyncio.Queue()
 
-    tool_router = ToolRouter(
-        config.mcpServers, hf_token=hf_token, local_mode=local_mode
+    tool_router = _create_tool_router(
+        config.mcpServers,
+        hf_token=hf_token,
+        local_mode=local_mode,
+        domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
     )
     session_holder: list = [None]
 

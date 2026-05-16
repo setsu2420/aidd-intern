@@ -43,10 +43,43 @@ interface ModelOption {
   recommended?: boolean;
 }
 
+interface BackendModel {
+  id: string;
+  label?: string;
+  provider?: string;
+  tier?: string;
+  recommended?: boolean;
+}
+
 const getHfAvatarUrl = (modelId: string) => {
   const org = modelId.split('/')[0];
   return `https://huggingface.co/api/avatars/${org}`;
 };
+
+const avatarForBackendModel = (model: BackendModel) => {
+  if (model.provider === 'anthropic') return 'https://huggingface.co/api/avatars/Anthropic';
+  if (model.provider === 'openai') return 'https://huggingface.co/api/avatars/openai';
+  if (model.provider === 'openrouter') return 'https://openrouter.ai/favicon.ico';
+  if (model.provider === 'vllm') return '/vite.svg';
+  return getHfAvatarUrl(model.id);
+};
+
+const optionIdForPath = (path: string) => (
+  path
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'model'
+);
+
+const modelOptionFromBackend = (model: BackendModel): ModelOption => ({
+  id: optionIdForPath(model.id),
+  name: model.label ?? model.id,
+  description: model.provider ?? model.tier ?? 'Model',
+  modelPath: model.id,
+  avatarUrl: avatarForBackendModel(model),
+  recommended: model.recommended,
+});
 
 const DEFAULT_MODEL_OPTIONS: ModelOption[] = [
   {
@@ -219,16 +252,20 @@ export default function ChatInput({ sessionId, initialModelPath, onSend, onStop,
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data?.available) return;
-        const claude = data.available.find((m: { provider?: string; id?: string }) => (
-          m.provider === 'anthropic' && m.id
-        ));
-        if (!claude?.id) return;
-
-        const next = DEFAULT_MODEL_OPTIONS.map((option) => (
-          isClaudeModel(option)
-            ? { ...option, modelPath: claude.id, name: claude.label ?? option.name }
-            : option
-        ));
+        const backendModels = (data.available as BackendModel[]).filter((m) => m.id);
+        const byPath = new Map(DEFAULT_MODEL_OPTIONS.map((option) => [option.modelPath, option]));
+        for (const backendModel of backendModels) {
+          byPath.set(backendModel.id, {
+            ...(byPath.get(backendModel.id) ?? modelOptionFromBackend(backendModel)),
+            modelPath: backendModel.id,
+            name: backendModel.label ?? byPath.get(backendModel.id)?.name ?? backendModel.id,
+            description: backendModel.provider ?? byPath.get(backendModel.id)?.description ?? 'Model',
+            recommended: backendModel.recommended,
+          });
+        }
+        const next = backendModels.length
+          ? backendModels.map((backendModel) => byPath.get(backendModel.id) ?? modelOptionFromBackend(backendModel))
+          : DEFAULT_MODEL_OPTIONS;
         modelOptionsRef.current = next;
         setModelOptions(next);
         if (!sessionIdRef.current) {
