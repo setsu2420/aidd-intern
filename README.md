@@ -1,18 +1,13 @@
 <p align="center">
-  <img src="frontend/public/smolagents.webp" alt="smolagents logo" width="160" />
-</p>
-
-<p align="center">
     <a href="https://github.com/huggingface/aidd-intern/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
     <a href="https://smolagents-aidd-intern.hf.space/"><img alt="Website" src="https://img.shields.io/website/https/smolagents-aidd-intern.hf.space.svg?down_color=red&down_message=offline&up_message=online"></a>
 </p>
 
 # AIDD-Intern
 
-An ML intern that autonomously researches, writes, and ships good quality ML
-related code using the Hugging Face ecosystem, with deep access to docs,
-papers, datasets, cloud compute, and domain-specific AI drug discovery
-workflows.
+AIDD-Intern autonomously researches, writes, and ships AI drug discovery
+engineering work using the Hugging Face ecosystem, with deep access to docs,
+papers, datasets, cloud compute, and domain-specific AIDD workflows.
 
 The project is organized as a reusable agent harness. The generic runtime owns
 sessions, model calls, tool routing, approvals, persistence, telemetry, and UI
