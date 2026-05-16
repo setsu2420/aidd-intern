@@ -20,6 +20,25 @@ events; domain packs add specialized prompts and tools. The default domain pack
 supports AIDD binder workflows, and the optional `protein_design` pack adds
 protein binder generation, orthogonal validation, and ACE playbook memory.
 
+## Project Layout
+
+- `agent/` contains the reusable async agent runtime, CLI, context manager,
+  model routing, session persistence/upload, tool router, built-in tools, roles,
+  and domain packs.
+- `backend/` contains the FastAPI web backend, hosted session manager, auth,
+  quota checks, dataset uploads, KPI scheduler, and REST/SSE/WebSocket routes.
+- `frontend/` contains the Vite + React + TypeScript + MUI web app, including
+  the multi-session chat UI, AI SDK transport, persisted session state, and tool
+  trace rendering.
+- `configs/` contains the CLI and web agent defaults, including model,
+  domain-pack, trace, and MCP server configuration.
+- `scripts/` contains the local dev launcher, ProteinMCP setup/launch helpers,
+  KPI/SFT utilities, sandbox cleanup, and local launcher installer.
+- `tests/` contains pytest unit and integration tests; `evals/protein_design/`
+  contains the protein-design benchmark scaffold.
+- `docs/` contains architecture, context management, multi-agent, and
+  protein-design domain-pack notes.
+
 ## Quick Start
 
 ### Installation
@@ -27,7 +46,7 @@ protein binder generation, orthogonal validation, and ACE playbook memory.
 ```bash
 git clone git@github.com:huggingface/aidd-intern.git
 cd aidd-intern
-uv sync
+uv sync --extra dev
 uv tool install -e .
 ```
 
@@ -50,7 +69,7 @@ AIDD_INTERN_PROTEINMCP_HOME=~/.cache/aidd-intern/proteinmcp # local ProteinMCP i
 LOCAL_LLM_BASE_URL=http://localhost:8000 # shared fallback for local model prefixes
 LOCAL_LLM_API_KEY=<optional-local-api-key> # optional shared local API key
 HF_TOKEN=<your-hugging-face-token>
-GITHUB_TOKEN=<github-personal-access-token> 
+GITHUB_TOKEN=<github-personal-access-token>
 ```
 If no `HF_TOKEN` is set, the CLI will prompt you to paste one on first launch
 unless you start on a local model. To get a GITHUB_TOKEN follow the tutorial
@@ -58,18 +77,43 @@ unless you start on a local model. To get a GITHUB_TOKEN follow the tutorial
 
 ### Local Web App
 
-To start the local backend and frontend together:
+To start the local backend and frontend together from the repository root:
 
 ```bash
 ./scripts/dev.sh
 ```
 
-The script resolves the repository path from its own location, so it also works
-from any directory:
+The script resolves the repository path from its own location, installs
+frontend dependencies with `npm ci` when `frontend/node_modules` is missing, and
+starts both services. Use a full path to run it from another directory:
 
 ```bash
 /path/to/aidd-intern/scripts/dev.sh
 ```
+
+Default local endpoints:
+
+- Frontend: `http://localhost:5173/`
+- Backend health check: `curl -g http://[::1]:7860/api`
+- Frontend proxy health check: `curl http://localhost:5173/api`
+
+Run the services separately when debugging one side:
+
+```bash
+cd backend
+uv run python -m uvicorn main:app --host ::1 --port 7860
+```
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Vite proxies `/api` and `/auth` to `http://[::1]:7860`; `/api` also proxies
+WebSocket traffic. Override the launcher defaults with
+`AIDD_INTERN_BACKEND_HOST`, `AIDD_INTERN_BACKEND_PORT`,
+`AIDD_INTERN_FRONTEND_HOST`, or `AIDD_INTERN_FRONTEND_PORT`.
 
 To install a user-level launcher:
 
@@ -539,15 +583,24 @@ The agent emits the following events via `event_queue`:
 
 ### Pre-commit Checks
 
-Run Ruff before every commit:
+Run Ruff and the test suite before every commit:
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
+uv run pytest
 ```
 
 If the format check fails, run `uv run ruff format .` and re-run the checks
 before committing.
+
+For frontend changes, also run:
+
+```bash
+cd frontend
+npm run lint
+npm run build
+```
 
 For domain-pack changes, also run:
 
@@ -563,6 +616,26 @@ uv run python evals/protein_design/runner.py \
   --model test-model \
   --output /tmp/protein_design_eval_results.json
 ```
+
+CI runs `uv sync --locked --extra dev`, Ruff, Ruff format check, and
+`uv run pytest` on Python 3.12.
+
+### Code Boundaries
+
+- Generic agent runtime behavior belongs in `agent/core/`.
+- Domain prompts and tools belong in `agent/domain_packs/<name>/`.
+- CLI behavior belongs in `agent/main.py`; hosted web-session orchestration
+  belongs in `backend/session_manager.py`.
+- Backend route changes generally belong under `backend/routes/`.
+- Frontend event transport and message conversion belong under
+  `frontend/src/lib/`; persistent UI/session state belongs under
+  `frontend/src/store/`; reusable UI belongs under `frontend/src/components/`.
+- Long-running scientific or GPU workloads should stay behind subprocess, MCP,
+  container, sandbox, or HF Jobs boundaries rather than importing heavy runtime
+  stacks into the FastAPI process.
+- When changing shared MCP, model, trace, or domain defaults, keep
+  `configs/cli_agent_config.json` and `configs/frontend_agent_config.json`
+  aligned unless the difference is intentional.
 
 ### Adding Built-in Tools
 
