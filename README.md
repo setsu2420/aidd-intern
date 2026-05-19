@@ -5,93 +5,65 @@
 
 # AIDD-Intern
 
-AIDD-Intern autonomously researches, writes, and ships AI drug discovery
-engineering work using the Hugging Face ecosystem, with deep access to docs,
-papers, datasets, cloud compute, and domain-specific AIDD workflows.
+AIDD-Intern 是一个面向 AI drug discovery 的异步智能体运行时。它把 LLM
+模型调用、上下文管理、工具路由、MCP、会话追踪、Web UI 和 AIDD
+领域工具分开实现，让同一个项目既能做无 GPU 的资料调研，也能在具备外部
+计算资源时调度 binder/protein design 工作流。
 
-The project is organized as a reusable agent harness. The generic runtime owns
-sessions, model calls, tool routing, approvals, persistence, telemetry, and UI
-events; domain packs add specialized prompts and tools. The default domain pack
-supports AIDD binder workflows, and the optional `protein_design` pack adds
-protein binder generation, orthogonal validation, and ACE playbook memory.
+本项目不会在本地进程中加载 LLM 权重，也不会把 BindCraft、BoltzGen、
+PXDesign、Chai-1、Protenix 等重型科学工具直接导入 FastAPI 或 CLI
+进程。没有本地 GPU 时，推荐使用远程 LLM API 和 `--domain-pack none`
+做调研任务；需要生成或验证蛋白 binder 时，再通过 MCP、子进程、容器、集群
+或 Hugging Face Jobs 接入对应工具。
 
-## Node.js CLI Package
+## 目录
 
-The npm package is the lightweight operational harness for a running
-AIDD-Intern backend. It is intentionally separate from the Python interactive
-agent runtime: the Node CLI runs smoke checks, integration checks, and
-evaluation fixtures against `/api`.
+- [核心功能](#核心功能)
+- [快速开始](#快速开始)
+- [配置 API 和搜索](#配置-api-和搜索)
+- [使用说明](#使用说明)
+- [工具和 MCP 配置](#工具和-mcp-配置)
+- [BindCraft、BoltzGen、PXDesign](#bindcraftboltzgenpxdesign)
+- [上下文和模型策略](#上下文和模型策略)
+- [项目结构](#项目结构)
+- [开发和测试](#开发和测试)
+- [会话追踪和分享](#会话追踪和分享)
 
-Install from npm after the package is published:
+## 核心功能
 
-```bash
-npm install -g aidd-intern
-aidd-intern --help
-```
+- **带来源链接的调研**：内置 `research` 子智能体、`web_search`、
+  `literature_lookup`、`hf_papers`、GitHub/HF 文档工具和 `aidd_bio`。
+  调研输出要求给出论文、官方文档、代码仓库、数据集/模型卡或网页链接。
+- **真正的 Google Search**：配置 `GOOGLE_SEARCH_API_KEY` 和
+  `GOOGLE_SEARCH_ENGINE_ID` 后，`web_search` 使用 Google Custom Search
+  JSON API，并支持 `recent_days` 和 `sort_by_date` 优先查找近期资料。
+- **AIDD binder 工作流**：默认 `aidd_binder` 域包提供
+  `binder_design`，用于规划 binder campaign、创建项目 manifest、检查
+  generator 输出、排序候选 binder、标记验证缺口并导出可复用 skill card。
+- **Protein design 扩展**：可选 `protein_design` 域包提供 PXDesign、
+  BoltzGen、BindCraft 生成工具，以及 Chai-1、Protenix、Foldseek 验证边界。
+- **MCP 集成**：默认配置 Hugging Face MCP 和本地 ProteinMCP stdio
+  launcher。冷启动会跳过当前不可用的 MCP，避免无 token 或无 GPU 时阻塞。
+- **上下文窗口自适应**：运行时会根据接入模型和
+  `AIDD_INTERN_MODEL_MAX_TOKENS` 调整压缩策略。未知本地模型默认采用保守的
+  65,536 token 策略，避免长任务因上下文溢出失败。
+- **本地 CLI 和 Web UI**：Python CLI 用于真实交互式/无头智能体运行；
+  FastAPI + React Web UI 用于浏览器会话；Node.js CLI 用于 smoke、
+  integration 和 eval 测试。
+- **会话追踪**：会话可保存为 Claude Code JSONL 兼容格式，并上传到用户自己的
+  Hugging Face 私有 dataset，便于复盘工具调用和模型回答。
 
-Use it against a local or hosted backend:
+## 快速开始
 
-```bash
-aidd-intern smoke
-aidd-intern integration --json
-aidd-intern eval --fixtures fixtures/prompts.json --limit 3
-aidd-intern eval --judge
-```
+### 依赖
 
-Useful environment variables:
+- Python 3.11+
+- `uv`
+- Git
+- Node.js 22+，仅在开发前端或 npm harness 时需要
+- Conda/Mamba 和 GPU，仅在安装 PXDesign、BindCraft 等本地科学工具时需要
 
-```bash
-AIDD_INTERN_BACKEND_URL=http://[::1]:7860
-AIDD_INTERN_HF_TOKEN=<optional-hugging-face-token>
-AIDD_INTERN_TEST_MODEL=<optional-model-id>
-AIDD_INTERN_JUDGE_MODEL=openai/gpt-4.1-mini
-AIDD_INTERN_JUDGE_API_KEY=<optional-openai-compatible-key>
-```
-
-Legacy `HARNESS_*` variables still work for migration, but new automation
-should prefer `AIDD_INTERN_*`.
-
-Source development:
-
-```bash
-npm ci
-npm run build
-npm run lint
-npm test
-npm pack --dry-run
-```
-
-The publish surface is constrained by `package.json` `files` and `exports`, so
-the npm tarball contains only `dist/`, `fixtures/`, `README.md`, and `LICENSE`.
-
-## Project Layout
-
-- `agent/` contains the reusable async agent runtime, CLI, context manager,
-  model routing, session persistence/upload, tool router, built-in tools, roles,
-  and domain packs.
-- `backend/` contains the FastAPI web backend, hosted session manager, auth,
-  quota checks, dataset uploads, KPI scheduler, and REST/SSE/WebSocket routes.
-- `frontend/` contains the Vite + React + TypeScript + MUI web app, including
-  the multi-session chat UI, AI SDK transport, persisted session state, and tool
-  trace rendering.
-- `configs/` contains the CLI and web agent defaults, including model,
-  domain-pack, trace, and MCP server configuration.
-- `scripts/` contains the local dev launcher, ProteinMCP setup/launch helpers,
-  KPI/SFT utilities, sandbox cleanup, and local launcher installer.
-- `src/` contains the npm package source for `aidd-intern`. It exposes the
-  Commander CLI, typed backend client, SSE parser, trace collector, and
-  evaluation utilities.
-- `fixtures/` contains evaluation prompts shipped with the npm package.
-- `tests/` contains pytest unit and integration tests; `evals/protein_design/`
-  contains the protein-design benchmark scaffold.
-- `tests/harness/` contains the Node CLI/package tests that do not require a
-  running backend.
-- `docs/` contains architecture, context management, multi-agent, binder
-  workflow, and protein-design domain-pack notes.
-
-## Quick Start
-
-### Installation
+### 安装 Python 运行时
 
 ```bash
 git clone git@github.com:huggingface/aidd-intern.git
@@ -100,56 +72,40 @@ uv sync --extra dev
 uv tool install -e .
 ```
 
-#### That's it. Now `aidd-intern` works from any directory:
+安装后可以从任意目录运行：
 
 ```bash
 aidd-intern
 ```
 
-Create a `.env` file in the project root (or export these in your shell):
+### 无本地 GPU 的调研模式
+
+如果只希望完成调研、资料查找、代码阅读和方案整理，不运行 binder/protein
+生成工具，使用 `none` 域包：
 
 ```bash
-ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using anthropic models
-OPENAI_API_KEY=<your-openai-api-key> # if using openai models
-OPENROUTER_API_KEY=<your-openrouter-api-key> # if using openrouter/<model>
-SILICONFLOW_API_KEY=<your-siliconflow-api-key> # if using siliconflow/<model>
-AIDD_INTERN_DEFAULT_MODEL_ID=llamacpp/qwen3.6-35b-a3b-gguf # replace suffix with /v1/models id if needed
-LLAMACPP_BASE_URL=http://127.0.0.1:30000 # local SGLang/vLLM-style OpenAI-compatible endpoint
-AIDD_INTERN_PROTEINMCP_HOME=~/.cache/aidd-intern/proteinmcp # local ProteinMCP installs
-LOCAL_LLM_BASE_URL=http://localhost:8000 # shared fallback for local model prefixes
-LOCAL_LLM_API_KEY=<optional-local-api-key> # optional shared local API key
-GOOGLE_SEARCH_API_KEY=<google-custom-search-api-key> # enables real Google Search results
-GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id> # required with the API key
-HF_TOKEN=<your-hugging-face-token>
-GITHUB_TOKEN=<github-personal-access-token>
+aidd-intern --domain-pack none --model openrouter/openai/gpt-5.2 \
+  "调研 2026 年最新的 protein binder design 工具。请优先使用 Google Search，给出来源链接和发布日期。"
 ```
-If no `HF_TOKEN` is set, the CLI will prompt you to paste one on first launch
-unless you start on a local model. To get a GITHUB_TOKEN follow the tutorial
-[here](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
 
-### Local Web App
+这种模式会保留通用工具、Web 搜索、论文/文档/GitHub 检索和本地文件工具，
+但不会启用 binder/protein 专用工具提示。
 
-To start the local backend and frontend together from the repository root:
+### 本地 Web App
+
+从仓库根目录启动后端和前端：
 
 ```bash
 ./scripts/dev.sh
 ```
 
-The script resolves the repository path from its own location, installs
-frontend dependencies with `npm ci` when `frontend/node_modules` is missing, and
-starts both services. Use a full path to run it from another directory:
+默认地址：
 
-```bash
-/path/to/aidd-intern/scripts/dev.sh
-```
+- 前端：`http://localhost:5173/`
+- 后端健康检查：`curl -g http://[::1]:7860/api`
+- 前端代理检查：`curl http://localhost:5173/api`
 
-Default local endpoints:
-
-- Frontend: `http://localhost:5173/`
-- Backend health check: `curl -g http://[::1]:7860/api`
-- Frontend proxy health check: `curl http://localhost:5173/api`
-
-Run the services separately when debugging one side:
+也可以分开启动：
 
 ```bash
 cd backend
@@ -162,185 +118,355 @@ npm ci
 npm run dev
 ```
 
-Vite proxies `/api` and `/auth` to `http://[::1]:7860`; `/api` also proxies
-WebSocket traffic. Override the launcher defaults with
-`AIDD_INTERN_BACKEND_HOST`, `AIDD_INTERN_BACKEND_PORT`,
-`AIDD_INTERN_FRONTEND_HOST`, or `AIDD_INTERN_FRONTEND_PORT`.
+## 配置 API 和搜索
 
-To install a user-level launcher:
+在仓库根目录创建 `.env`，或在 shell 中导出变量。不要把 `.env`、token、
+模型权重、数据库、checkpoint 或生成的结构批次提交到 GitHub。
 
 ```bash
-./scripts/install-local-launcher.sh
-aidd-intern-dev
+# LLM provider，根据你选择的模型设置其一或多个
+OPENAI_API_KEY=<your-openai-api-key>
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
+OPENROUTER_API_KEY=<your-openrouter-api-key>
+SILICONFLOW_API_KEY=<your-siliconflow-api-key>
+
+# 默认模型。也可以每次用 --model 覆盖
+AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
+
+# 真正的 Google Search。两个变量必须同时设置
+GOOGLE_SEARCH_API_KEY=<google-custom-search-json-api-key>
+GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id>
+
+# 可选别名，代码也会识别
+GOOGLE_API_KEY=<google-custom-search-json-api-key>
+GOOGLE_CSE_ID=<programmable-search-engine-id>
+
+# Hugging Face 与 GitHub 工具
+HF_TOKEN=<your-hugging-face-token>
+GITHUB_TOKEN=<github-personal-access-token>
+
+# 本地或局域网 OpenAI-compatible 推理服务，可选
+LOCAL_LLM_BASE_URL=http://localhost:8000
+LOCAL_LLM_API_KEY=<optional-local-api-key>
+
+# ProteinMCP 本地安装目录，可选
+AIDD_INTERN_PROTEINMCP_HOME=~/.cache/aidd-intern/proteinmcp
 ```
 
-By default, this creates `~/.local/bin/aidd-intern-dev`. Make sure
-`~/.local/bin` is in your `PATH`.
+相关官方入口：
 
-### Python Agent Runtime Usage
+- Google Custom Search JSON API:
+  https://developers.google.com/custom-search/v1/overview
+- Google Programmable Search Engine:
+  https://programmablesearchengine.google.com/
+- OpenAI API keys: https://platform.openai.com/api-keys
+- Anthropic Console: https://console.anthropic.com/
+- OpenRouter API keys: https://openrouter.ai/settings/keys
+- Hugging Face access tokens:
+  https://huggingface.co/docs/hub/security-tokens
+- GitHub fine-grained personal access tokens:
+  https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
 
-The commands below refer to the Python interactive/headless runtime installed
-with `uv tool install -e .`. They are not the npm test harness commands above.
+### Google Search 行为
 
-**Interactive mode** (start a chat session):
+`web_search` 的优先级如下：
+
+1. 同时设置 `GOOGLE_SEARCH_API_KEY` 和 `GOOGLE_SEARCH_ENGINE_ID` 时，使用
+   Google Custom Search JSON API。
+2. 调用参数包含 `recent_days` 时，Google 请求会发送 `dateRestrict=dN`。
+3. 调用参数包含 `sort_by_date=true` 时，Google 请求会发送 `sort=date`。
+4. 没有 Google 凭据时，开发环境会使用内置 HTML 搜索 fallback，并在结果中标注
+   provider。
+5. 已配置 Google 但 Google 返回错误时，默认直接报错。只有设置
+   `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` 才会退回 fallback。
+
+可以用真实 Google 凭据跑 live test：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 AIDD_INTERN_LIVE_WEB_SEARCH_TESTS=1 \
+  uv run pytest -p no:cacheprovider tests/integration/test_web_search_live.py -s
+```
+
+该测试会调用真实 Google Custom Search。未配置凭据时会跳过，不使用 mock data。
+
+## 使用说明
+
+### Python 智能体 CLI
+
+交互模式：
 
 ```bash
 aidd-intern
 ```
 
-**Headless mode** (single prompt, auto-approve):
+无头模式，单次任务：
 
 ```bash
-aidd-intern "fine-tune llama on my dataset"
+aidd-intern "调研最新的 AlphaFold-style complex validation 方法，并给出来源链接"
 ```
 
-**Options:**
+常用参数：
 
 ```bash
-aidd-intern --model anthropic/claude-opus-4-7 "your prompt"   # requires ANTHROPIC_API_KEY
-aidd-intern --model openai/gpt-5.5 "your prompt"              # requires OPENAI_API_KEY
-aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"   # requires OPENROUTER_API_KEY
-aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt" # requires SILICONFLOW_API_KEY
-aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
-aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
-aidd-intern --sandbox-tools "your prompt"                         # use HF Space sandbox tools
-aidd-intern --max-iterations 100 "your prompt"
-aidd-intern --no-stream "your prompt"
+aidd-intern --model openai/gpt-5.5 "your prompt"
+aidd-intern --model anthropic/claude-opus-4-7 "your prompt"
+aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"
+aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt"
+aidd-intern --domain-pack none "research-only task"
+aidd-intern --domain-pack aidd_binder "plan a binder campaign"
+aidd-intern --domain-pack protein_design "run protein design tools"
+aidd-intern --sandbox-tools "test this script in an HF Space sandbox"
+aidd-intern --max-iterations 100 "long task"
+aidd-intern --no-stream "disable streaming"
 ```
 
-Run `aidd-intern` then `/model` to see the full list of suggested model ids
-(Claude, GPT, HF-router models like MiniMax, Kimi, GLM, DeepSeek, and local
-model prefixes).
-
-**Local models:**
-
-Local model support uses OpenAI-compatible HTTP endpoints through LiteLLM. The
-agent does not load model weights directly from disk; start your inference
-server first, then select it with a provider-specific model prefix:
-
-```bash
-aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
-aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
-```
-
-Inside interactive mode, switch with `/model`:
+交互模式内可以用 `/model` 查看和切换模型：
 
 ```text
+/model
+/model openrouter/openai/gpt-5.2
 /model ollama/llama3.1:8b
-/model lm_studio/google/gemma-3-4b
-/model llamacpp/llama-3.1-8b-instruct
 ```
 
-Supported local prefixes are `ollama/`, `vllm/`, `lm_studio/`, and
-`llamacpp/`. Set `LOCAL_LLM_BASE_URL` and optional `LOCAL_LLM_API_KEY` to use
-one shared local endpoint, or override a specific provider with its matching
-`*_BASE_URL` / `*_API_KEY` variable, such as `OLLAMA_BASE_URL` or
-`VLLM_API_KEY`. Provider-specific variables take precedence over the shared
-local variables. Base URLs may include or omit `/v1`.
+### 本地 OpenAI-compatible 模型
 
-For a vLLM server, the suffix after `vllm/` must match one of the model ids
-returned by the server's OpenAI-compatible `GET /v1/models` endpoint. If the
-server was launched with `--served-model-name qwen3.6-35b-a3b-gguf`, use
-`AIDD_INTERN_DEFAULT_MODEL_ID=llamacpp/qwen3.6-35b-a3b-gguf`; otherwise set it to
-the exact returned id, for example `vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct`.
-
-Unknown local and OpenAI-compatible models default to a conservative 65,536
-token context policy. The session context manager tightens compaction
-thresholds, keeps fewer untouched turns, and truncates oversized messages for
-65K models so long autonomous runs do not fail with provider context-window
-errors. Override the detected window when your serving stack exposes a
-different limit:
+AIDD-Intern 通过 LiteLLM 调用 OpenAI-compatible HTTP 服务。它不负责启动
+Ollama、vLLM、LM Studio 或 llama.cpp，也不会在 CLI 进程中加载模型权重。
 
 ```bash
-AIDD_INTERN_MODEL_MAX_TOKENS=32768 aidd-intern --model vllm/my-small-model
-AIDD_INTERN_MODEL_MAX_TOKENS=131072 aidd-intern --model ollama/qwen-long
+aidd-intern --model ollama/llama3.1:8b "your prompt"
+aidd-intern --model vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct "your prompt"
+aidd-intern --model lm_studio/google/gemma-3-4b "your prompt"
+aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
 ```
 
-For a local, no-GPU, research-only workflow, keep the agent on generic tools
-and disable the binder/protein domain pack:
+支持的本地前缀包括 `ollama/`、`vllm/`、`lm_studio/`、`llamacpp/`。可用
+`LOCAL_LLM_BASE_URL` 和 `LOCAL_LLM_API_KEY` 设置共享端点，也可以用
+`OLLAMA_BASE_URL`、`VLLM_API_KEY` 等 provider-specific 变量覆盖。
+
+### Node.js CLI package
+
+`src/` 下的 Node CLI 是后端测试和评测 harness，不是 Python 交互式智能体。
+它适合 CI 或发布 npm package 后给用户跑 smoke、integration、eval。
 
 ```bash
-aidd-intern --domain-pack none --model openrouter/openai/gpt-5.2 "research the latest tools for X"
+npm ci
+npm run build
+npm run lint
+npm test
+npm pack --dry-run
 ```
 
-That mode keeps the prompt focused on research, web search, docs, papers, and
-GitHub examples instead of binder or protein-generation workflows.
+连接本地或线上后端：
 
-## Research Sources
+```bash
+aidd-intern --url http://[::1]:7860 smoke
+aidd-intern --json integration
+aidd-intern eval --fixtures fixtures/prompts.json --limit 3
+aidd-intern eval --judge
+```
 
-The research sub-agent is built to return source-backed findings. It prefers
-official docs, papers, dataset/model cards, GitHub code, and live web results.
-When `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` are set, `web_search`
-uses Google Custom Search directly and can prioritize recent pages with
-`recent_days` and `sort_by_date`.
-Set `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` only if you want DuckDuckGo
-fallback when Google Search is unavailable.
+注意：Python CLI 和 Node CLI 都叫 `aidd-intern`。开发时优先明确当前 PATH
+指向的是 `uv tool install -e .` 安装的 Python 运行时，还是 `npm link`/全局
+npm 安装的 Node harness。
 
-**ProteinMCP tools:**
+## 工具和 MCP 配置
 
-The default CLI and web configs register ProteinMCP's BindCraft, BoltzGen, and PXDesign
-MCP servers through local stdio launchers. They do not use Docker. Install the
-local source repos and conda environments once:
+默认配置文件：
+
+- CLI: `configs/cli_agent_config.json`
+- Web: `configs/frontend_agent_config.json`
+
+用户级 CLI 配置：
+
+```bash
+~/.config/aidd-intern/cli_agent_config.json
+```
+
+也可以用环境变量指定：
+
+```bash
+AIDD_INTERN_CLI_CONFIG=/path/to/cli_agent_config.json
+```
+
+配置文件支持 `${VAR}` 和 `${VAR:-default}` 环境变量替换。新增或修改 MCP
+默认值时，请保持 CLI 和 frontend 配置一致，除非确实需要差异。
+
+默认 MCP：
+
+- `hf-mcp-server`: HTTP endpoint `https://hf.co/mcp`。未设置 `HF_TOKEN`
+  时冷启动会跳过，避免 Hugging Face OAuth 登录错误拖慢启动。
+- `proteinmcp-bindcraft`: 本地 stdio launcher。
+- `proteinmcp-boltzgen`: 本地 stdio launcher。
+- `proteinmcp-pxdesign`: 本地 stdio launcher。
+
+ProteinMCP 的冷启动规则：
+
+- `--domain-pack protein_design` 时自动尝试连接 ProteinMCP。
+- 其他域包下，只有设置 `AIDD_INTERN_ENABLE_PROTEINMCP=1` 才会连接。
+- launcher 会自动 clone 缺失 repo，但默认不会运行重型 `quick_setup.sh`。
+  如果确实想让 launcher 自动 setup，设置
+  `AIDD_INTERN_PROTEINMCP_AUTO_SETUP=1`。
+
+## BindCraft、BoltzGen、PXDesign
+
+这些工具用于真实 binder/protein design，通常需要 GPU、Conda/Mamba、
+模型权重和较长运行时间。无 GPU 的本地电脑建议只做调研、规划、候选结果解读
+和报告整理，不直接运行生成任务。
+
+### 一次性安装
+
+安装全部本地 ProteinMCP 工具：
 
 ```bash
 scripts/setup-proteinmcp-local.sh all
 ```
 
-The setup installs under `AIDD_INTERN_PROTEINMCP_HOME`, defaulting to
-`~/.cache/aidd-intern/proteinmcp`. To install only one server, pass
-`bindcraft_mcp`, `boltzgen_mcp`, or `pxdesign_mcp`. BoltzGen setup defaults to `--skip-models`
-so it does not block on the model download prompt; set
-`AIDD_INTERN_BOLTZGEN_SETUP_ARGS=--download-models` if you want to fetch them
-during setup. BindCraft setup downloads AlphaFold2 weights by default; set
-`AIDD_INTERN_BINDCRAFT_SETUP_ARGS=--skip-weights` for a lighter setup that can
-start the MCP but cannot run full designs until weights are installed. PXDesign
-uses the official Conda installer by default; set `PXDESIGN_BIN` if you already
-have a working PXDesign CLI elsewhere.
+只安装某一个：
 
-Do not commit model weights, checkpoints, databases, or generated structure
-batches to GitHub. Keep large scientific assets in a local cache, shared
-filesystem, object store, Hugging Face Hub repo, or container volume, then
-point tools at them with environment variables. Common examples:
+```bash
+scripts/setup-proteinmcp-local.sh bindcraft_mcp
+scripts/setup-proteinmcp-local.sh boltzgen_mcp
+scripts/setup-proteinmcp-local.sh pxdesign_mcp
+```
+
+默认安装目录：
+
+```bash
+~/.cache/aidd-intern/proteinmcp
+```
+
+可通过环境变量覆盖：
 
 ```bash
 AIDD_INTERN_PROTEINMCP_HOME=/data/aidd-intern/proteinmcp
-AIDD_INTERN_BINDCRAFT_SETUP_ARGS=--skip-weights
-AIDD_INTERN_BOLTZGEN_SETUP_ARGS=--skip-models
+```
+
+### 本地启动单个 MCP server
+
+```bash
+scripts/run-proteinmcp-local.sh bindcraft_mcp
+scripts/run-proteinmcp-local.sh boltzgen_mcp
+scripts/run-proteinmcp-local.sh pxdesign_mcp
+```
+
+### BindCraft
+
+默认 repo：
+
+```bash
+https://github.com/MacromNex/bindcraft_mcp.git
+```
+
+安装 BindCraft MCP：
+
+```bash
+scripts/setup-proteinmcp-local.sh bindcraft_mcp
+```
+
+更轻量的安装方式：
+
+```bash
+AIDD_INTERN_BINDCRAFT_SETUP_ARGS=--skip-weights \
+  scripts/setup-proteinmcp-local.sh bindcraft_mcp
+```
+
+`--skip-weights` 可以让 MCP 环境先搭起来，但没有 AlphaFold2 权重时不能运行完整
+design。已有内部 BindCraft wrapper 时，可以让 protein design 域包直接调用：
+
+```bash
 PROTEIN_DESIGN_BINDCRAFT_CMD=/opt/bindcraft/run_bindcraft.sh
+```
+
+### BoltzGen
+
+默认 repo：
+
+```bash
+https://github.com/MacromNex/boltzgen_mcp.git
+```
+
+安装：
+
+```bash
+scripts/setup-proteinmcp-local.sh boltzgen_mcp
+```
+
+BoltzGen setup 默认带 `--skip-models`，避免安装时卡在模型下载。需要安装阶段下载
+模型时：
+
+```bash
+AIDD_INTERN_BOLTZGEN_SETUP_ARGS=--download-models \
+  scripts/setup-proteinmcp-local.sh boltzgen_mcp
+```
+
+已有 wrapper 时：
+
+```bash
 PROTEIN_DESIGN_BOLTZGEN_CMD=/opt/boltzgen/bin/boltzgen
+```
+
+### PXDesign
+
+默认 repo：
+
+```bash
+https://github.com/bytedance/PXDesign.git
+```
+
+安装：
+
+```bash
+scripts/setup-proteinmcp-local.sh pxdesign_mcp
+```
+
+PXDesign setup 使用官方 Conda installer，不使用 Docker。没有 `nvidia-smi`
+或 CUDA 自动检测失败时，显式指定 CUDA：
+
+```bash
+AIDD_INTERN_PXDESIGN_CUDA_VERSION=12.1 \
+  scripts/setup-proteinmcp-local.sh pxdesign_mcp
+```
+
+已有 PXDesign CLI 时：
+
+```bash
+PXDESIGN_BIN=/opt/pxdesign/bin/pxdesign
 PROTEIN_DESIGN_PXDESIGN_CMD=/opt/pxdesign/bin/pxdesign
 ```
 
-If your cluster or container image already provides weights, set the command
-variables to wrappers that export the tool-specific weight paths before
-launching the underlying program.
+### GPU 和重型资产
 
-The stdio launcher auto-clones missing MCP repos, but it does not run the heavy
-`quick_setup.sh` step unless `AIDD_INTERN_PROTEINMCP_AUTO_SETUP=1` is set.
+不要提交以下内容：
 
-**Domain packs:**
+- AlphaFold2/BindCraft/PXDesign/BoltzGen 权重
+- checkpoint、数据库、索引和大型结构批次
+- 生成结果目录、trace dump、私有数据集
 
-AIDD-Intern defaults to the `aidd_binder` domain pack. The generic agent
-runtime owns sessions, tool routing, approvals, persistence, and UI events; the
-domain pack contributes binder-specific workflow tools and prompt policy.
+推荐将大型资产放在本地 cache、共享文件系统、对象存储、Hugging Face Hub 私有
+repo、容器 volume 或集群路径，再用环境变量指向它们。
 
-Supported values:
+Protein design 工具会尽量检查 GPU 空闲显存。没有 `nvidia-smi` 但调度器已分配
+显存时，可以提供 hint：
 
-- `aidd_binder`: default AIDD binder workflow pack. Registers `binder_design`,
-  which plans binder campaigns, creates project manifests, inspects generator
-  outputs, ranks candidates from BindCraft, BoltzGen, PXDesign, or compatible
-  CSV metric files, flags validation gaps, keeps diverse representatives by
-  fold cluster, and can export a reusable skill card from a completed
-  campaign. See `docs/aidd-binder-workflow-guide.md`.
-- `protein_design`: protein binder design pack. Registers generation tools for
-  PXdesign, BoltzGen, and BindCraft; validation helpers for Chai-1, Protenix,
-  and Foldseek; approval thresholds for expensive GPU runs; and an ACE playbook
-  tool for campaign memory.
-- `none`: generic runtime without domain-specific workflow tools.
+```bash
+PROTEIN_DESIGN_GPU_FREE_MB=24000
+```
 
-Example config override:
+## 域包
+
+支持的 `--domain-pack`：
+
+- `aidd_binder`：默认域包。提供 `binder_design`，用于 binder campaign
+  规划、manifest、输出检查、候选排序、验证缺口标记和 skill 导出。详见
+  `docs/aidd-binder-workflow-guide.md`。
+- `protein_design`：启用 PXDesign、BoltzGen、BindCraft 生成工具，Chai-1、
+  Protenix、Foldseek 验证边界，以及 ACE-style campaign memory。需要外部工具
+  和通常意义上的 GPU 环境。
+- `none`：通用运行时，不加载领域专用工作流工具。适合无 GPU 调研、代码阅读、
+  文档整理和普通工程任务。
+
+配置文件覆盖示例：
 
 ```json
 {
@@ -348,320 +474,54 @@ Example config override:
 }
 ```
 
-Protein design details:
+## 上下文和模型策略
 
-- `agent/domain_packs/protein_design/tools.py` wraps generator command
-  boundaries.
-- `agent/domain_packs/protein_design/validation.py` wraps Chai-1, Protenix, and
-  Foldseek validation boundaries.
-- `agent/domain_packs/protein_design/ace.py` implements ACE-style structured
-  playbooks for incremental context engineering.
-- `agent/roles/` and `agent/tools/role_handoff_tool.py` provide structured
-  role handoffs for supervisor, researcher, executor, verifier, reviewer, and
-  protein-design specialist roles.
-- `evals/protein_design/` contains a headless benchmark scaffold and container
-  environment templates.
+AIDD-Intern 的上下文预算不固定，应随接入 LLM 调整：
 
-Useful docs:
+- 运行时会读取模型/provider 信息。
+- 未知本地模型默认使用保守 65,536 token 策略。
+- 上下文接近阈值时会触发压缩，减少长任务因 provider context window
+  错误中断。
+- 可用 `AIDD_INTERN_MODEL_MAX_TOKENS` 显式覆盖。
 
-- `docs/context-management-guide.md`
-- `docs/multi-agent-collaboration-guide.md`
-- `docs/protein-design-domain-pack-guide.md`
-- `docs/protein-design-optimization-roadmap.md`
-- `docs/pd-l1-binder-design-report.md`
-- `docs/aidd-intern-architecture-harness-guide.md`
-
-**CLI tool runtime:**
-
-By default, the CLI runs `bash`, `read`, `write`, and `edit` on your local
-filesystem. To use HF Space sandbox tools instead, including `sandbox_create`,
-opt in with `--sandbox-tools`:
+示例：
 
 ```bash
-aidd-intern --sandbox-tools "test this training script in a GPU sandbox"
-aidd-intern --model llamacpp/ggml-org/gemma-3-1b-it-GGUF --sandbox-tools
+AIDD_INTERN_MODEL_MAX_TOKENS=32768 \
+  aidd-intern --model vllm/my-small-model "your prompt"
+
+AIDD_INTERN_MODEL_MAX_TOKENS=131072 \
+  aidd-intern --model ollama/qwen-long "your prompt"
 ```
 
-Sandbox tool runtime requires `HF_TOKEN`, even when the selected model is local,
-because it creates private HF Spaces. You can also make sandbox tools your CLI
-default in `~/.config/aidd-intern/cli_agent_config.json`:
-
-```json
-{ "tool_runtime": "sandbox" }
-```
-
-Use the default local runtime when you want tools to inspect or edit files in
-your checkout. Use sandbox runtime when you want the agent to create or replace
-an HF Space sandbox, test code remotely, or request GPU sandbox hardware before
-launching larger HF Jobs.
-
-**Google Search:**
-
-`web_search` uses Google Custom Search JSON API when these variables are set:
+如果你只做调研，优先选择上下文窗口较大的远程模型，并明确要求输出来源链接：
 
 ```bash
-GOOGLE_SEARCH_API_KEY=...
-GOOGLE_SEARCH_ENGINE_ID=...
+aidd-intern --domain-pack none --model openrouter/openai/gpt-5.2 \
+  "请调研 X。要求：优先搜索最近 365 天资料；每个结论都给出链接；区分论文、官方文档和博客。"
 ```
 
-Without those credentials, local development falls back to the built-in HTML
-search backend and the tool output labels the provider as a fallback.
+## 项目结构
 
-**AIDD biomedical sources:**
+- `agent/`：异步 agent runtime、CLI 入口、上下文管理、工具路由、会话持久化、
+  模型切换、内置工具和 domain packs。
+- `backend/`：FastAPI 后端，负责 hosted session、auth、quota、dataset
+  upload、KPI scheduling、REST/SSE/WebSocket API。
+- `frontend/`：Vite + React + TypeScript + MUI Web App。
+- `configs/`：CLI 和 frontend 共享默认配置，包括模型、domain pack、trace 和
+  MCP server。
+- `scripts/`：本地 dev launcher、ProteinMCP setup/run helper、KPI/SFT 工具和
+  sandbox cleanup。
+- `src/`：Node.js CLI package 源码，用于 smoke、integration 和 eval harness。
+- `fixtures/`：Node CLI eval prompts。
+- `tests/`：pytest 和 Node harness tests。
+- `evals/protein_design/`：protein design benchmark scaffold。
+- `docs/`：架构、上下文管理、多智能体协作、binder workflow 和 protein design
+  domain pack 文档。
 
-The built-in `aidd_bio` tool searches and fetches records from RCSB PDB,
-AlphaFold DB, UniProt, and Foldseek. It supports bounded previews for
-PDB/mmCIF/FASTA/JSON content so long structure files do not flood the model
-context.
+## 开发和测试
 
-**Protein design execution boundaries:**
-
-The protein-design pack keeps heavyweight scientific tooling outside the Python
-agent process. Local runs expect tool commands to be available on `PATH` or
-configured through environment variables:
-
-```bash
-PROTEIN_DESIGN_PXDESIGN_CMD=pxdesign
-PROTEIN_DESIGN_BOLTZGEN_CMD=boltzgen
-PROTEIN_DESIGN_BINDCRAFT_CMD=bindcraft
-PROTEIN_DESIGN_CHAI1_CMD=chai1
-PROTEIN_DESIGN_PROTENIX_CMD=protenix
-PROTEIN_DESIGN_FOLDSEEK_CMD=foldseek
-```
-
-Generator wrappers inspect available GPU memory before launching heavy work.
-When GPU headroom is low, the pack downscales sampling budgets or blocks the
-run before allocation, returning a `gpu_plan` that explains the selected device,
-free memory, and any adjustments. In environments without `nvidia-smi`, set a
-test or scheduler-provided memory hint:
-
-```bash
-PROTEIN_DESIGN_GPU_FREE_MB=24000
-```
-
-For containerized runs, use the generation and validation Dockerfile scaffolds
-under `evals/protein_design/environments/` and keep licensed packages such as
-PyRosetta on approved internal distribution channels.
-
-## Sharing Traces
-
-Every session is auto-uploaded to your **own private Hugging Face dataset**
-in [Claude Code JSONL format](https://huggingface.co/changelog/agent-trace-viewer),
-which the HF Agent Trace Viewer auto-detects so you can browse turns, tool
-calls, and model responses directly on the Hub.
-
-By default the dataset is named `{your-hf-username}/aidd-intern-sessions` and is
-**created private**. You can flip it to public from inside the CLI:
-
-```bash
-/share-traces            # show current visibility + dataset URL
-/share-traces public     # publish (anyone can view)
-/share-traces private    # lock it back down
-```
-
-You can also flip visibility from the dataset page on huggingface.co — the
-agent honours whatever you set there for subsequent uploads.
-
-To opt out entirely, set in your CLI config (e.g. `configs/cli_agent_config.json`
-or `~/.config/aidd-intern/cli_agent_config.json`):
-
-```json
-{ "share_traces": false }
-```
-
-To override the destination repo, set:
-
-```json
-{ "personal_trace_repo_template": "{hf_user}/my-custom-traces" }
-```
-
-The shared `smolagents/aidd-intern-sessions` dataset is unrelated and only
-receives anonymized telemetry rows used by the backend KPI scheduler.
-
-## Supported Gateways
-
-AIDD-Intern currently supports one-way notification gateways from CLI sessions.
-These gateways send out-of-band status updates; they do not accept inbound chat
-messages.
-
-### Slack
-
-Slack notifications use the Slack Web API to post messages when the agent needs
-approval, hits an error, or completes a turn. Create a Slack app with a bot token
-that has `chat:write`, invite the bot to the target channel, then set:
-
-```bash
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_CHANNEL_ID=C...
-```
-
-The CLI automatically creates a `slack.default` destination when both variables
-are present. Optional environment variables for the env-only default:
-
-```bash
-AIDD_INTERN_SLACK_NOTIFICATIONS=false
-AIDD_INTERN_SLACK_DESTINATION=slack.ops
-AIDD_INTERN_SLACK_AUTO_EVENTS=approval_required,error,turn_complete
-AIDD_INTERN_SLACK_ALLOW_AGENT_TOOL=true
-AIDD_INTERN_SLACK_ALLOW_AUTO_EVENTS=true
-```
-
-For a persistent user-level config, put overrides in
-`~/.config/aidd-intern/cli_agent_config.json` or point `AIDD_INTERN_CLI_CONFIG` at a
-JSON file:
-
-```json
-{
-  "messaging": {
-    "enabled": true,
-    "auto_event_types": ["approval_required", "error", "turn_complete"],
-    "destinations": {
-      "slack.ops": {
-        "provider": "slack",
-        "token": "${SLACK_BOT_TOKEN}",
-        "channel": "${SLACK_CHANNEL_ID}",
-        "allow_agent_tool": true,
-        "allow_auto_events": true
-      }
-    }
-  }
-}
-```
-
-## Architecture
-
-### Component Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         User/CLI                            │
-└────────────┬─────────────────────────────────────┬──────────┘
-             │ Operations                          │ Events
-             ↓ (user_input, exec_approval,         ↑
-      submission_queue  interrupt, compact, ...)  event_queue
-             │                                          │
-             ↓                                          │
-┌────────────────────────────────────────────────────┐  │
-│            submission_loop (agent_loop.py)         │  │
-│  ┌──────────────────────────────────────────────┐  │  │
-│  │  1. Receive Operation from queue             │  │  │
-│  │  2. Route to handler (run_agent/compact/...) │  │  │
-│  └──────────────────────────────────────────────┘  │  │
-│                      ↓                             │  │
-│  ┌──────────────────────────────────────────────┐  │  │
-│  │         Handlers.run_agent()                 │  ├──┤
-│  │                                              │  │  │
-│  │  ┌────────────────────────────────────────┐  │  │  │
-│  │  │  Agentic Loop (max 300 iterations)     │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  ┌──────────────────────────────────┐  │  │  │  │
-│  │  │  │ Session                          │  │  │  │  │
-│  │  │  │  ┌────────────────────────────┐  │  │  │  │  │
-│  │  │  │  │ ContextManager             │  │  │  │  │  │
-│  │  │  │  │ • Message history          │  │  │  │  │  │
-│  │  │  │  │   (litellm.Message[])      │  │  │  │  │  │
-│  │  │  │  │ • Auto-compaction (170k)   │  │  │  │  │  │
-│  │  │  │  │ • Session upload to HF     │  │  │  │  │  │
-│  │  │  │  └────────────────────────────┘  │  │  │  │  │
-│  │  │  │                                  │  │  │  │  │
-│  │  │  │  ┌────────────────────────────┐  │  │  │  │  │
-│  │  │  │  │ ToolRouter                 │  │  │  │  │  │
-│  │  │  │  │  ├─ HF docs & research     │  │  │  │  │  │
-│  │  │  │  │  ├─ HF repos, datasets,    │  │  │  │  │  │
-│  │  │  │  │  │  jobs, papers           │  │  │  │  │  │
-│  │  │  │  │  ├─ GitHub code search     │  │  │  │  │  │
-│  │  │  │  │  ├─ Sandbox & local tools  │  │  │  │  │  │
-│  │  │  │  │  ├─ Planning               │  │  │  │  │  │
-│  │  │  │  │  └─ MCP server tools       │  │  │  │  │  │
-│  │  │  │  └────────────────────────────┘  │  │  │  │  │
-│  │  │  └──────────────────────────────────┘  │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  ┌──────────────────────────────────┐  │  │  │  │
-│  │  │  │ Doom Loop Detector               │  │  │  │  │
-│  │  │  │ • Detects repeated tool patterns │  │  │  │  │
-│  │  │  │ • Injects corrective prompts     │  │  │  │  │
-│  │  │  └──────────────────────────────────┘  │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  Loop:                                 │  │  │  │
-│  │  │    1. LLM call (litellm.acompletion)   │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    2. Parse tool_calls[]               │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    3. Approval check                   │  │  │  │
-│  │  │       (jobs, sandbox, destructive ops) │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    4. Execute via ToolRouter           │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    5. Add results to ContextManager    │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    6. Repeat if tool_calls exist       │  │  │  │
-│  │  └────────────────────────────────────────┘  │  │  │
-│  └──────────────────────────────────────────────┘  │  │
-└────────────────────────────────────────────────────┴──┘
-```
-
-### Agentic Loop Flow
-
-```
-User Message
-     ↓
-[Add to ContextManager]
-     ↓
-     ╔═══════════════════════════════════════════╗
-     ║      Iteration Loop (max 300)             ║
-     ║                                           ║
-     ║  Get messages + tool specs                ║
-     ║         ↓                                 ║
-     ║  litellm.acompletion()                    ║
-     ║         ↓                                 ║
-     ║  Has tool_calls? ──No──> Done             ║
-     ║         │                                 ║
-     ║        Yes                                ║
-     ║         ↓                                 ║
-     ║  Add assistant msg (with tool_calls)      ║
-     ║         ↓                                 ║
-     ║  Doom loop check                          ║
-     ║         ↓                                 ║
-     ║  For each tool_call:                      ║
-     ║    • Needs approval? ──Yes──> Wait for    ║
-     ║    │                         user confirm ║
-     ║    No                                     ║
-     ║    ↓                                      ║
-     ║    • ToolRouter.execute_tool()            ║
-     ║    • Add result to ContextManager         ║
-     ║         ↓                                 ║
-     ║  Continue loop ─────────────────┐         ║
-     ║         ↑                       │         ║
-     ║         └───────────────────────┘         ║
-     ╚═══════════════════════════════════════════╝
-```
-
-## Events
-
-The agent emits the following events via `event_queue`:
-
-- `processing` - Starting to process user input
-- `ready` - Agent is ready for input
-- `assistant_chunk` - Streaming token chunk
-- `assistant_message` - Complete LLM response text
-- `assistant_stream_end` - Token stream finished
-- `tool_call` - Tool being called with arguments
-- `tool_output` - Tool execution result
-- `tool_log` - Informational tool log message
-- `tool_state_change` - Tool execution state transition
-- `approval_required` - Requesting user approval for sensitive operations
-- `turn_complete` - Agent finished processing
-- `error` - Error occurred during processing
-- `interrupted` - Agent was interrupted
-- `compacted` - Context was compacted
-- `undo_complete` - Undo operation completed
-- `shutdown` - Agent shutting down
-
-## Development
-
-### Pre-commit Checks
-
-Run Ruff and the test suite before every commit:
+提交前建议运行：
 
 ```bash
 uv run ruff check .
@@ -669,10 +529,15 @@ uv run ruff format --check .
 uv run pytest
 ```
 
-If the format check fails, run `uv run ruff format .` and re-run the checks
-before committing.
+如果格式检查失败：
 
-For frontend changes, also run:
+```bash
+uv run ruff format .
+uv run ruff check .
+uv run ruff format --check .
+```
+
+前端改动：
 
 ```bash
 cd frontend
@@ -680,7 +545,7 @@ npm run lint
 npm run build
 ```
 
-For the Node.js npm package in `src/`, run from the repository root:
+Node CLI package：
 
 ```bash
 npm run build
@@ -689,22 +554,24 @@ npm test
 npm pack --dry-run
 ```
 
-The backend-dependent Node commands are:
+Binder 和 MCP 相关的聚焦测试：
 
 ```bash
-aidd-intern smoke
-aidd-intern integration
-aidd-intern eval --fixtures fixtures/prompts.json --limit 3
+PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
+  tests/unit/test_binder_design_tool.py \
+  tests/unit/test_mcp_startup.py \
+  tests/unit/test_config.py \
+  tests/unit/test_web_search_tool.py
 ```
 
-For domain-pack changes, also run:
+Protein design 域包测试：
 
 ```bash
-uv run pytest tests/unit/test_protein_design_domain_pack.py
-uv run pytest tests/unit
+PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
+  tests/unit/test_protein_design_domain_pack.py
 ```
 
-To smoke-test the protein-design evaluation scaffold:
+Protein design benchmark scaffold smoke test：
 
 ```bash
 uv run python evals/protein_design/runner.py \
@@ -712,90 +579,59 @@ uv run python evals/protein_design/runner.py \
   --output /tmp/protein_design_eval_results.json
 ```
 
-CI runs `uv sync --locked --extra dev`, Ruff, Ruff format check, and
-`uv run pytest` on Python 3.12.
+该命令会写临时结果到 `/tmp`，不要把 benchmark 输出提交到仓库。
 
-### Code Boundaries
+## 会话追踪和分享
 
-- Generic agent runtime behavior belongs in `agent/core/`.
-- Domain prompts and tools belong in `agent/domain_packs/<name>/`.
-- CLI behavior belongs in `agent/main.py`; hosted web-session orchestration
-  belongs in `backend/session_manager.py`.
-- Backend route changes generally belong under `backend/routes/`.
-- Frontend event transport and message conversion belong under
-  `frontend/src/lib/`; persistent UI/session state belongs under
-  `frontend/src/store/`; reusable UI belongs under `frontend/src/components/`.
-- Long-running scientific or GPU workloads should stay behind subprocess, MCP,
-  container, sandbox, or HF Jobs boundaries rather than importing heavy runtime
-  stacks into the FastAPI process.
-- When changing shared MCP, model, trace, or domain defaults, keep
-  `configs/cli_agent_config.json` and `configs/frontend_agent_config.json`
-  aligned unless the difference is intentional.
+CLI session 可以自动上传到用户自己的 Hugging Face 私有 dataset，并使用
+Claude Code JSONL 兼容格式，方便用 HF Agent Trace Viewer 查看 turns、tool
+calls 和模型回答。
 
-### Adding Built-in Tools
+默认目标：
 
-Edit `agent/core/tools.py`:
-
-```python
-def create_builtin_tools() -> list[ToolSpec]:
-    return [
-        ToolSpec(
-            name="your_tool",
-            description="What your tool does",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "param": {"type": "string", "description": "Parameter description"}
-                },
-                "required": ["param"]
-            },
-            handler=your_async_handler
-        ),
-        # ... existing tools
-    ]
+```text
+{your-hf-username}/aidd-intern-sessions
 ```
 
-### Adding or Updating Domain Packs
+CLI 内命令：
 
-Domain-specific code should live under `agent/domain_packs/<name>/`. A domain
-pack should expose its tools through `agent/domain_packs/__init__.py` so the
-generic `ToolRouter` can load them when `Config.domain_pack` matches.
+```text
+/share-traces
+/share-traces public
+/share-traces private
+```
 
-Keep these boundaries intact:
-
-- generic runtime behavior belongs in `agent/core/`;
-- domain prompts and domain tools belong in `agent/domain_packs/`;
-- long-running scientific or GPU workloads should stay behind subprocess,
-  container, MCP, or HF Jobs boundaries;
-- benchmark tasks and environment scaffolds belong in `evals/<domain>/`.
-
-### Adding MCP Servers
-
-Edit `configs/cli_agent_config.json` for CLI defaults, or
-`configs/frontend_agent_config.json` for web-session defaults:
+关闭上传：
 
 ```json
 {
-  "model_name": "anthropic/claude-sonnet-4-5-20250929",
-  "mcpServers": {
-    "your-server-name": {
-      "transport": "http",
-      "url": "https://example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${YOUR_TOKEN}"
-      }
-    }
-  }
+  "share_traces": false
 }
 ```
 
-Note: Environment variables like `${YOUR_TOKEN}` are auto-substituted from `.env`.
+覆盖目标 repo：
 
-## Cite aidd-intern
-If you use `aidd-intern` in your work, please cite it by using the following BibTeX entry or similar.
+```json
+{
+  "personal_trace_repo_template": "{hf_user}/my-custom-traces"
+}
+```
+
+## GitHub 协作
+
+- 不要提交 `.env`、token、权重、checkpoint、数据库或生成的大型结构批次。
+- 代码改动优先通过 GitHub PR 合并，不直接推送部署分支。
+- 多行 PR 描述建议使用 `gh pr edit <number> --body-file <file>`，避免 shell
+  quoting 破坏 Markdown、环境变量或反引号。
+
+## Cite AIDD-Intern
+
+If you use `aidd-intern` in your work, please cite it by using the following
+BibTeX entry or similar.
+
 ```bibtex
 @Misc{aidd-intern,
-  title =        {aidd-intern: an agent that autonomously researches, writes, and ships good quality ML related code using the Hugging Face ecosystem},
+  title =        {AIDD-Intern: an agent runtime for source-backed AI drug discovery research and binder workflows},
   author =       {Aksel Joonas Reedi, Henri Bonamy, Yoan Di Cosmo, Leandro von Werra, Lewis Tunstall},
   howpublished = {\url{https://github.com/huggingface/aidd-intern}},
   year =         {2026}
