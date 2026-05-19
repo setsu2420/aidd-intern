@@ -9,7 +9,16 @@ from agent.core.tools import create_builtin_tools
 from agent.domain_packs.protein_design.ace import ace_playbook_handler
 from agent.domain_packs.protein_design.approval import ProteinDesignApprovalPolicy
 from agent.domain_packs.protein_design.telemetry import summarize_validation_metrics
-from agent.domain_packs.protein_design.tools import _gpu_plan, _parse_hardware_errors
+from agent.domain_packs.protein_design.tools import (
+    _gpu_plan,
+    _parse_hardware_errors,
+    _run_command,
+    run_bindcraft_handler,
+)
+from evals.protein_design.runner import (
+    EvaluationTask,
+    run_evaluation_suite,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -94,6 +103,81 @@ def test_core_approval_policy_covers_protein_design_tools():
     assert not agent_loop._needs_approval("run_bindcraft", {"iterations": 100})
 
 
+@pytest.mark.asyncio
+async def test_run_command_reports_missing_executable():
+    returncode, stdout, stderr = await _run_command(
+        ["definitely-not-a-real-protein-design-command"]
+    )
+
+    assert returncode == 127
+    assert stdout == ""
+    assert "Executable not found" in stderr
+
+
+@pytest.mark.asyncio
+async def test_run_bindcraft_uses_local_mcp_runtime(tmp_path, monkeypatch):
+    mcp_root = tmp_path / "bindcraft_mcp"
+    env_python = mcp_root / "env/bin/python"
+    script = mcp_root / "scripts/run_bindcraft.py"
+    filters = mcp_root / "repo/BindCraft/settings_filters/default_filters.json"
+    advanced = (
+        mcp_root / "repo/BindCraft/settings_advanced/default_4stage_multimer.json"
+    )
+    params = mcp_root / "repo/scripts/params"
+    for path in [
+        env_python,
+        script,
+        filters,
+        advanced,
+        params / "params_model_1_multimer_v3.npz",
+    ]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}" if path.suffix == ".json" else "", encoding="utf-8")
+    advanced.write_text('{"af_params_dir": ""}\n', encoding="utf-8")
+
+    target = tmp_path / "target.pdb"
+    target.write_text("HEADER TARGET\n", encoding="utf-8")
+    output = tmp_path / "out"
+    captured = {}
+
+    async def fake_run_command(command, timeout_s=None, cwd=None, env=None):
+        captured["command"] = command
+        captured["cwd"] = cwd
+        captured["env"] = env
+        return 0, "done", ""
+
+    monkeypatch.setenv("AIDD_INTERN_BINDCRAFT_MCP_DIR", str(mcp_root))
+    monkeypatch.setenv("PROTEIN_DESIGN_GPU_FREE_MB", "12000,64000")
+    monkeypatch.setattr(
+        "agent.domain_packs.protein_design.tools._run_command",
+        fake_run_command,
+    )
+
+    result = await run_bindcraft_handler(
+        target_pdb=str(target),
+        binder_length=80,
+        output_dir=str(output),
+        hotspot_residues="1,2,3",
+        num_designs=1,
+        max_trajectories=4,
+    )
+
+    assert result["returncode"] == 0
+    assert result["output_dir"] == str(output)
+    assert captured["command"][0] == str(env_python)
+    assert captured["cwd"] == str(mcp_root / "scripts")
+    assert captured["env"]["CUDA_VISIBLE_DEVICES"] == "1"
+    settings = json.loads((output / "target_settings.json").read_text())
+    generated_advanced = json.loads(
+        (output / "aidd_advanced_settings.json").read_text()
+    )
+    assert settings["target_hotspot_residues"] == "1,2,3"
+    assert generated_advanced["af_params_dir"] == str(params)
+    assert generated_advanced["save_design_animations"] is False
+    assert generated_advanced["zip_animations"] is False
+    assert generated_advanced["max_trajectories"] == 4
+
+
 def test_protein_design_telemetry_summarizes_terminal_filters():
     summary = summarize_validation_metrics(
         [
@@ -169,3 +253,69 @@ async def test_ace_playbook_applies_delta_and_merges_duplicates(tmp_path):
     assert ok is True
     assert rendered.count("Reduce PXdesign samples after CUDA OOM.") == 1
     assert "h=2" in rendered
+
+
+@pytest.mark.asyncio
+async def test_ace_playbook_reflects_run_feedback(tmp_path):
+    playbook_path = tmp_path / "ace_playbook.json"
+
+    text, ok = await ace_playbook_handler(
+        {
+            "operation": "reflect_run",
+            "playbook_path": str(playbook_path),
+            "tool_name": "run_pxdesign",
+            "status": "failed",
+            "stderr": "RuntimeError: CUDA out of memory",
+            "metrics": {"iptm": 0.61, "plddt": 77},
+        }
+    )
+
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] == "reflected"
+    assert payload["delta_count"] >= 2
+
+    rendered, ok = await ace_playbook_handler(
+        {"operation": "render", "playbook_path": str(playbook_path)}
+    )
+
+    assert ok is True
+    assert "CUDA OOM" in rendered
+    assert "Harness Feedback" in rendered
+
+
+@pytest.mark.asyncio
+async def test_protein_design_eval_runner_emits_harness_feedback(tmp_path):
+    target = tmp_path / "target.pdb"
+    target.write_text("HEADER TEST\n", encoding="utf-8")
+    task = EvaluationTask(
+        task_id="toy_target",
+        target_name="Toy",
+        target_pdb_path=str(target),
+        known_hotspots="chain A: Y1",
+    )
+
+    results = await run_evaluation_suite([task], "test-model")
+
+    result = results[0]
+    assert result["harness_ready"] is True
+    assert result["harness_profile"]["schema"] == "ETCLOVG"
+    assert result["status"] == "ready_for_headless_agent"
+    assert result["feedback_delta_items"][0]["section"] == "harness_feedback"
+
+
+@pytest.mark.asyncio
+async def test_protein_design_eval_runner_blocks_missing_environment():
+    task = EvaluationTask(
+        task_id="missing_target",
+        target_name="Missing",
+        target_pdb_path="/tmp/aidd-intern-missing-target.pdb",
+        known_hotspots="chain A: Y1",
+    )
+
+    results = await run_evaluation_suite([task], "test-model")
+
+    result = results[0]
+    assert result["harness_ready"] is False
+    assert result["status"] == "skipped_missing_target"
+    assert "environment" in result["feedback_delta_items"][0]["content"]

@@ -10,6 +10,8 @@ wheels/
 .tox/
 .coverage
 htmlcov/
+node_modules/
+.memsearch/
 .ipynb_checkpoints/
 
 # Virtual environments

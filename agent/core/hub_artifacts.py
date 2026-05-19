@@ -6,7 +6,7 @@ import re
 import shlex
 import tempfile
 import textwrap
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +52,7 @@ def session_artifact_date(session: Any) -> str:
             )
         except ValueError:
             logger.debug("Could not parse session_start_time=%r", raw)
-    return datetime.utcnow().strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _collection_session_id_fragment(session: Any) -> str:

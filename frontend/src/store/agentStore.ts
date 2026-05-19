@@ -17,6 +17,7 @@
  */
 import { create } from 'zustand';
 import type { User } from '@/types/agent';
+import { createJsonMapStore } from '@/lib/json-map-store';
 
 export interface PlanItem {
   id: string;
@@ -106,6 +107,21 @@ const defaultSessionState: PerSessionState = {
   researchSteps: [],
   researchStats: { ...defaultResearchStats },
 };
+
+const toolErrorStore = createJsonMapStore<boolean>('hf-agent-tool-errors', (e) => {
+  console.warn('Failed to persist tool errors:', e);
+});
+
+const rejectedToolStore = createJsonMapStore<boolean>('hf-agent-rejected-tools', (e) => {
+  console.warn('Failed to persist rejected tools:', e);
+});
+
+const trackioDashboardStore = createJsonMapStore<{ spaceId: string; project?: string }>(
+  'hf-agent-trackio-dashboards',
+  (e) => {
+    console.warn('Failed to persist trackio dashboards:', e);
+  },
+);
 
 interface AgentStore {
   // ── Per-session state map ───────────────────────────────────────────
@@ -229,60 +245,33 @@ function syncSnapshot(
 
 // Load persisted tool errors from localStorage
 function loadToolErrors(): Record<string, boolean> {
-  try {
-    const stored = localStorage.getItem('hf-agent-tool-errors');
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
+  return toolErrorStore.readAll();
 }
 
 // Save tool errors to localStorage
 function saveToolErrors(errors: Record<string, boolean>): void {
-  try {
-    localStorage.setItem('hf-agent-tool-errors', JSON.stringify(errors));
-  } catch (e) {
-    console.warn('Failed to persist tool errors:', e);
-  }
+  toolErrorStore.writeAll(errors);
 }
 
 // Load persisted rejected tools from localStorage
 function loadRejectedTools(): Record<string, boolean> {
-  try {
-    const stored = localStorage.getItem('hf-agent-rejected-tools');
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
+  return rejectedToolStore.readAll();
 }
 
 // Save rejected tools to localStorage
 function saveRejectedTools(rejected: Record<string, boolean>): void {
-  try {
-    localStorage.setItem('hf-agent-rejected-tools', JSON.stringify(rejected));
-  } catch (e) {
-    console.warn('Failed to persist rejected tools:', e);
-  }
+  rejectedToolStore.writeAll(rejected);
 }
 
 // Trackio dashboards survive a page reload — without persistence the iframe
 // disappears whenever the user refreshes mid-job, which is the exact moment
 // they'd want to keep watching it.
 function loadTrackioDashboards(): Record<string, { spaceId: string; project?: string }> {
-  try {
-    const stored = localStorage.getItem('hf-agent-trackio-dashboards');
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
+  return trackioDashboardStore.readAll();
 }
 
 function saveTrackioDashboards(dashboards: Record<string, { spaceId: string; project?: string }>): void {
-  try {
-    localStorage.setItem('hf-agent-trackio-dashboards', JSON.stringify(dashboards));
-  } catch (e) {
-    console.warn('Failed to persist trackio dashboards:', e);
-  }
+  trackioDashboardStore.writeAll(dashboards);
 }
 
 export const useAgentStore = create<AgentStore>()((set, get) => ({

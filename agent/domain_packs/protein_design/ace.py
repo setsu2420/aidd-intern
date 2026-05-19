@@ -21,6 +21,7 @@ DEFAULT_SECTIONS = [
     "generation_dispatch",
     "validation",
     "failure_modes",
+    "harness_feedback",
     "reporting",
 ]
 
@@ -102,6 +103,133 @@ def _coerce_delta_items(delta_items: Any) -> list[dict[str, Any]]:
             }
         )
     return coerced
+
+
+def reflect_run_feedback(arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert execution feedback into deterministic ACE delta bullets."""
+    tool_name = str(arguments.get("tool_name") or arguments.get("source") or "run")
+    status = str(arguments.get("status") or "").lower()
+    stderr = str(arguments.get("stderr") or "")
+    stdout = str(arguments.get("stdout") or "")
+    metrics = arguments.get("metrics") or {}
+    evidence = {
+        "tool": tool_name,
+        "status": status,
+        "stderr_preview": stderr[:500],
+        "stdout_preview": stdout[:500],
+        "metrics": metrics,
+    }
+    combined_log = f"{stdout}\n{stderr}".lower()
+    delta_items: list[dict[str, Any]] = []
+
+    if any(token in combined_log for token in ("cuda out of memory", "outofmemory")):
+        delta_items.append(
+            {
+                "section": "failure_modes",
+                "content": (
+                    f"When {tool_name} hits CUDA OOM, reduce samples or iterations, "
+                    "prefer mixed precision, and retry only after recording the GPU budget."
+                ),
+                "feedback": "helpful",
+                "source": tool_name,
+                "evidence": evidence,
+            }
+        )
+    if any(token in combined_log for token in ("no such file", "not found", "missing")):
+        delta_items.append(
+            {
+                "section": "target_analysis",
+                "content": (
+                    "Before generation, verify target structure paths, biological assembly, "
+                    "and chain identifiers exist in the execution environment."
+                ),
+                "feedback": "helpful",
+                "source": tool_name,
+                "evidence": evidence,
+            }
+        )
+
+    iptm = _as_float(metrics.get("iptm"))
+    plddt = _as_float(metrics.get("plddt"))
+    ipae = _as_float(metrics.get("ipae"))
+    if iptm is not None or plddt is not None or ipae is not None:
+        if (iptm is not None and iptm < 0.75) or (ipae is not None and ipae > 8):
+            delta_items.append(
+                {
+                    "section": "validation",
+                    "content": (
+                        "Do not advance candidates with weak interface confidence; "
+                        "use orthogonal prediction plus interface inspection before spending more compute."
+                    ),
+                    "feedback": "helpful",
+                    "source": tool_name,
+                    "evidence": evidence,
+                }
+            )
+        elif (iptm is None or iptm >= 0.8) and (plddt is None or plddt >= 80):
+            delta_items.append(
+                {
+                    "section": "validation",
+                    "content": (
+                        "Candidates passing ipTM/pLDDT triage still require diversity clustering "
+                        "and developability checks before wet-lab handoff."
+                    ),
+                    "feedback": "helpful",
+                    "source": tool_name,
+                    "evidence": evidence,
+                }
+            )
+
+    if status in {"success", "completed", "passed"}:
+        delta_items.append(
+            {
+                "section": "harness_feedback",
+                "content": (
+                    f"{tool_name} completed successfully; preserve runtime parameters, "
+                    "outputs, and validator versions in the campaign trace for regression comparison."
+                ),
+                "feedback": "helpful",
+                "source": tool_name,
+                "evidence": evidence,
+            }
+        )
+    elif status in {"failed", "error", "timeout"}:
+        delta_items.append(
+            {
+                "section": "harness_feedback",
+                "content": (
+                    f"{tool_name} failed; classify the failure before retrying so repeated "
+                    "episodes improve the playbook instead of only consuming more compute."
+                ),
+                "feedback": "helpful",
+                "source": tool_name,
+                "evidence": evidence,
+            }
+        )
+
+    if not delta_items:
+        delta_items.append(
+            {
+                "section": "harness_feedback",
+                "content": (
+                    f"Record {tool_name} execution feedback even when no known failure "
+                    "pattern is detected, because sparse traces reduce later attribution quality."
+                ),
+                "feedback": "neutral",
+                "source": tool_name,
+                "evidence": evidence,
+            }
+        )
+    return delta_items
+
+
+def _as_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def apply_delta(
@@ -221,7 +349,7 @@ ACE_PLAYBOOK_TOOL_SPEC = {
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["initialize", "apply_delta", "render"],
+                "enum": ["initialize", "apply_delta", "reflect_run", "render"],
             },
             "playbook_path": {
                 "type": "string",
@@ -238,6 +366,26 @@ ACE_PLAYBOOK_TOOL_SPEC = {
                 "type": "integer",
                 "default": 80,
                 "description": "Maximum bullets retained per section after refinement.",
+            },
+            "tool_name": {
+                "type": "string",
+                "description": "Tool name for reflect_run feedback.",
+            },
+            "status": {
+                "type": "string",
+                "description": "Execution status for reflect_run, e.g. success, failed, timeout.",
+            },
+            "stdout": {
+                "type": "string",
+                "description": "Bounded stdout/log text for reflect_run.",
+            },
+            "stderr": {
+                "type": "string",
+                "description": "Bounded stderr/log text for reflect_run.",
+            },
+            "metrics": {
+                "type": "object",
+                "description": "Validation or generation metrics for reflect_run.",
             },
         },
         "required": ["operation", "playbook_path"],
@@ -272,6 +420,23 @@ async def ace_playbook_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
                 True,
             )
 
+        if operation == "reflect_run":
+            delta_items = reflect_run_feedback(arguments)
+            stats = apply_delta(playbook, delta_items, prune_threshold=prune_threshold)
+            save_playbook(path, playbook)
+            return (
+                _format_result(
+                    {
+                        "status": "reflected",
+                        "path": str(path),
+                        "delta_count": len(delta_items),
+                        "delta_items": delta_items,
+                        **stats,
+                    }
+                ),
+                True,
+            )
+
         if operation == "render":
             return render_playbook(playbook), True
 
@@ -279,7 +444,7 @@ async def ace_playbook_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
             _format_result(
                 {
                     "status": "error",
-                    "message": "Unknown operation. Use initialize, apply_delta, or render.",
+                    "message": "Unknown operation. Use initialize, apply_delta, reflect_run, or render.",
                 }
             ),
             False,

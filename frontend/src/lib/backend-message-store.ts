@@ -5,33 +5,19 @@
  * but the LLM needs the backend format to continue the conversation.
  */
 import { logger } from '@/utils/logger';
+import { createJsonMapStore } from './json-map-store';
 
 const STORAGE_KEY = 'hf-agent-backend-messages';
 const MAX_SESSIONS = 50;
 
 type MessagesMap = Record<string, unknown[]>;
 
-function readAll(): MessagesMap {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as MessagesMap;
-    }
-    return {};
-  } catch {
-    return {};
-  }
-}
+const store = createJsonMapStore<unknown[]>(STORAGE_KEY, (e) => {
+  logger.warn('Failed to persist backend messages:', e);
+});
 
-function writeAll(map: MessagesMap): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    // Quota exceeded is the most common reason — the cache is best-effort.
-    logger.warn('Failed to persist backend messages:', e);
-  }
+function readAll(): MessagesMap {
+  return store.readAll();
 }
 
 export function loadBackendMessages(sessionId: string): unknown[] {
@@ -49,7 +35,7 @@ export function saveBackendMessages(sessionId: string, messages: unknown[]): voi
     for (const k of toRemove) delete map[k];
   }
 
-  writeAll(map);
+  store.writeAll(map);
 }
 
 export function moveBackendMessages(fromId: string, toId: string): void {
@@ -57,11 +43,12 @@ export function moveBackendMessages(fromId: string, toId: string): void {
   if (!map[fromId]) return;
   map[toId] = map[fromId];
   delete map[fromId];
-  writeAll(map);
+  store.writeAll(map);
 }
 
 export function deleteBackendMessages(sessionId: string): void {
   const map = readAll();
+  if (!(sessionId in map)) return;
   delete map[sessionId];
-  writeAll(map);
+  store.writeAll(map);
 }

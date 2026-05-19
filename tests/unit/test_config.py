@@ -166,9 +166,13 @@ def test_default_cli_config_registers_proteinmcp_and_local_model(monkeypatch):
 
     assert config.model_name == "vllm/huihui-26b"
     assert config.domain_pack == "aidd_binder"
+    hf_mcp = config.mcpServers["hf-mcp-server"]
     bindcraft = config.mcpServers["proteinmcp-bindcraft"]
     boltzgen = config.mcpServers["proteinmcp-boltzgen"]
     pxdesign = config.mcpServers["proteinmcp-pxdesign"]
+    assert hf_mcp.transport == "http"
+    assert hf_mcp.url == "https://hf.co/mcp"
+    assert hf_mcp.auth is None
     assert bindcraft.transport == "stdio"
     assert boltzgen.transport == "stdio"
     assert pxdesign.transport == "stdio"

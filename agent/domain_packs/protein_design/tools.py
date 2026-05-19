@@ -31,6 +31,7 @@ TOOL_BASE_GPU_MB = {
     "boltzgen": 10_000,
     "bindcraft": 14_000,
 }
+MAX_TOOL_OUTPUT_CHARS = 12_000
 
 
 def _safe_path(raw: str, *, must_exist: bool = True) -> Path:
@@ -89,9 +90,11 @@ def _gpu_plan(
     """Create a conservative GPU execution plan from current free VRAM."""
     free_mb = _detect_gpu_free_mb()
     best_free = max(free_mb) if free_mb else None
+    best_index = free_mb.index(best_free) if best_free is not None else None
     plan: dict[str, Any] = {
         "gpu_free_mb": free_mb,
         "selected_gpu_free_mb": best_free,
+        "selected_gpu_index": best_index,
         "adjusted": False,
         "can_run": True,
         "reason": None,
@@ -185,12 +188,16 @@ def _base_output(
 ) -> dict[str, Any]:
     combined = "\n".join(part for part in [stdout, stderr] if part)
     hardware = _parse_hardware_errors(combined)
+    stdout_truncated = len(stdout) > MAX_TOOL_OUTPUT_CHARS
+    stderr_truncated = len(stderr) > MAX_TOOL_OUTPUT_CHARS
     return {
         "tool": tool,
         "command": command,
         "returncode": returncode,
-        "stdout": stdout,
-        "stderr": stderr,
+        "stdout": stdout[-MAX_TOOL_OUTPUT_CHARS:] if stdout_truncated else stdout,
+        "stderr": stderr[-MAX_TOOL_OUTPUT_CHARS:] if stderr_truncated else stderr,
+        "stdout_truncated": stdout_truncated,
+        "stderr_truncated": stderr_truncated,
         "gpu_plan": gpu_plan or {},
         "hardware_errors": hardware,
         "status": "needs_runtime_correction"
@@ -200,13 +207,26 @@ def _base_output(
 
 
 async def _run_command(
-    command: list[str], timeout_s: int | None = None
+    command: list[str],
+    timeout_s: int | None = None,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        missing = command[0] if command else "<empty command>"
+        return (
+            127,
+            "",
+            f"Executable not found: {missing}. Configure the runtime command or ProteinMCP launcher. ({exc})",
+        )
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             process.communicate(), timeout=timeout_s
@@ -251,6 +271,41 @@ def _runtime_prefix(tool_name: str, tool_runtime: str) -> list[str]:
             tool_name,
         ]
     return [tool_name]
+
+
+def _bindcraft_mcp_root() -> Path:
+    return Path(
+        os.environ.get(
+            "AIDD_INTERN_BINDCRAFT_MCP_DIR",
+            str(
+                Path.home() / ".cache" / "aidd-intern" / "proteinmcp" / "bindcraft_mcp"
+            ),
+        )
+    ).expanduser()
+
+
+def _bindcraft_default_paths() -> dict[str, Path]:
+    root = _bindcraft_mcp_root()
+    return {
+        "root": root,
+        "python": Path(
+            os.environ.get(
+                "AIDD_INTERN_BINDCRAFT_MCP_PYTHON", str(root / "env/bin/python")
+            )
+        ).expanduser(),
+        "script": root / "scripts/run_bindcraft.py",
+        "scripts_dir": root / "scripts",
+        "filters": root / "repo/BindCraft/settings_filters/default_filters.json",
+        "advanced": root
+        / "repo/BindCraft/settings_advanced/default_4stage_multimer.json",
+        "params": root / "repo/scripts/params",
+    }
+
+
+def _write_bindcraft_json(path: Path, payload: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 async def run_pxdesign_handler(
@@ -316,6 +371,14 @@ async def run_bindcraft_handler(
     binder_length: int,
     iterations: int = 50,
     tool_runtime: str = "local",
+    output_dir: str | None = None,
+    binder_name: str | None = None,
+    target_chains: str = "A",
+    hotspot_residues: str | None = None,
+    num_designs: int = 1,
+    max_trajectories: int | None = None,
+    device: int | None = None,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Run BindCraft iterative optimization."""
     target = _safe_path(target_pdb)
@@ -324,19 +387,104 @@ async def run_bindcraft_handler(
     )
     if not gpu_plan["can_run"]:
         return _base_output("bindcraft", [], 75, "", gpu_plan["reason"] or "", gpu_plan)
-    iterations = int(gpu_plan.get("iterations", iterations))
-    command = [
-        *_runtime_prefix("bindcraft", tool_runtime),
-        "run",
-        "--target-pdb",
-        str(target),
-        "--binder-length",
-        str(binder_length),
-        "--iterations",
-        str(iterations),
-    ]
-    returncode, stdout, stderr = await _run_command(command)
-    return _base_output("bindcraft", command, returncode, stdout, stderr, gpu_plan)
+    paths = _bindcraft_default_paths()
+    out_dir = _safe_path(
+        output_dir or str(target.parent / f"{target.stem}_bindcraft_out"),
+        must_exist=False,
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if tool_runtime == "local":
+        missing = [
+            str(path)
+            for path in [
+                paths["python"],
+                paths["script"],
+                paths["filters"],
+                paths["advanced"],
+                paths["params"],
+            ]
+            if not path.exists()
+        ]
+        if missing:
+            return _base_output(
+                "bindcraft",
+                [],
+                127,
+                "",
+                "Missing BindCraft runtime files: " + ", ".join(missing),
+                gpu_plan,
+            )
+
+        target_settings = {
+            "design_path": str(out_dir),
+            "binder_name": binder_name or target.stem,
+            "starting_pdb": str(target),
+            "chains": target_chains,
+            "target_hotspot_residues": hotspot_residues or "",
+            "lengths": [int(binder_length), int(binder_length)],
+            "number_of_final_designs": int(num_designs),
+        }
+        settings_path = _write_bindcraft_json(
+            out_dir / "target_settings.json", target_settings
+        )
+
+        advanced = json.loads(paths["advanced"].read_text(encoding="utf-8"))
+        advanced["af_params_dir"] = str(paths["params"])
+        # The local ProteinMCP/BindCraft runtime does not always ship ffmpeg.
+        # Animations are nonessential and can otherwise abort low-confidence runs.
+        advanced["save_design_animations"] = False
+        advanced["zip_animations"] = False
+        if max_trajectories is not None:
+            advanced["max_trajectories"] = max(1, int(max_trajectories))
+        if "num_recycles_design" in advanced and iterations:
+            advanced["num_recycles_design"] = max(
+                1, min(int(iterations), int(advanced["num_recycles_design"]))
+            )
+        advanced_path = _write_bindcraft_json(
+            out_dir / "aidd_advanced_settings.json", advanced
+        )
+
+        command = [
+            str(paths["python"]),
+            str(paths["script"]),
+            f"--settings={settings_path}",
+            f"--filters={paths['filters']}",
+            f"--advanced={advanced_path}",
+        ]
+        env = os.environ.copy()
+        selected_device = device
+        if selected_device is None:
+            selected_device = int(gpu_plan.get("selected_gpu_index") or 0)
+        env["CUDA_VISIBLE_DEVICES"] = str(selected_device)
+        env["XLA_FLAGS"] = "--xla_gpu_enable_triton_gemm=false"
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONPATH"] = str(paths["scripts_dir"]) + (
+            f":{env['PYTHONPATH']}" if env.get("PYTHONPATH") else ""
+        )
+        returncode, stdout, stderr = await _run_command(
+            command,
+            timeout_s=timeout_s,
+            cwd=str(paths["scripts_dir"]),
+            env=env,
+        )
+    else:
+        command = [
+            *_runtime_prefix("bindcraft", tool_runtime),
+            "run",
+            "--target-pdb",
+            str(target),
+            "--binder-length",
+            str(binder_length),
+            "--iterations",
+            str(iterations),
+        ]
+        returncode, stdout, stderr = await _run_command(command, timeout_s=timeout_s)
+
+    result = _base_output("bindcraft", command, returncode, stdout, stderr, gpu_plan)
+    result["output_dir"] = str(out_dir)
+    result["metric_files"] = [str(path) for path in sorted(out_dir.glob("*.csv"))]
+    return result
 
 
 def _format_result(payload: dict[str, Any]) -> str:
@@ -369,6 +517,18 @@ async def _bindcraft_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         binder_length=int(arguments["binder_length"]),
         iterations=int(arguments.get("iterations") or 50),
         tool_runtime=arguments.get("tool_runtime") or "local",
+        output_dir=arguments.get("output_dir"),
+        binder_name=arguments.get("binder_name"),
+        target_chains=arguments.get("target_chains") or "A",
+        hotspot_residues=arguments.get("hotspot_residues"),
+        num_designs=int(arguments.get("num_designs") or 1),
+        max_trajectories=(
+            int(arguments["max_trajectories"])
+            if arguments.get("max_trajectories") is not None
+            else None
+        ),
+        device=arguments.get("device"),
+        timeout_s=arguments.get("timeout_s"),
     )
     return _format_result(result), result["returncode"] == 0
 
@@ -448,6 +608,40 @@ def create_protein_design_tools(tool_spec_cls: type | None = None) -> list[Any]:
                         "description": "Target binder length in amino acids.",
                     },
                     "iterations": {"type": "integer", "default": 50},
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Directory for BindCraft outputs.",
+                    },
+                    "binder_name": {
+                        "type": "string",
+                        "description": "Prefix for generated binder designs.",
+                    },
+                    "target_chains": {
+                        "type": "string",
+                        "default": "A",
+                        "description": "Target chain IDs for interface design.",
+                    },
+                    "hotspot_residues": {
+                        "type": "string",
+                        "description": "Comma-separated target hotspot residue numbers.",
+                    },
+                    "num_designs": {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Number of final accepted designs to request.",
+                    },
+                    "max_trajectories": {
+                        "type": "integer",
+                        "description": "Optional cap on attempted BindCraft trajectories.",
+                    },
+                    "device": {
+                        "type": "integer",
+                        "description": "GPU index to use. Defaults to the GPU with most free memory.",
+                    },
+                    "timeout_s": {
+                        "type": "integer",
+                        "description": "Optional command timeout in seconds.",
+                    },
                     "tool_runtime": {
                         "type": "string",
                         "enum": ["local", "sandbox"],

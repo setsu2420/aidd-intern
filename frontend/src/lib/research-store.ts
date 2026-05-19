@@ -3,6 +3,7 @@
  * Survives page refresh so the rolling display isn't lost mid-research.
  */
 import type { PerSessionState } from '@/store/agentStore';
+import { createJsonMapStore } from './json-map-store';
 
 /** Max steps to keep in storage and display. Single source of truth. */
 export const RESEARCH_MAX_STEPS = 4;
@@ -16,19 +17,10 @@ type ResearchState = {
 
 type ResearchMap = Record<string, ResearchState>;
 
-function readAll(): ResearchMap {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
+const store = createJsonMapStore<ResearchState>(STORAGE_KEY);
 
-function writeAll(map: ResearchMap): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-  } catch { /* quota exceeded — ignore */ }
+function readAll(): ResearchMap {
+  return store.readAll();
 }
 
 export function saveResearch(
@@ -41,7 +33,7 @@ export function saveResearch(
     steps: steps.slice(-RESEARCH_MAX_STEPS),
     stats,
   };
-  writeAll(map);
+  store.writeAll(map);
 }
 
 export function loadResearch(sessionId: string): ResearchState | null {
@@ -51,6 +43,7 @@ export function loadResearch(sessionId: string): ResearchState | null {
 
 export function clearResearch(sessionId: string): void {
   const map = readAll();
+  if (!(sessionId in map)) return;
   delete map[sessionId];
-  writeAll(map);
+  store.writeAll(map);
 }

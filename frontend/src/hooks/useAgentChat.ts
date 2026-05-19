@@ -21,6 +21,8 @@ import { useSessionStore } from '@/store/sessionStore';
 import { useLayoutStore } from '@/store/layoutStore';
 import { logger } from '@/utils/logger';
 
+const STREAMABLE_TOOLS = new Set(['hf_jobs', 'sandbox', 'bash']);
+
 interface UseAgentChatOptions {
   sessionId: string;
   isActive: boolean;
@@ -91,61 +93,65 @@ export function useAgentChat({ sessionId, isActive, onReady, onError, onSessionD
           const sessState = useAgentStore.getState().getSessionState(sessionId);
           const agents = { ...sessState.researchAgents };
           const agent = agents[aid] || { label: label || 'research', steps: [], stats: { toolCount: 0, tokenCount: 0, startedAt: null, finalElapsed: null } };
+          const currentSteps = sessState.researchSteps;
 
           if (log === 'Starting research sub-agent...') {
+            const startedStats = {
+              toolCount: 0,
+              tokenCount: 0,
+              startedAt: Date.now(),
+              finalElapsed: null,
+            };
             agents[aid] = {
               label: label || 'research',
               steps: [],
-              stats: { toolCount: 0, tokenCount: 0, startedAt: Date.now(), finalElapsed: null },
+              stats: startedStats,
             };
-            // Also update legacy flat fields (aggregate of all agents)
-            const allSteps = Object.values(agents).flatMap(a => a.steps);
-            const anyRunning = Object.values(agents).some(a => a.stats.startedAt !== null);
             updateSession(sessionId, {
               researchAgents: agents,
-              researchSteps: allSteps.slice(-RESEARCH_MAX_STEPS),
-              researchStats: anyRunning ? agents[aid].stats : sessState.researchStats,
+              researchSteps: currentSteps,
+              researchStats: startedStats,
               activityStatus: { type: 'tool', toolName: 'research', description: label || log },
             });
-            saveResearch(sessionId, allSteps.slice(-RESEARCH_MAX_STEPS), agents[aid].stats);
+            saveResearch(sessionId, currentSteps, startedStats);
           } else if (log.startsWith('tokens:')) {
-            agent.stats = { ...agent.stats, tokenCount: parseInt(log.slice(7), 10) };
-            agents[aid] = agent;
+            const nextAgent = { ...agent, stats: { ...agent.stats, tokenCount: parseInt(log.slice(7), 10) } };
+            agents[aid] = nextAgent;
             updateSession(sessionId, { researchAgents: agents });
           } else if (log.startsWith('tools:')) {
-            agent.stats = { ...agent.stats, toolCount: parseInt(log.slice(6), 10) };
-            agents[aid] = agent;
+            const nextAgent = { ...agent, stats: { ...agent.stats, toolCount: parseInt(log.slice(6), 10) } };
+            agents[aid] = nextAgent;
             updateSession(sessionId, { researchAgents: agents });
           } else if (log === 'Research complete.') {
             const elapsed = agent.stats.startedAt
               ? Math.round((Date.now() - agent.stats.startedAt) / 1000)
               : null;
-            agent.stats = { ...agent.stats, startedAt: null, finalElapsed: elapsed };
-            agents[aid] = agent;
+            const completedStats = { ...agent.stats, startedAt: null, finalElapsed: elapsed };
+            const completedAgent = { ...agent, stats: completedStats };
+            agents[aid] = completedAgent;
             const anyRunning = Object.values(agents).some(a => a.stats.startedAt !== null);
             updateSession(sessionId, {
               researchAgents: agents,
-              researchStats: anyRunning ? sessState.researchStats : agent.stats,
+              researchStats: anyRunning ? sessState.researchStats : completedStats,
               activityStatus: { type: 'tool', toolName: 'research', description: log },
             });
             // Clear persistence only when ALL agents are done
             if (!anyRunning) clearResearch(sessionId);
           } else {
             // Regular tool call step — append to this agent
-            agent.steps = [...agent.steps, log].slice(-RESEARCH_MAX_STEPS);
-            agents[aid] = agent;
-            const allSteps = Object.values(agents).flatMap(a => a.steps);
+            const nextSteps = [...currentSteps, log].slice(-RESEARCH_MAX_STEPS);
+            const nextAgent = { ...agent, steps: [...agent.steps, log].slice(-RESEARCH_MAX_STEPS) };
+            agents[aid] = nextAgent;
             updateSession(sessionId, {
               researchAgents: agents,
-              researchSteps: allSteps.slice(-RESEARCH_MAX_STEPS),
+              researchSteps: nextSteps,
               activityStatus: { type: 'tool', toolName: 'research', description: log },
             });
-            saveResearch(sessionId, allSteps.slice(-RESEARCH_MAX_STEPS), agent.stats);
+            saveResearch(sessionId, nextSteps, nextAgent.stats);
           }
           return;
         }
 
-        const STREAMABLE_TOOLS = new Set(['hf_jobs', 'sandbox', 'bash']);
         if (!STREAMABLE_TOOLS.has(tool)) return;
 
         const sessState = useAgentStore.getState().getSessionState(sessionId);

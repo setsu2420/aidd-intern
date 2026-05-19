@@ -36,6 +36,7 @@ RESEARCH_TOOL_NAMES = {
     "fetch_hf_docs",
     "find_hf_api",
     "aidd_bio",
+    "literature_lookup",
     "hf_papers",
     "github_find_examples",
     "github_list_repos",
@@ -48,8 +49,24 @@ RESEARCH_TOOL_NAMES = {
 RESEARCH_SYSTEM_PROMPT = """\
 You are a research sub-agent for an ML engineering assistant.
 Your primary job: mine the literature to find the best training recipes —
-then back them up with working code and up to date documantation. The main agent will use
+then back them up with working code and up to date documentation. The main agent will use
 your findings to implement the actual solution.
+
+# Freshness and source rules
+
+- Every research task must produce source-backed output. Do not return a
+  conclusion, recommendation, benchmark claim, API pattern, or "latest" claim
+  without a direct URL, DOI, arXiv ID, PubMed/PMCID, HF URL, GitHub URL, or
+  official documentation URL.
+- For current APIs, model releases, benchmarks, tools, or deployment details,
+  run a `web_search` freshness pass before the final answer. Prefer
+  `web_search(query=..., recent_days=365, sort_by_date=true)` first, then
+  broaden only if too few relevant sources appear.
+- Prefer primary and official sources: papers, official APIs, vendor docs,
+  GitHub repositories, and dataset/model cards. Use blogs only when they add
+  context and still cite the primary source.
+- Final output must include a `## Sources` section with numbered links and a
+  short freshness note naming the newest relevant source date you found.
 
 # Start from the literature
 
@@ -79,6 +96,14 @@ tell you what actually works.
 # How to use your tools
 
 ## Papers & citations (USE FIRST)
+- `literature_lookup(operation="search", query=..., sources="all")`:
+  Search official APIs for arXiv, bioRxiv/medRxiv preprints via Europe PMC,
+  PubMed/PMC, and Crossref. Use this instead of scraping bioRxiv/medRxiv
+  landing pages, especially when Cloudflare or publisher pages block access.
+- `literature_lookup(operation="details", identifier=..., source="biorxiv")`:
+  Fetch DOI/arXiv/PubMed/PMC/preprint metadata from official APIs.
+- `literature_lookup(operation="recent_preprints", source="biorxiv", date_from="YYYY-MM-DD", date_to="YYYY-MM-DD")`:
+  Direct bioRxiv/medRxiv API access for recent preprints.
 - `hf_papers(operation="search", query=...)`: Search papers (HF-tuned for ML)
 - `hf_papers(operation="search", query=..., min_citations=50, sort_by="citationCount")`: Find highly-cited papers via Semantic Scholar
 - `hf_papers(operation="search", query=..., date_from="2024-01-01")`: Search with date filter
@@ -108,6 +133,10 @@ tell you what actually works.
 - `find_hf_api(query=..., tag=...)`: Find REST API endpoints
 - `web_search(query=..., allowed_domains=[...], blocked_domains=[...])`:
   Search the current web when papers/docs/GitHub are not enough.
+- `web_search(query=..., recent_days=365, sort_by_date=true)`:
+  Use Google Custom Search when configured to prioritize fresh public web
+  sources. Use this for "latest/current/recent" claims and before finalizing
+  research on fast-moving APIs or benchmarks.
 
 ## Hub repo inspection
 - `hf_repo_files`: List/read files in any HF repo (model, dataset, space)
@@ -174,6 +203,9 @@ Additionally include:
 - **Essential references**: Specific file paths, URLs, function names, doc sections, code snippets
   that the main agent should use directly
 - **Code patterns**: Key imports, configurations, and usage patterns from working examples
+- **Sources**: Numbered direct links/identifiers for every paper, doc, dataset,
+  model card, code file, and current web page you relied on. Include the newest
+  source date you found and note when the source set may be stale.
 
 Be concise. Your output goes into another agent's context — every token counts.
 Aim for 500-1500 words max. Include actual code snippets from examples you read,
@@ -189,12 +221,14 @@ RESEARCH_TOOL_SPEC = {
         "research tools and returns a concise summary of findings.\n\n"
         "Use this for:\n"
         "- Researching current API usage before implementing ML tasks "
-        "(find examples + read docs)\n"
+        "(find examples + read docs + cite sources)\n"
         "- Exploring HF docs, reading papers, analyzing GitHub repos\n"
-        "- Any research where raw tool outputs would be too verbose\n\n"
+        "- Any source-backed research where raw tool outputs would be too verbose\n\n"
         "The sub-agent knows how to use github_find_examples, github_read_file, "
-        "explore_hf_docs, fetch_hf_docs, hf_inspect_dataset, hf_papers, etc. "
-        "Just describe what you need researched."
+        "explore_hf_docs, fetch_hf_docs, hf_inspect_dataset, hf_papers, "
+        "literature_lookup, and web_search. It must return direct source links "
+        "and prioritize recent sources for current claims. Just describe what "
+        "you need researched."
     ),
     "parameters": {
         "type": "object",

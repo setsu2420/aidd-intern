@@ -50,8 +50,14 @@ The pack currently contributes these tools:
 - `run_boltzgen`: dispatches BoltzGen constraint-conditioned generation.
 - `run_bindcraft`: dispatches BindCraft iterative optimization.
 
-The default `aidd_binder` pack remains unchanged. Use `domain_pack="none"` for
-a generic runtime with no domain-specific tools.
+The default `aidd_binder` pack is the high-level campaign layer for AIDD binder
+work. It plans target-specific campaigns, writes project manifests, ranks
+generator outputs, flags validation gaps, and keeps fold-diverse
+representatives. Use the `protein_design` pack when you need direct generator
+and validation dispatch tools. Use `domain_pack="none"` for a generic runtime
+with no domain-specific tools.
+
+For the default campaign workflow, see `docs/aidd-binder-workflow-guide.md`.
 
 ## File Map
 
@@ -138,12 +144,18 @@ gives the self-correction loop structured information for retry decisions.
 The ACE playbook is a structured JSON file that accumulates local lessons from
 generation, validation, and failure logs.
 
+This follows the Agentic Context Engineering pattern from the ACE paper: keep
+context as explicit playbook bullets, apply incremental deltas from execution
+feedback, and refine/prune the accumulated context instead of repeatedly
+rewriting a monolithic prompt.
+
 Sections:
 
 - `target_analysis`
 - `generation_dispatch`
 - `validation`
 - `failure_modes`
+- `harness_feedback`
 - `reporting`
 
 Expected use:
@@ -154,6 +166,11 @@ Expected use:
 3. Let `apply_delta` merge duplicates, increment helpful/harmful counters, and
    prune low-value overflow bullets.
 4. Render the playbook when the agent needs compact campaign memory.
+
+The `reflect_run` operation converts a bounded tool execution result into ACE
+delta items. Use it after generation, validation, clustering, or benchmark
+runs. The deterministic reflector currently recognizes CUDA OOM, missing files,
+weak interface-confidence metrics, successful runs, and failed runs.
 
 Example delta item:
 
@@ -168,6 +185,41 @@ Example delta item:
   }
 }
 ```
+
+Example reflected run:
+
+```json
+{
+  "operation": "reflect_run",
+  "playbook_path": "runs/pdl1/ace_playbook.json",
+  "tool_name": "run_pxdesign",
+  "status": "failed",
+  "stderr": "RuntimeError: CUDA out of memory",
+  "metrics": {
+    "iptm": 0.61,
+    "plddt": 77
+  }
+}
+```
+
+## Harness Evidence
+
+The evaluation scaffold now emits an ETCLOVG-style harness profile for each
+benchmark task:
+
+- `environment`: target files and execution prerequisites;
+- `tools`: required biology, generation, validation, ranking, and clustering
+  tools;
+- `control`: expected campaign flow and known hotspot constraints;
+- `learning`: ACE feedback availability;
+- `observability`: trace fields needed for replay and comparison;
+- `validation`: success filters and diversity checks;
+- `governance`: approval boundaries for expensive or external actions.
+
+Each evaluation result includes `harness_ready`, `harness_profile`, and
+`feedback_delta_items`. Feed those delta items into
+`protein_design_ace_playbook(operation="apply_delta")` to carry benchmark
+lessons forward into later campaigns.
 
 ## Approval Policy
 

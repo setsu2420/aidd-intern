@@ -6,8 +6,20 @@ if [[ $# -ne 1 ]]; then
   exit 64
 fi
 
+source_path="${BASH_SOURCE[0]}"
+while [[ -L "$source_path" ]]; do
+  source_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+  source_path="$(readlink "$source_path")"
+  if [[ "$source_path" != /* ]]; then
+    source_path="$source_dir/$source_path"
+  fi
+done
+script_dir="$(cd -P "$(dirname "$source_path")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
 server="$1"
 base_dir="${AIDD_INTERN_PROTEINMCP_HOME:-${HOME}/.cache/aidd-intern/proteinmcp}"
+workdir="${AIDD_INTERN_WORKDIR:-$repo_root}"
 auto_clone="${AIDD_INTERN_PROTEINMCP_AUTO_CLONE:-1}"
 auto_setup="${AIDD_INTERN_PROTEINMCP_AUTO_SETUP:-0}"
 
@@ -33,13 +45,13 @@ case "$server" in
   pxdesign_mcp)
     repo_url="${AIDD_INTERN_PXDESIGN_REPO:-https://github.com/bytedance/PXDesign.git}"
     repo_dir="${AIDD_INTERN_PXDESIGN_DIR:-${base_dir}/PXDesign}"
-    server_py="${AIDD_INTERN_WORKDIR:-.}/scripts/pxdesign_mcp_server.py"
+    server_py="${workdir}/scripts/pxdesign_mcp_server.py"
     default_setup_args=()
     setup_args_var="${AIDD_INTERN_PXDESIGN_SETUP_ARGS:-}"
     pythonpath="${repo_dir}${PYTHONPATH:+:${PYTHONPATH}}"
     if [[ -n "${AIDD_INTERN_PXDESIGN_MCP_PYTHON:-}" ]]; then
       python_bin="${AIDD_INTERN_PXDESIGN_MCP_PYTHON}"
-    elif command -v uv >/dev/null 2>&1 && [[ -f "${AIDD_INTERN_WORKDIR:-.}/uv.lock" ]]; then
+    elif command -v uv >/dev/null 2>&1 && [[ -f "${workdir}/uv.lock" ]]; then
       python_bin="uv"
       default_setup_args=()
     elif [[ -x "${repo_dir}/env/bin/python" ]]; then
@@ -87,7 +99,7 @@ cd "$repo_dir"
 export PYTHONPATH="$pythonpath"
 export PXDESIGN_REPO_DIR="${PXDESIGN_REPO_DIR:-$repo_dir}"
 if [[ "$server" == "pxdesign_mcp" && "$python_bin" == "uv" ]]; then
-  cd "${AIDD_INTERN_WORKDIR:-.}"
+  cd "$workdir"
   exec uv run python "$server_py"
 fi
 exec "$python_bin" "$server_py"

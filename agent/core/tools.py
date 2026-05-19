@@ -4,6 +4,7 @@ Provides ToolSpec and ToolRouter for managing both built-in and MCP tools
 """
 
 import logging
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
@@ -46,6 +47,10 @@ from agent.tools.hf_repo_git_tool import (
     hf_repo_git_handler,
 )
 from agent.tools.jobs_tool import HF_JOBS_TOOL_SPEC, hf_jobs_handler
+from agent.tools.literature_lookup_tool import (
+    LITERATURE_LOOKUP_TOOL_SPEC,
+    literature_lookup_handler,
+)
 from agent.tools.notify_tool import NOTIFY_TOOL_SPEC, notify_handler
 from agent.tools.papers_tool import HF_PAPERS_TOOL_SPEC, hf_papers_handler
 from agent.tools.plan_tool import PLAN_TOOL_SPEC, plan_tool_handler
@@ -71,6 +76,51 @@ warnings.filterwarnings(
 logger = logging.getLogger(__name__)
 
 NOT_ALLOWED_TOOL_NAMES = ["hf_jobs", "hf_doc_search", "hf_doc_fetch", "hf_whoami"]
+HF_MCP_SERVER_NAME = "hf-mcp-server"
+PROTEIN_MCP_SERVER_PREFIX = "proteinmcp-"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _mcp_server_enabled_for_startup(
+    name: str,
+    *,
+    hf_token: str | None,
+    domain_pack: str,
+) -> bool:
+    if name == HF_MCP_SERVER_NAME:
+        # The Hugging Face MCP endpoint requires auth. Without a token, FastMCP
+        # spends startup time on a doomed connection and may print a 401
+        # traceback into the TUI.
+        return bool(hf_token)
+    if name.startswith(PROTEIN_MCP_SERVER_PREFIX):
+        # ProteinMCP launchers clone/check local repos and start Python stdio
+        # servers. Keep that cost out of the default aidd_binder startup path.
+        return domain_pack == "protein_design" or _env_bool(
+            "AIDD_INTERN_ENABLE_PROTEINMCP"
+        )
+    return True
+
+
+def filter_startup_mcp_servers(
+    mcp_servers: dict[str, MCPServerConfig],
+    *,
+    hf_token: str | None,
+    domain_pack: str,
+) -> dict[str, MCPServerConfig]:
+    """Return MCP servers that should be connected during cold start."""
+    return {
+        name: server
+        for name, server in mcp_servers.items()
+        if _mcp_server_enabled_for_startup(
+            name, hf_token=hf_token, domain_pack=domain_pack
+        )
+    }
 
 
 def convert_mcp_content_to_string(content: list) -> str:
@@ -153,15 +203,19 @@ class ToolRouter:
             self.register_tool(tool)
 
         self.mcp_client: Client | None = None
-        if mcp_servers:
+        active_mcp_servers = filter_startup_mcp_servers(
+            mcp_servers, hf_token=hf_token, domain_pack=domain_pack
+        )
+        if active_mcp_servers:
             mcp_servers_payload = {}
-            for name, server in mcp_servers.items():
+            for name, server in active_mcp_servers.items():
                 data = server.model_dump()
-                if hf_token:
-                    data.setdefault("headers", {})["Authorization"] = (
-                        f"Bearer {hf_token}"
-                    )
+                if hf_token and not data.get("auth"):
+                    headers = dict(data.get("headers") or {})
+                    headers["Authorization"] = f"Bearer {hf_token}"
+                    data["headers"] = headers
                 mcp_servers_payload[name] = data
+            self.mcp_servers = mcp_servers_payload
             self.mcp_client = Client({"mcpServers": mcp_servers_payload})
         self._mcp_initialized = False
 
@@ -326,6 +380,12 @@ def create_builtin_tools(
             handler=hf_docs_fetch_handler,
         ),
         # Paper discovery and reading
+        ToolSpec(
+            name=LITERATURE_LOOKUP_TOOL_SPEC["name"],
+            description=LITERATURE_LOOKUP_TOOL_SPEC["description"],
+            parameters=LITERATURE_LOOKUP_TOOL_SPEC["parameters"],
+            handler=literature_lookup_handler,
+        ),
         ToolSpec(
             name=HF_PAPERS_TOOL_SPEC["name"],
             description=HF_PAPERS_TOOL_SPEC["description"],

@@ -62,7 +62,7 @@ router = APIRouter(prefix="/api", tags=["agent"])
 _background_teardown_tasks: set[asyncio.Task] = set()
 
 DEFAULT_CLAUDE_MODEL_ID = "bedrock/us.anthropic.claude-opus-4-6-v1"
-DEFAULT_LOCAL_MODEL_ID = "vllm/huihui-26b"
+DEFAULT_LOCAL_MODEL_ID = "vllm/qwen3.6-35b-a3b"
 DEFAULT_FREE_MODEL_ID = "moonshotai/Kimi-K2.6"
 PREMIUM_MODEL_IDS = {
     DEFAULT_CLAUDE_MODEL_ID,

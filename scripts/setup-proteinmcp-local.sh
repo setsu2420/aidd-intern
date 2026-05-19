@@ -16,6 +16,8 @@ Notes:
   - BoltzGen setup defaults to --skip-models so it does not block on a model
     download prompt. Download models later with the boltzgen MCP or CLI.
   - PXDesign setup uses the official Conda install script and never uses Docker.
+    If AIDD_INTERN_PXDESIGN_SETUP_ARGS is unset, CUDA is auto-detected from
+    nvidia-smi and passed to PXDesign/install.sh.
 EOF
 }
 
@@ -61,9 +63,39 @@ setup_pxdesign() {
 
   # shellcheck disable=SC2206
   local extra_args=(${AIDD_INTERN_PXDESIGN_SETUP_ARGS:-})
+  local env_name="pxdesign"
   if [[ ${#extra_args[@]} -eq 0 ]]; then
-    extra_args=(--pkg_manager mamba --env_name pxdesign)
+    local cuda_version="${AIDD_INTERN_PXDESIGN_CUDA_VERSION:-}"
+    if [[ -z "$cuda_version" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+      cuda_version="$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: \([0-9][0-9.]*\).*/\1/p' | head -1)"
+    fi
+    if [[ "$cuda_version" =~ ^1[3-9]\. ]]; then
+      # PXDesign/install.sh pins torch==2.3.1. PyTorch publishes cu121 wheels
+      # for 2.3.1 but not cu124 wheels, and CUDA 13-capable drivers can run
+      # cu121 wheels. Prefer the installer-supported torch/CUDA combination.
+      cuda_version="12.1"
+    fi
+    if [[ -z "$cuda_version" ]]; then
+      echo "Could not auto-detect CUDA for PXDesign." >&2
+      echo "Set AIDD_INTERN_PXDESIGN_CUDA_VERSION, for example 12.4." >&2
+      exit 66
+    fi
+    extra_args=(--pkg_manager mamba --env pxdesign --cuda-version "$cuda_version")
   fi
+
+  for ((i = 0; i < ${#extra_args[@]}; i++)); do
+    if [[ "${extra_args[$i]}" == "--env" && $((i + 1)) -lt ${#extra_args[@]} ]]; then
+      env_name="${extra_args[$((i + 1))]}"
+    fi
+  done
+
+  if command -v conda >/dev/null 2>&1 \
+    && conda env list | awk '{print $1}' | grep -Fxq "$env_name" \
+    && conda run -n "$env_name" pxdesign --help >/dev/null 2>&1; then
+    echo "PXDesign conda environment '${env_name}' is already ready."
+    return
+  fi
+
   (cd "$repo_dir" && bash install.sh "${extra_args[@]}")
 }
 

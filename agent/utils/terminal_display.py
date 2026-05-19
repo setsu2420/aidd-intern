@@ -3,7 +3,9 @@ Terminal display utilities — rich-powered CLI formatting.
 """
 
 import asyncio
+import os
 import re
+from typing import Any
 
 from rich.console import Console
 from rich.markup import escape
@@ -66,6 +68,9 @@ _THEME = Theme(
         "tool.args": "dim",
         "tool.ok": "dim green",
         "tool.fail": "dim red",
+        "context.ok": "dim green",
+        "context.warn": "bold yellow",
+        "context.danger": "bold red",
         "info": "dim",
         "muted": "dim",
         # Markdown emphasis colors
@@ -85,9 +90,118 @@ _console = Console(theme=_THEME, highlight=False)
 # Indent prefix for all agent output (aligns under the `>` prompt)
 _I = "  "
 
+_BOOT_ANIMATION_ENV = "AIDD_INTERN_BOOT_ANIMATION"
+_TUI_TYPEWRITER_ENV = "AIDD_INTERN_TUI_TYPEWRITER"
+
+
+def _boot_animation_enabled() -> bool:
+    value = os.environ.get(_BOOT_ANIMATION_ENV, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _typewriter_enabled() -> bool:
+    value = os.environ.get(_TUI_TYPEWRITER_ENV, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def get_console() -> Console:
     return _console
+
+
+def _format_token_count(tokens: int) -> str:
+    value = abs(tokens)
+    if value >= 1_000_000:
+        formatted = f"{value / 1_000_000:.1f}M"
+    elif value >= 1_000:
+        formatted = f"{value / 1_000:.1f}k"
+    else:
+        formatted = str(value)
+    return f"-{formatted}" if tokens < 0 else formatted
+
+
+def _context_bar(percent: float, width: int = 12) -> str:
+    clamped = max(0.0, min(percent, 100.0))
+    filled = int(round(clamped / 100.0 * width))
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
+
+
+def _context_status(session: Any) -> dict[str, Any] | None:
+    cm = getattr(session, "context_manager", None)
+    config = getattr(session, "config", None)
+    if cm is None or config is None:
+        return None
+
+    model_name = getattr(config, "model_name", "")
+    used_tokens = cm.estimate_usage(model_name)
+    max_tokens = int(getattr(cm, "model_max_tokens", 0) or 0)
+    threshold = int(getattr(cm, "compaction_threshold", max_tokens) or max_tokens)
+    percent = (used_tokens / max_tokens * 100.0) if max_tokens else 0.0
+
+    return {
+        "used_tokens": used_tokens,
+        "max_tokens": max_tokens,
+        "threshold": threshold,
+        "percent": percent,
+        "turns": int(getattr(session, "turn_count", 0) or 0),
+        "items": len(getattr(cm, "items", []) or []),
+    }
+
+
+def format_context_status(
+    session: Any,
+    *,
+    include_turns: bool = False,
+    include_items: bool = False,
+) -> str | None:
+    status = _context_status(session)
+    if status is None:
+        return None
+
+    used_tokens = int(status["used_tokens"])
+    max_tokens = int(status["max_tokens"])
+    threshold = int(status["threshold"])
+    percent = float(status["percent"])
+
+    text = (
+        f"Context {_context_bar(percent)} {_format_token_count(used_tokens)} / "
+        f"{_format_token_count(max_tokens)} ({percent:.1f}%)"
+    )
+    if threshold and threshold != max_tokens:
+        text += f" | compact @ {_format_token_count(threshold)}"
+    if max_tokens and used_tokens > max_tokens:
+        text += f" | over by {_format_token_count(used_tokens - max_tokens)}"
+    if include_turns:
+        text += f" | turns {status['turns']}"
+    if include_items:
+        text += f" | items {status['items']}"
+    return text
+
+
+def _context_status_style(percent: float) -> str:
+    if percent >= 90.0:
+        return "context.danger"
+    if percent >= 75.0:
+        return "context.warn"
+    return "context.ok"
+
+
+def print_context_status(
+    session: Any,
+    *,
+    include_turns: bool = False,
+    include_items: bool = False,
+) -> None:
+    status = _context_status(session)
+    if status is None:
+        return
+    text = format_context_status(
+        session,
+        include_turns=include_turns,
+        include_items=include_items,
+    )
+    if text:
+        style = _context_status_style(float(status["percent"]))
+        _console.print(f"{_I}[{style}]{escape(text)}[/{style}]")
 
 
 # ── Banner ─────────────────────────────────────────────────────────────
@@ -99,6 +213,25 @@ def print_banner(
     tool_runtime: str | None = None,
 ) -> None:
     """Print particle logo then CRT boot sequence with system info."""
+    model_label = model or "unknown"
+    user_label = hf_user or "not logged in"
+    if not _boot_animation_enabled():
+        _console.print()
+        _console.print(f"{_I}[tool.name]aidd-intern[/tool.name] runtime starting...")
+        _console.print(f"{_I}[muted]User:[/muted] {user_label}")
+        _console.print(f"{_I}[muted]Model:[/muted] {model_label}")
+        _console.print(
+            f"{_I}[muted]Tool runtime:[/muted] {tool_runtime or 'local filesystem'}"
+        )
+        _console.print(f"{_I}[muted]Tools:[/muted] loading...")
+        _console.print()
+        _console.print(
+            f"{_I}[tool.name]/help[/tool.name] [muted]for commands[/muted] · "
+            f"[tool.name]/model[/tool.name] [muted]to switch[/muted] · "
+            f"[tool.name]/quit[/tool.name] [muted]to exit[/muted]"
+        )
+        return
+
     from agent.utils.particle_logo import run_particle_logo
     from agent.utils.crt_boot import run_boot_sequence
 
@@ -108,9 +241,6 @@ def print_banner(
     # Clear screen for CRT boot — starts from top
     _console.file.write("\033[2J\033[H")
     _console.file.flush()
-
-    model_label = model or "unknown"
-    user_label = hf_user or "not logged in"
 
     # Warm gold palette matching the shimmer highlight (255, 200, 80)
     gold = "rgb(255,200,80)"
@@ -133,49 +263,23 @@ def print_banner(
 
 
 def print_init_done(tool_count: int = 0) -> None:
-    import time
-
-    f = _console.file
-    # Overwrite the "Tools: loading..." line with actual count
-    f.write(
-        "\033[A\033[A\033[A\033[K"
-    )  # Move up 3 lines (blank + help + blank) then up to tools line
-    f.write("\033[A\033[K")
-    gold = "\033[38;2;180;140;40m"
-    reset = "\033[0m"
-    tool_text = f"{_I}  Tools: {tool_count} loaded"
-    for ch in tool_text:
-        f.write(f"{gold}{ch}{reset}")
-        f.flush()
-        time.sleep(0.012)
-    f.write("\n\n")
-    # Reprint the help line
-    f.write(
-        f"{_I}\033[38;2;255;200;80m/help for commands · /model to switch · /quit to exit{reset}\n\n"
+    _console.print(f"{_I}[muted]Tools:[/muted] {tool_count} loaded")
+    _console.print(
+        f"{_I}[tool.name]/help[/tool.name] [muted]for commands[/muted] · "
+        f"[tool.name]/model[/tool.name] [muted]to switch[/muted] · "
+        f"[tool.name]/quit[/tool.name] [muted]to exit[/muted]"
     )
-    # Ready message — minimal padding
-    f.write(
-        f"{_I}\033[38;2;255;200;80mReady. Let's build something impressive.{reset}\n"
-    )
-    f.flush()
+    _console.print(f"{_I}[tool.name]Ready.[/tool.name]")
 
 
 # ── Tool calls ─────────────────────────────────────────────────────────
 
 
 def print_tool_call(tool_name: str, args_preview: str) -> None:
-    import time
-
     f = _console.file
-    # CRT-style: type out tool name in HF yellow
-    gold = "\033[38;2;255;200;80m"
-    reset = "\033[0m"
-    f.write(f"{_I}{gold}▸ ")
-    for ch in tool_name:
-        f.write(ch)
-        f.flush()
-        time.sleep(0.015)
-    f.write(f"{reset}  \033[2m{args_preview}{reset}\n")
+    f.write(
+        f"{_I}\033[38;2;255;200;80m▸ {tool_name}\033[0m  \033[2m{args_preview}\033[0m\n"
+    )
     f.flush()
 
 
@@ -265,9 +369,7 @@ class SubAgentDisplayManager:
             time_str = f"{elapsed:.0f}s"
         else:
             time_str = f"{elapsed / 60:.0f}m {elapsed % 60:.0f}s"
-        tok = agent["token_count"]
-        tok_str = f"{tok / 1000:.1f}k" if tok >= 1000 else str(tok)
-        return f"{agent['tool_count']} tool uses · {tok_str} tokens · {time_str}"
+        return time_str
 
     def _erase(self) -> None:
         if self._lines_on_screen > 0:
@@ -277,32 +379,13 @@ class SubAgentDisplayManager:
             f.flush()
 
     def _render_agent_lines(self, agent: dict, compact: bool = False) -> list[str]:
-        """Render one agent's block.
-
-        compact=True → single line (label + stats + most-recent tool name);
-        compact=False → header + up to _MAX_VISIBLE rolling tool-call lines.
-        We use compact mode when multiple agents are live so the total live
-        region stays small enough to fit on one screen. Otherwise cursor-up
-        can't reach lines that have scrolled into scrollback, and every
-        redraw pollutes history with a stale copy.
-        """
+        """Render one concise research-agent status line."""
         stats = self._format_stats(agent)
         label = agent["label"]
         header = f"{_I}\033[38;2;255;200;80m▸ {label}\033[0m"
         if stats:
             header += f"  \033[2m({stats})\033[0m"
-        if compact:
-            latest = agent["calls"][-1] if agent["calls"] else ""
-            if latest:
-                # Strip long json tails for the inline view
-                short = latest.split("  ")[0] if "  " in latest else latest
-                header += f" \033[2m·\033[0m \033[2m{short}\033[0m"
-            return [header]
-        lines = [header]
-        visible = agent["calls"][-self._MAX_VISIBLE :]
-        for desc in visible:
-            lines.append(f"{_I}  \033[2m{desc}\033[0m")
-        return lines
+        return [header]
 
     def _redraw(self) -> None:
         f = _console.file
@@ -349,7 +432,6 @@ async def print_markdown(
     instant: bool = False,
 ) -> None:
     import io
-    import random
     from rich.padding import Padding
 
     _console.print()
@@ -375,12 +457,15 @@ async def print_markdown(
 
     f = _console.file
 
-    # Headless / non-interactive: dump the rendered markdown in one write.
-    if instant:
+    # Default TUI path is buffered: streaming already arrives in paragraph-sized
+    # chunks, and per-character flush loops make terminals feel sluggish.
+    if instant or not _typewriter_enabled():
         f.write(rendered)
         f.write("\n")
         f.flush()
         return
+
+    import random
 
     # CRT typewriter effect — async so the event loop can service signal
     # handlers (Ctrl+C during streaming) between characters. If cancelled
@@ -388,20 +473,18 @@ async def print_markdown(
     # doesn't bleed onto the "interrupted" line, and return.
     rng = random.Random(42)
     cancelled = False
-    for ch in rendered:
+    chunk_size = 24
+    for offset in range(0, len(rendered), chunk_size):
         if cancel_event is not None and cancel_event.is_set():
             cancelled = True
             break
-        f.write(ch)
+        chunk = rendered[offset : offset + chunk_size]
+        f.write(chunk)
         f.flush()
-        if ch == "\n":
-            await asyncio.sleep(0.002)
-        elif ch == " ":
-            await asyncio.sleep(0.002)
-        elif rng.random() < 0.03:
-            await asyncio.sleep(0.015)
-        else:
-            await asyncio.sleep(0.004)
+        pause = 0.0015 if ("\n" in chunk or " " in chunk) else 0.003
+        if rng.random() < 0.05:
+            pause *= 2
+        await asyncio.sleep(pause)
     f.write("\033[0m\n" if cancelled else "\n")
     f.flush()
 
@@ -419,9 +502,8 @@ def print_interrupted() -> None:
 
 
 def print_compacted(old_tokens: int, new_tokens: int) -> None:
-    _console.print(
-        f"{_I}[dim]context compacted: {old_tokens:,} → {new_tokens:,} tokens[/dim]"
-    )
+    # Compaction is internal context maintenance. Keep it out of normal output.
+    return
 
 
 # ── Approval ───────────────────────────────────────────────────────────

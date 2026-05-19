@@ -1,5 +1,5 @@
 {
-  "model_name": "${AIDD_INTERN_DEFAULT_MODEL_ID:-vllm/huihui-26b}",
+  "model_name": "${AIDD_INTERN_DEFAULT_MODEL_ID:-vllm/qwen3.6-35b-a3b}",
   "domain_pack": "aidd_binder",
   "save_sessions": true,
   "session_dataset_repo": "smolagents/aidd-intern-sessions",
@@ -17,7 +17,7 @@
   "mcpServers": {
     "hf-mcp-server": {
       "transport": "http",
-      "url": "https://huggingface.co/mcp?login"
+      "url": "https://hf.co/mcp"
     },
     "proteinmcp-bindcraft": {
       "transport": "stdio",

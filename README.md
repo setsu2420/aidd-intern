@@ -15,6 +15,55 @@ events; domain packs add specialized prompts and tools. The default domain pack
 supports AIDD binder workflows, and the optional `protein_design` pack adds
 protein binder generation, orthogonal validation, and ACE playbook memory.
 
+## Node.js CLI Package
+
+The npm package is the lightweight operational harness for a running
+AIDD-Intern backend. It is intentionally separate from the Python interactive
+agent runtime: the Node CLI runs smoke checks, integration checks, and
+evaluation fixtures against `/api`.
+
+Install from npm after the package is published:
+
+```bash
+npm install -g aidd-intern
+aidd-intern --help
+```
+
+Use it against a local or hosted backend:
+
+```bash
+aidd-intern smoke
+aidd-intern integration --json
+aidd-intern eval --fixtures fixtures/prompts.json --limit 3
+aidd-intern eval --judge
+```
+
+Useful environment variables:
+
+```bash
+AIDD_INTERN_BACKEND_URL=http://[::1]:7860
+AIDD_INTERN_HF_TOKEN=<optional-hugging-face-token>
+AIDD_INTERN_TEST_MODEL=<optional-model-id>
+AIDD_INTERN_JUDGE_MODEL=openai/gpt-4.1-mini
+AIDD_INTERN_JUDGE_API_KEY=<optional-openai-compatible-key>
+```
+
+Legacy `HARNESS_*` variables still work for migration, but new automation
+should prefer `AIDD_INTERN_*`.
+
+Source development:
+
+```bash
+npm ci
+npm run build
+npm run lint
+npm test
+npm pack --dry-run
+```
+
+The publish surface is constrained by `package.json` `files` and `exports`, so
+the npm tarball contains only `dist/`, `fixtures/`, `README.md`, and `LICENSE`.
+
 ## Project Layout
 
 - `agent/` contains the reusable async agent runtime, CLI, context manager,
@@ -29,10 +78,16 @@ protein binder generation, orthogonal validation, and ACE playbook memory.
   domain-pack, trace, and MCP server configuration.
 - `scripts/` contains the local dev launcher, ProteinMCP setup/launch helpers,
   KPI/SFT utilities, sandbox cleanup, and local launcher installer.
+- `src/` contains the npm package source for `aidd-intern`. It exposes the
+  Commander CLI, typed backend client, SSE parser, trace collector, and
+  evaluation utilities.
+- `fixtures/` contains evaluation prompts shipped with the npm package.
 - `tests/` contains pytest unit and integration tests; `evals/protein_design/`
   contains the protein-design benchmark scaffold.
-- `docs/` contains architecture, context management, multi-agent, and
-  protein-design domain-pack notes.
+- `tests/harness/` contains the Node CLI/package tests that do not require a
+  running backend.
+- `docs/` contains architecture, context management, multi-agent, binder
+  workflow, and protein-design domain-pack notes.
 
 ## Quick Start
 
@@ -58,11 +113,13 @@ ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using anthropic models
 OPENAI_API_KEY=<your-openai-api-key> # if using openai models
 OPENROUTER_API_KEY=<your-openrouter-api-key> # if using openrouter/<model>
 SILICONFLOW_API_KEY=<your-siliconflow-api-key> # if using siliconflow/<model>
-AIDD_INTERN_DEFAULT_MODEL_ID=vllm/huihui-26b # replace suffix with /v1/models id if needed
-VLLM_BASE_URL=http://192.168.4.6:8108 # vLLM OpenAI-compatible endpoint on peacock05
+AIDD_INTERN_DEFAULT_MODEL_ID=llamacpp/qwen3.6-35b-a3b-gguf # replace suffix with /v1/models id if needed
+LLAMACPP_BASE_URL=http://127.0.0.1:30000 # local SGLang/vLLM-style OpenAI-compatible endpoint
 AIDD_INTERN_PROTEINMCP_HOME=~/.cache/aidd-intern/proteinmcp # local ProteinMCP installs
 LOCAL_LLM_BASE_URL=http://localhost:8000 # shared fallback for local model prefixes
 LOCAL_LLM_API_KEY=<optional-local-api-key> # optional shared local API key
+GOOGLE_SEARCH_API_KEY=<google-custom-search-api-key> # enables real Google Search results
+GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id> # required with the API key
 HF_TOKEN=<your-hugging-face-token>
 GITHUB_TOKEN=<github-personal-access-token>
 ```
@@ -120,7 +177,10 @@ aidd-intern-dev
 By default, this creates `~/.local/bin/aidd-intern-dev`. Make sure
 `~/.local/bin` is in your `PATH`.
 
-### Usage
+### Python Agent Runtime Usage
+
+The commands below refer to the Python interactive/headless runtime installed
+with `uv tool install -e .`. They are not the npm test harness commands above.
 
 **Interactive mode** (start a chat session):
 
@@ -142,7 +202,7 @@ aidd-intern --model openai/gpt-5.5 "your prompt"              # requires OPENAI_
 aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"   # requires OPENROUTER_API_KEY
 aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt" # requires SILICONFLOW_API_KEY
 aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model vllm/huihui-26b "your prompt"
+aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
 aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 aidd-intern --sandbox-tools "your prompt"                         # use HF Space sandbox tools
 aidd-intern --max-iterations 100 "your prompt"
@@ -161,7 +221,7 @@ server first, then select it with a provider-specific model prefix:
 
 ```bash
 aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model vllm/huihui-26b "your prompt"
+aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
 aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
 ```
 
@@ -182,9 +242,9 @@ local variables. Base URLs may include or omit `/v1`.
 
 For a vLLM server, the suffix after `vllm/` must match one of the model ids
 returned by the server's OpenAI-compatible `GET /v1/models` endpoint. If the
-server was launched with `--served-model-name huihui-26b`, use
-`AIDD_INTERN_DEFAULT_MODEL_ID=vllm/huihui-26b`; otherwise set it to the exact
-returned id, for example `vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct`.
+server was launched with `--served-model-name qwen3.6-35b-a3b-gguf`, use
+`AIDD_INTERN_DEFAULT_MODEL_ID=llamacpp/qwen3.6-35b-a3b-gguf`; otherwise set it to
+the exact returned id, for example `vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct`.
 
 Unknown local and OpenAI-compatible models default to a conservative 65,536
 token context policy. The session context manager tightens compaction
@@ -197,6 +257,26 @@ different limit:
 AIDD_INTERN_MODEL_MAX_TOKENS=32768 aidd-intern --model vllm/my-small-model
 AIDD_INTERN_MODEL_MAX_TOKENS=131072 aidd-intern --model ollama/qwen-long
 ```
+
+For a local, no-GPU, research-only workflow, keep the agent on generic tools
+and disable the binder/protein domain pack:
+
+```bash
+aidd-intern --domain-pack none --model openrouter/openai/gpt-5.2 "research the latest tools for X"
+```
+
+That mode keeps the prompt focused on research, web search, docs, papers, and
+GitHub examples instead of binder or protein-generation workflows.
+
+## Research Sources
+
+The research sub-agent is built to return source-backed findings. It prefers
+official docs, papers, dataset/model cards, GitHub code, and live web results.
+When `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` are set, `web_search`
+uses Google Custom Search directly and can prioritize recent pages with
+`recent_days` and `sort_by_date`.
+Set `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` only if you want DuckDuckGo
+fallback when Google Search is unavailable.
 
 **ProteinMCP tools:**
 
@@ -249,8 +329,11 @@ domain pack contributes binder-specific workflow tools and prompt policy.
 Supported values:
 
 - `aidd_binder`: default AIDD binder workflow pack. Registers `binder_design`,
-  which creates project manifests, inspects generator outputs, and ranks
-  candidates from BindCraft, BoltzGen, PXDesign, or compatible CSV metric files.
+  which plans binder campaigns, creates project manifests, inspects generator
+  outputs, ranks candidates from BindCraft, BoltzGen, PXDesign, or compatible
+  CSV metric files, flags validation gaps, keeps diverse representatives by
+  fold cluster, and can export a reusable skill card from a completed
+  campaign. See `docs/aidd-binder-workflow-guide.md`.
 - `protein_design`: protein binder design pack. Registers generation tools for
   PXdesign, BoltzGen, and BindCraft; validation helpers for Chai-1, Protenix,
   and Foldseek; approval thresholds for expensive GPU runs; and an ACE playbook
@@ -595,6 +678,23 @@ For frontend changes, also run:
 cd frontend
 npm run lint
 npm run build
+```
+
+For the Node.js npm package in `src/`, run from the repository root:
+
+```bash
+npm run build
+npm run lint
+npm test
+npm pack --dry-run
+```
+
+The backend-dependent Node commands are:
+
+```bash
+aidd-intern smoke
+aidd-intern integration
+aidd-intern eval --fixtures fixtures/prompts.json --limit 3
 ```
 
 For domain-pack changes, also run:

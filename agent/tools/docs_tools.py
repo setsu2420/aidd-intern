@@ -784,10 +784,7 @@ async def search_openapi_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 async def _get_api_search_tool_spec() -> dict[str, Any]:
-    """Generate OpenAPI tool spec with tags populated at runtime."""
-    spec = await _fetch_openapi_spec()
-    tags = _extract_all_tags(spec)
-
+    """Generate OpenAPI tool spec without fetching the spec at startup."""
     return {
         "name": "find_hf_api",
         "description": (
@@ -817,10 +814,10 @@ async def _get_api_search_tool_spec() -> dict[str, Any]:
                 },
                 "tag": {
                     "type": "string",
-                    "enum": tags,
                     "description": (
-                        "Filter by API category. Use alone to browse all endpoints in a category, "
-                        "or combine with 'query' to search within a category."
+                        "Optional API category tag. Use alone to browse all endpoints in a category, "
+                        "or combine with 'query' to search within a category. Examples: models, "
+                        "datasets, spaces, collections, webhooks, organizations."
                     ),
                 },
             },
