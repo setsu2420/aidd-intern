@@ -16,7 +16,7 @@ Other protein-design or broader ML capabilities can be added later.
 
 ## Current Scope
 
-The default domain pack is `aidd_binder`.
+The default workflow is `aidd_binder`.
 
 The Binder Design tool must support:
 

@@ -20,13 +20,14 @@ def test_startup_filters_optional_mcp_servers_without_token(monkeypatch):
     }
 
     active = filter_startup_mcp_servers(
-        servers, hf_token=None, domain_pack="aidd_binder"
+        servers,
+        hf_token=None,
     )
 
     assert set(active) == {"custom"}
 
 
-def test_startup_enables_authenticated_hf_and_protein_design_mcp(monkeypatch):
+def test_startup_enables_proteinmcp_only_when_explicitly_requested(monkeypatch):
     monkeypatch.delenv("AIDD_INTERN_ENABLE_PROTEINMCP", raising=False)
     servers = {
         "hf-mcp-server": _server(transport="http", url="https://hf.co/mcp"),
@@ -34,9 +35,12 @@ def test_startup_enables_authenticated_hf_and_protein_design_mcp(monkeypatch):
         "custom": _server(transport="http", url="http://127.0.0.1/mcp"),
     }
 
-    active = filter_startup_mcp_servers(
-        servers, hf_token="hf-token", domain_pack="protein_design"
-    )
+    active = filter_startup_mcp_servers(servers, hf_token="hf-token")
+
+    assert set(active) == {"hf-mcp-server", "custom"}
+
+    monkeypatch.setenv("AIDD_INTERN_ENABLE_PROTEINMCP", "1")
+    active = filter_startup_mcp_servers(servers, hf_token="hf-token")
 
     assert set(active) == {"hf-mcp-server", "proteinmcp-bindcraft", "custom"}
 
@@ -58,7 +62,6 @@ def test_tool_router_does_not_construct_mcp_client_when_all_servers_skipped(
         },
         hf_token=None,
         local_mode=True,
-        domain_pack="aidd_binder",
     )
 
     assert router.mcp_client is None
@@ -77,7 +80,6 @@ def test_tool_router_forwards_hf_token_as_bearer_header(monkeypatch):
         {"hf-mcp-server": _server(transport="http", url="https://hf.co/mcp")},
         hf_token="hf-token",
         local_mode=True,
-        domain_pack="aidd_binder",
     )
 
     config = seen["payload"]["mcpServers"]["hf-mcp-server"]

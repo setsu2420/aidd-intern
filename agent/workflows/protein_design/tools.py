@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agent.domain_packs.protein_design.ace import (
+from agent.workflows.protein_design.ace import (
     ACE_PLAYBOOK_TOOL_SPEC,
     ace_playbook_handler,
 )
@@ -534,7 +534,7 @@ async def _bindcraft_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
 
 def create_protein_design_tools(tool_spec_cls: type | None = None) -> list[Any]:
-    """Create ToolSpec instances for the protein-design domain pack."""
+    """Create ToolSpec instances for protein-design workflows."""
     if tool_spec_cls is None:
         from agent.core.tools import ToolSpec
 

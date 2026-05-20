@@ -15,7 +15,6 @@ import litellm
 from litellm import Message
 
 from agent.context_manager.manager import ContextManager
-from agent.domain_packs import DEFAULT_DOMAIN_PACK
 from agent.messaging.gateway import NotificationGateway
 from agent.messaging.models import NotificationRequest
 
@@ -210,7 +209,6 @@ class Session:
             tool_specs=tool_specs,
             hf_token=hf_token,
             local_mode=local_mode,
-            domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
         )
         self.event_queue = event_queue
         self.session_id = session_id or str(uuid.uuid4())

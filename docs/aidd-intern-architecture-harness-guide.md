@@ -8,15 +8,16 @@ This document explains how AIDD-Intern is structured and how to reuse the same
 architecture to build harnesses for other domains.
 
 The main conclusion is that AIDD-Intern is less a single ML app than a reusable
-agent harness with a dedicated AI drug discovery domain pack:
+agent harness with AI drug discovery workflow modules:
 
 - a generic async agent runtime: session, context, model call loop, tool routing,
   approval, events, persistence, telemetry;
-- an AIDD domain pack: biomedical database tools, prompts, research tools, Hub
+- AIDD workflow modules: biomedical database tools, prompts, research tools, Hub
   tools, sandbox, Jobs, dataset upload, Trackio, HF OAuth and Space deployment;
 - two surfaces over the same runtime: local CLI and hosted web UI.
 
-For a new domain harness, keep the runtime spine and replace the domain pack.
+For a new domain harness, keep the runtime spine and add focused workflow
+modules.
 
 ## Source Notes
 
@@ -232,7 +233,7 @@ The router blocks a few MCP names (`hf_jobs`, `hf_doc_search`, `hf_doc_fetch`,
 
 ### Built-in Tool Families
 
-The current ML domain pack registers these categories in `agent/core/tools.py`:
+The current built-in tool registry includes these categories in `agent/core/tools.py`:
 
 - research sub-agent: `research`;
 - HF docs/API: `explore_hf_docs`, `fetch_hf_docs`, `find_hf_api`;
@@ -273,7 +274,7 @@ layer only. Example: a finance harness might auto-approve read-only market data
 queries but require manual approval for order placement, account mutation, or
 paid data acquisition.
 
-## Domain Pack: What Is ML-Specific
+## Workflow Modules: What Is ML-Specific
 
 The AIDD-Intern specialization is concentrated in these places:
 
@@ -489,11 +490,11 @@ class HarnessSpec:
     telemetry_events: list[str]
 ```
 
-The existing code can grow toward this by extracting AIDD-specific registration
-from `create_builtin_tools()` into a domain module:
+The existing code can grow toward this by keeping AIDD-specific registration
+behind focused workflow modules:
 
 ```text
-agent/domain_packs/
+agent/workflows/
   ml/
     prompt.yaml
     tools.py
@@ -503,16 +504,6 @@ agent/domain_packs/
   finance/
   legal/
   robotics/
-```
-
-Then config chooses:
-
-```json
-{
-  "domain_pack": "ml",
-  "tool_runtime": "sandbox",
-  "model_name": "..."
-}
 ```
 
 ## What to Keep for Any Domain
@@ -646,16 +637,16 @@ Keep the chat for reasoning and status. Put inspection artifacts in panels.
 
 ## Suggested Migration Plan
 
-### Phase 1: Extract Domain Pack Boundary
+### Phase 1: Isolate Workflow Modules
 
-Goal: make ML the first domain pack without changing behavior.
+Goal: keep ML-specific behavior isolated without changing runtime behavior.
 
 Changes:
 
-- Create `agent/domain_packs/ml/`.
+- Create a dedicated workflow module for ML behavior.
 - Move `system_prompt_v3.yaml` or add a domain prompt selector.
-- Move built-in ML tool registration into `agent/domain_packs/ml/tools.py`.
-- Add `Config.domain_pack`.
+- Move built-in ML tool registration into the workflow module when it becomes
+  large enough to justify the split.
 - Keep `ToolRouter` API stable.
 
 Validation:
@@ -782,7 +773,7 @@ Replace:
 
 ## Risk Areas in Current Architecture
 
-- The domain pack is implicit. AIDD-specific prompts, tools, approval rules and
+- AIDD-specific prompts, tools, approval rules and
   UI behavior are spread across modules.
 - The web backend is stateful; horizontal scaling would need shared execution
   ownership or a worker queue, not just Mongo snapshots.
@@ -816,7 +807,7 @@ Before shipping a new domain harness:
 ## Minimal Implementation Template
 
 ```text
-agent/domain_packs/<domain>/
+agent/workflows/<domain>/
   __init__.py
   prompt.yaml
   tools.py
@@ -854,8 +845,8 @@ class DomainApprovalPolicy:
 `runner.py`:
 
 ```python
-async def run_task(task: HarnessTask, model: str, domain_pack: str) -> HarnessResult:
-    session = create_isolated_session(model=model, domain_pack=domain_pack)
+async def run_task(task: HarnessTask, model: str) -> HarnessResult:
+    session = create_isolated_session(model=model)
     await submit(task.input)
     await wait_for_terminal_event()
     return score(session, task)
@@ -866,6 +857,6 @@ async def run_task(task: HarnessTask, model: str, domain_pack: str) -> HarnessRe
 AIDD-Intern's durable asset is the agent harness: queue-driven sessions,
 tool-calling loop, approval gates, sandbox/compute execution, event streaming,
 persistence, and telemetry. The AIDD-specific behavior is substantial but
-replaceable. To build other domain harnesses, do not fork the entire app. First
-extract the domain pack boundary, then add domain tools, approval policy,
-environment setup, scorers, and artifact renderers.
+replaceable. To build other domain harnesses, do not fork the entire app. Add
+focused workflow tools, approval policy, environment setup, scorers, and
+artifact renderers.

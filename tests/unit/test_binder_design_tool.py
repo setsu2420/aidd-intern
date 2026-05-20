@@ -384,9 +384,3 @@ def test_binder_design_is_registered_for_llm():
     )
     assert "skill_name" in specs["binder_design"].parameters["properties"]
 
-
-def test_binder_design_is_omitted_without_domain_pack():
-    tools = create_builtin_tools(local_mode=True, domain_pack="none")
-    specs = {tool.name: tool for tool in tools}
-
-    assert "binder_design" not in specs

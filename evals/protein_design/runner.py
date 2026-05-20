@@ -1,4 +1,4 @@
-"""Headless evaluation harness for the protein-design domain pack."""
+"""Headless evaluation harness for protein-design workflows."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _harness_profile(task: EvaluationTask, target_exists: bool) -> dict[str, Any
                     "trace_fields": [
                         "task_id",
                         "model_name",
-                        "domain_pack",
+                        "workflow",
                         "target_available",
                         "status",
                     ]
@@ -171,7 +171,7 @@ async def run_evaluation_suite(
             {
                 "task": asdict(task),
                 "model_name": model_name,
-                "domain_pack": "protein_design",
+                "workflow": "protein_design",
                 "target_available": target_exists,
                 "status": "skipped_missing_target"
                 if not harness_ready

@@ -35,17 +35,3 @@ def test_estimate_usage_uses_current_items_without_mutating_running_usage():
 
     assert cm.running_context_usage == 7
 
-
-def test_domain_pack_none_injects_research_only_context(monkeypatch):
-    monkeypatch.setattr(manager, "_get_hf_username", lambda _token=None: "unknown")
-
-    cm = manager.ContextManager(
-        model_max_tokens=65_536,
-        tool_specs=[],
-        hf_token=None,
-        local_mode=True,
-        domain_pack="none",
-    )
-
-    assert "Research-only mode" in cm.system_prompt
-    assert "The active domain pack is `none`" in cm.system_prompt

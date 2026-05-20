@@ -96,4 +96,4 @@ For large hosted models:
 - `agent/core/session.py`: model-window discovery and model-switch updates.
 - `agent/context_manager/manager.py`: compaction policy and summarization.
 - `agent/core/agent_loop.py`: per-call output budgeting and overflow recovery.
-- `agent/domain_packs/protein_design/ace.py`: structured campaign memory.
+- `agent/workflows/protein_design/ace.py`: structured campaign memory.

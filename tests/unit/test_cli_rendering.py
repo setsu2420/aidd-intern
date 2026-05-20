@@ -184,10 +184,9 @@ def test_subagent_display_does_not_spawn_background_redraw(monkeypatch):
 def test_cli_forwards_model_flag_to_interactive_main(monkeypatch):
     seen: dict[str, object] = {}
 
-    async def fake_main(*, model=None, sandbox_tools=False, domain_pack=None):
+    async def fake_main(*, model=None, sandbox_tools=False):
         seen["model"] = model
         seen["sandbox_tools"] = sandbox_tools
-        seen["domain_pack"] = domain_pack
 
     monkeypatch.setattr(sys, "argv", ["aidd-intern", "--model", "openai/gpt-5.5"])
     monkeypatch.setattr(main_mod, "main", fake_main)
@@ -197,24 +196,22 @@ def test_cli_forwards_model_flag_to_interactive_main(monkeypatch):
     assert seen == {
         "model": "openai/gpt-5.5",
         "sandbox_tools": False,
-        "domain_pack": None,
     }
 
 
 def test_cli_forwards_sandbox_flag_to_interactive_main(monkeypatch):
     seen: dict[str, object] = {}
 
-    async def fake_main(*, model=None, sandbox_tools=False, domain_pack=None):
+    async def fake_main(*, model=None, sandbox_tools=False):
         seen["model"] = model
         seen["sandbox_tools"] = sandbox_tools
-        seen["domain_pack"] = domain_pack
 
     monkeypatch.setattr(sys, "argv", ["aidd-intern", "--sandbox-tools"])
     monkeypatch.setattr(main_mod, "main", fake_main)
 
     main_mod.cli()
 
-    assert seen == {"model": None, "sandbox_tools": True, "domain_pack": None}
+    assert seen == {"model": None, "sandbox_tools": True}
 
 
 @pytest.mark.asyncio
@@ -278,7 +275,6 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
         max_iterations=None,
         stream=True,
         sandbox_tools=False,
-        domain_pack=None,
     ):
         seen.update(
             {
@@ -287,7 +283,6 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
                 "max_iterations": max_iterations,
                 "stream": stream,
                 "sandbox_tools": sandbox_tools,
-                "domain_pack": domain_pack,
             }
         )
 
@@ -306,35 +301,6 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
         "max_iterations": None,
         "stream": False,
         "sandbox_tools": True,
-        "domain_pack": None,
-    }
-
-
-def test_cli_forwards_domain_pack_flag(monkeypatch):
-    seen: dict[str, object] = {}
-
-    async def fake_main(*, model=None, sandbox_tools=False, domain_pack=None):
-        seen.update(
-            {
-                "model": model,
-                "sandbox_tools": sandbox_tools,
-                "domain_pack": domain_pack,
-            }
-        )
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["aidd-intern", "--domain-pack", "none", "--model", "openai/gpt-5.5"],
-    )
-    monkeypatch.setattr(main_mod, "main", fake_main)
-
-    main_mod.cli()
-
-    assert seen == {
-        "model": "openai/gpt-5.5",
-        "sandbox_tools": False,
-        "domain_pack": "none",
     }
 
 

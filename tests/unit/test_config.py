@@ -166,7 +166,6 @@ def test_default_cli_config_registers_proteinmcp_and_local_model(monkeypatch):
 
     assert config.model_name == "vllm/huihui-26b"
     assert config.models_config == "configs/models.json"
-    assert config.domain_pack == "aidd_binder"
     hf_mcp = config.mcpServers["hf-mcp-server"]
     bindcraft = config.mcpServers["proteinmcp-bindcraft"]
     boltzgen = config.mcpServers["proteinmcp-boltzgen"]
@@ -208,15 +207,3 @@ def test_model_catalog_default_applies_when_env_default_missing(tmp_path, monkey
     config = config_module.load_config(str(config_path))
 
     assert config.model_name == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
-
-
-def test_domain_pack_none_is_accepted(tmp_path):
-    config_path = tmp_path / "config.json"
-    _write_json(
-        config_path,
-        {"model_name": "moonshotai/Kimi-K2.6", "domain_pack": "none"},
-    )
-
-    config = config_module.load_config(str(config_path))
-
-    assert config.domain_pack == "none"

@@ -1,1 +1,1 @@
-"""AIDD Binder domain pack."""
+"""AIDD Binder workflow compatibility namespace."""
