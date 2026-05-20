@@ -55,6 +55,38 @@ export function createProgram(): Command {
     });
 
   program
+    .command('update')
+    .description('Update the globally installed npm package or this source checkout')
+    .option('--check', 'Check the globally installed npm package for available updates')
+    .option('--dry-run', 'Print update commands without executing them')
+    .option('--checkout', 'Update this source checkout with scripts/update-local.sh')
+    .option('--with-frontend', 'When used with --checkout, also refresh frontend dependencies')
+    .action(async (opts: { check?: boolean; dryRun?: boolean; checkout?: boolean; withFrontend?: boolean }) => {
+      const env = resolveEnv(program.opts<CliOptions>());
+      await runCommand(env, async () => {
+        const { runUpdate } = await import('./commands/update.js');
+        return runUpdate({
+          check: opts.check ?? false,
+          dryRun: opts.dryRun ?? false,
+          checkout: opts.checkout ?? false,
+          withFrontend: opts.withFrontend ?? false,
+        });
+      });
+    });
+
+  program
+    .command('configure-llm')
+    .description('Print provider-specific LLM environment setup steps')
+    .argument('[provider]', 'openrouter, openai, anthropic, siliconflow, or local')
+    .action(async (provider?: string) => {
+      const env = resolveEnv(program.opts<CliOptions>());
+      await runCommand(env, async () => {
+        const { runConfigureLlm } = await import('./commands/configure-llm.js');
+        return runConfigureLlm(provider);
+      });
+    });
+
+  program
     .command('integration')
     .description('Chat flow, SSE streaming, and tool execution')
     .action(async () => {

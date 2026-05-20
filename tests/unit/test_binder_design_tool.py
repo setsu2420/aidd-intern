@@ -369,7 +369,12 @@ def test_binder_design_is_registered_for_llm():
     tools = create_builtin_tools(local_mode=True)
     specs = {tool.name: tool for tool in tools}
 
+    assert "aidd_prepare" in specs
     assert "binder_design" in specs
+    assert (
+        "run_preparation"
+        in specs["aidd_prepare"].parameters["properties"]["operation"]["enum"]
+    )
     assert (
         "rank_candidates"
         in specs["binder_design"].parameters["properties"]["operation"]["enum"]

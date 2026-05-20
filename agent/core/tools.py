@@ -667,6 +667,11 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             "agent.tools.aidd_bio_tool", "AIDD_BIO_TOOL_SPEC", "aidd_bio_handler"
         ),
         _tool_spec_from_module(
+            "agent.tools.aidd_prepare_tool",
+            "AIDD_PREPARE_TOOL_SPEC",
+            "aidd_prepare_handler",
+        ),
+        _tool_spec_from_module(
             "agent.tools.dataset_tools",
             "HF_INSPECT_DATASET_TOOL_SPEC",
             "hf_inspect_dataset_handler",

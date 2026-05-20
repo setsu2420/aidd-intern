@@ -1843,10 +1843,92 @@ def cli():
         action="store_true",
         help="Use HF Space sandbox tools instead of local filesystem tools",
     )
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Run local installation diagnostics and exit",
+    )
+    parser.add_argument(
+        "--prepare-aidd",
+        action="store_true",
+        help=(
+            "Run the local AIDD preparation stage: literature metadata, PDB "
+            "download, structure crop, and hotspot residue ranking"
+        ),
+    )
+    parser.add_argument(
+        "--target-name",
+        default=None,
+        help="Target name for --prepare-aidd, e.g. PD-L1",
+    )
+    parser.add_argument(
+        "--pdb-id",
+        default=None,
+        help="RCSB PDB id for --prepare-aidd, e.g. 4ZQK",
+    )
+    parser.add_argument(
+        "--target-chains",
+        default=None,
+        help="Comma-separated target chain ids for --prepare-aidd, e.g. A",
+    )
+    parser.add_argument(
+        "--partner-chains",
+        default=None,
+        help="Comma-separated partner chain ids for --prepare-aidd, e.g. B",
+    )
+    parser.add_argument(
+        "--residue-ranges",
+        default=None,
+        help="Optional crop ranges for --prepare-aidd, e.g. A:19-134",
+    )
+    parser.add_argument(
+        "--research-query",
+        default=None,
+        help="Optional literature query for --prepare-aidd",
+    )
+    parser.add_argument(
+        "--prep-project-dir",
+        default=None,
+        help="Optional output directory for --prepare-aidd artifacts",
+    )
+    parser.add_argument(
+        "--literature-limit",
+        type=int,
+        default=5,
+        help="Number of literature metadata results for --prepare-aidd",
+    )
+    parser.add_argument(
+        "--hotspot-cutoff",
+        type=float,
+        default=4.5,
+        help="Atom contact cutoff in Angstrom for --prepare-aidd hotspot ranking",
+    )
     args = parser.parse_args()
 
     try:
-        if args.prompt:
+        if args.doctor:
+            from agent.core.doctor import run_doctor
+
+            raise SystemExit(run_doctor())
+        elif args.prepare_aidd:
+            from agent.tools.aidd_prepare_tool import run_aidd_preparation_cli
+
+            raise SystemExit(
+                asyncio.run(
+                    run_aidd_preparation_cli(
+                        target_name=args.target_name,
+                        pdb_id=args.pdb_id,
+                        target_chains=args.target_chains,
+                        partner_chains=args.partner_chains,
+                        project_dir=args.prep_project_dir,
+                        residue_ranges=args.residue_ranges,
+                        research_query=args.research_query,
+                        literature_limit=args.literature_limit,
+                        hotspot_cutoff=args.hotspot_cutoff,
+                    )
+                )
+            )
+        elif args.prompt:
             max_iter = args.max_iterations
             if max_iter is not None and max_iter < 0:
                 max_iter = 10_000  # effectively unlimited

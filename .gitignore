@@ -1,12 +1,14 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+*.pyo
 build/
 dist/
 wheels/
 *.egg-info
 .pytest_cache/
 .mypy_cache/
+.pyre/
 .tox/
 .coverage
 htmlcov/
@@ -50,12 +52,16 @@ frontend/.eslintcache
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
+frontend/tsconfig.tsbuildinfo
 
 # Docker
 .docker/
 
-# Eval (stale)
+# Eval outputs
 eval/
+eval_results/
+*_eval_results.json
+protein_design_eval_results.json
 
 # Project-specific
 scratch/
@@ -74,6 +80,9 @@ models/
 checkpoint-*/
 runs/
 wandb/
-frontend/tsconfig.tsbuildinfo
+*.ckpt
+*.safetensors
+*.pt
+*.pth
 # CocoIndex Code (ccc)
 /.cocoindex_code/

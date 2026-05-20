@@ -11,6 +11,14 @@ _EXPORTS = {
     "ToolResult": ("agent.tools.types", "ToolResult"),
     "AIDD_BIO_TOOL_SPEC": ("agent.tools.aidd_bio_tool", "AIDD_BIO_TOOL_SPEC"),
     "aidd_bio_handler": ("agent.tools.aidd_bio_tool", "aidd_bio_handler"),
+    "AIDD_PREPARE_TOOL_SPEC": (
+        "agent.tools.aidd_prepare_tool",
+        "AIDD_PREPARE_TOOL_SPEC",
+    ),
+    "aidd_prepare_handler": (
+        "agent.tools.aidd_prepare_tool",
+        "aidd_prepare_handler",
+    ),
     "BINDER_DESIGN_TOOL_SPEC": (
         "agent.tools.binder_design_tool",
         "BINDER_DESIGN_TOOL_SPEC",

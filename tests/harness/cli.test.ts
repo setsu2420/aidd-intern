@@ -19,7 +19,13 @@ describe('CLI program', () => {
     const commands = program.commands.map((command) => command.name());
     reportStep('CLI commands', 'observed commands', commands);
 
-    expect(commands).toEqual(['smoke', 'integration', 'eval']);
+    expect(commands).toEqual(['smoke', 'update', 'configure-llm', 'integration', 'eval']);
+    expect(program.commands.find((command) => command.name() === 'update')?.options.map((option) => option.long)).toEqual([
+      '--check',
+      '--dry-run',
+      '--checkout',
+      '--with-frontend',
+    ]);
     expect(program.commands.find((command) => command.name() === 'eval')?.options.map((option) => option.long)).toEqual([
       '--judge',
       '--fixtures',

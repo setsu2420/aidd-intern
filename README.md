@@ -32,6 +32,9 @@ Hugging Face Jobs.
 
 - [What It Does](#what-it-does)
 - [Quick Start](#quick-start)
+- [Local Updates](#local-updates)
+- [Local Diagnostics](#local-diagnostics)
+- [AIDD Preparation Stage](#aidd-preparation-stage)
 - [Model Configuration And Switching](#model-configuration-and-switching)
 - [API Keys And Search](#api-keys-and-search)
 - [CLI Usage](#cli-usage)
@@ -60,6 +63,9 @@ Hugging Face Jobs.
 - AIDD binder workflows: `binder_design` is available as a normal built-in tool
   for campaign planning, manifest creation, output checks, candidate ranking,
   validation-gap tracking, and reusable skill-card export.
+- AIDD preparation stage: `aidd_prepare` creates a local preparation project,
+  collects literature metadata, downloads RCSB PDB files, crops target
+  structures, and ranks contact-derived hotspot residue candidates.
 - Protein design extensions: PXDesign, BoltzGen, BindCraft, Chai-1, Protenix,
   Foldseek, and campaign memory tools are registered by default. Heavy local MCP
   launchers still require explicit setup and opt-in.
@@ -87,6 +93,7 @@ git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
 uv sync --extra dev
 uv tool install -e .
+cp .env.example .env
 ```
 
 Use the HTTPS URL above for first-time setup. The SSH form
@@ -95,10 +102,23 @@ has an SSH key with access to the repository. Run the `uv` commands from inside
 `aidd-intern`, because `uv sync` and `uv tool install -e .` read this project's
 `pyproject.toml`.
 
-Run the agent:
+Before the first real LLM call, edit `.env` and set at least one API key that
+matches the model you plan to use. For example, set `OPENROUTER_API_KEY` for
+`openrouter/openai/gpt-5.2`, `OPENAI_API_KEY` for `openai/gpt-5.5`,
+`ANTHROPIC_API_KEY` for `anthropic/claude-opus-4-6`, or `SILICONFLOW_API_KEY`
+for `siliconflow/deepseek-ai/DeepSeek-V4-Flash`. If you do not run a local vLLM
+server, also set `AIDD_INTERN_DEFAULT_MODEL_ID` to a remote model in `.env`.
+
+Run the agent after the model provider is configured:
 
 ```bash
 aidd-intern
+```
+
+Check the local install without starting a chat session:
+
+```bash
+aidd-intern --doctor
 ```
 
 ### Research Without A Local GPU
@@ -115,18 +135,141 @@ This keeps local filesystem tools, web search, paper/document/GitHub lookup, and
 the binder/protein workflow tools available without starting heavy local MCP
 servers.
 
+## Local Updates
+
+For users who installed the published npm package globally, npm's documented
+global update path is:
+
+```bash
+npm install -g aidd-intern@latest
+```
+
+The Node CLI also exposes this as a step-printing command:
+
+```bash
+aidd-intern update
+aidd-intern update --check
+aidd-intern update --dry-run
+```
+
+`aidd-intern update` updates the npm harness package only. It does not edit a
+source checkout and it does not refresh the Python `uv tool install -e .`
+runtime. If your `aidd-intern` command points to the Python CLI, use the
+`npm run update:local` source-checkout path below instead.
+
+For an existing source checkout, update from GitHub and refresh the local Python
+CLI from the repository root:
+
+```bash
+scripts/update-local.sh
+npm run update:local
+```
+
+The update script runs these steps and prints each step before executing it:
+
+1. `git pull --ff-only origin <current-branch>`
+2. `uv sync --extra dev`
+3. `uv tool install -e .`
+4. optional `npm ci` in `frontend/`
+5. `command -v aidd-intern`
+
+Use `--with-frontend` when frontend dependencies should also be refreshed:
+
+```bash
+scripts/update-local.sh --with-frontend
+npm run update:local:frontend
+node src/cli.ts update --checkout --with-frontend
+```
+
+`git pull --ff-only` fails instead of creating a merge commit when your local
+branch has diverged from the remote branch. Set `AIDD_INTERN_UPDATE_REMOTE` or
+`AIDD_INTERN_UPDATE_BRANCH` only when you intentionally update from a different
+remote or branch.
+
+## Local Diagnostics
+
+Run the doctor after installation, after editing `.env`, or after updating:
+
+```bash
+aidd-intern --doctor
+```
+
+The diagnostic is read-only. It prints each step, checks Python, `git`, `uv`,
+optional `npm`, config loading, the selected model's expected API key, Google
+Search credentials, the update helper, optional frontend dependencies, and the
+ProteinMCP opt-in flag.
+
+This follows the same practical setup pattern used by Hermes Agent: install,
+configure one provider, run a doctor-style check, then verify a simple chat
+before enabling heavier tools.
+
+## AIDD Preparation Stage
+
+Before running binder generation, complete the four local preparation tasks:
+
+1. Literature research: collect papers, official pages, DOIs, PMIDs, preprint
+   IDs, known binders, epitopes, and assay constraints with `literature_lookup`
+   and `web_search`.
+2. PDB download: fetch the selected experimental structure from RCSB PDB.
+3. Structure cropping: keep the target chain or domain that downstream design
+   tools should see.
+4. Hotspot residue determination: rank target residues at the target/partner
+   interface, then cross-check the candidates against literature or mutagenesis
+   evidence.
+
+The Python CLI can run the complete preparation pass after installation:
+
+```bash
+aidd-intern --prepare-aidd \
+  --target-name "PD-L1" \
+  --pdb-id 4ZQK \
+  --target-chains A \
+  --partner-chains B \
+  --residue-ranges A:19-134 \
+  --prep-project-dir runs/pd-l1-prep
+```
+
+This writes:
+
+- `aidd_preparation_manifest.json`
+- `literature/literature_sources.md`
+- `structures/raw/<PDB_ID>.pdb`
+- `structures/cropped/<PDB_ID>_<chains>_crop.pdb`
+- `analysis/hotspots.json`
+- `aidd_preparation_summary.md`
+
+`aidd_prepare` is also available to the agent as a built-in tool with
+`create_project`, `literature_research`, `download_pdb`, `crop_structure`,
+`identify_hotspots`, and `run_preparation` operations. Hotspots are ranked from
+non-hydrogen atom contacts across the requested target and partner chains; they
+are useful preparation candidates, not experimental binding-energy proof.
+
 ## Model Configuration And Switching
 
 The shared model catalog lives at [configs/models.json](configs/models.json).
 It controls the default model, visible model list, aliases, providers, tiers,
 and recommended entries for both CLI and web surfaces.
 
-Set the default model with either environment variables or the catalog:
+Set the default model with either environment variables or the catalog. New
+users without a local inference server should choose a remote provider and set
+the matching API key in `.env` first:
 
 ```bash
-AIDD_INTERN_DEFAULT_MODEL_ID=siliconflow/deepseek-ai/DeepSeek-V4-Flash
+AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
 AIDD_INTERN_MODELS_CONFIG=configs/models.json
 ```
+
+The npm harness can print provider-specific setup steps without editing files:
+
+```bash
+aidd-intern configure-llm
+aidd-intern configure-llm openrouter
+aidd-intern configure-llm local
+```
+
+The configuration shape intentionally mirrors OpenClaw/Hermes-style setup:
+choose one provider, set a model id, put the provider API key or local base URL
+in `.env`, then run a doctor/check command before using the full workflow.
 
 Start with a specific model:
 
@@ -178,20 +321,40 @@ VLLM_API_KEY=<optional-vllm-key>
 
 Create a root `.env` file or export variables in your shell. Do not commit
 tokens, model weights, checkpoints, databases, generated structures, or traces.
+The CLI and backend load the root `.env` automatically.
+
+Start from the checked-in template:
 
 ```bash
+cp .env.example .env
+```
+
+```bash
+# LLM providers. Set one or more according to your selected model.
 OPENAI_API_KEY=<your-openai-api-key>
 ANTHROPIC_API_KEY=<your-anthropic-api-key>
 OPENROUTER_API_KEY=<your-openrouter-api-key>
 SILICONFLOW_API_KEY=<your-siliconflow-api-key>
 
+# Default model. This can also be overridden per command with --model.
+AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
+AIDD_INTERN_MODELS_CONFIG=configs/models.json
+
+# Real Google Search. Both variables must be set for the Google provider.
 GOOGLE_SEARCH_API_KEY=<google-custom-search-json-api-key>
 GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id>
-GOOGLE_API_KEY=<optional-google-api-key-alias>
-GOOGLE_CSE_ID=<optional-google-cse-id-alias>
 
+# Optional aliases also recognized by the search tool.
+GOOGLE_API_KEY=<google-custom-search-json-api-key>
+GOOGLE_CSE_ID=<programmable-search-engine-id>
+
+# Hugging Face and GitHub tools.
 HF_TOKEN=<your-hugging-face-token>
 GITHUB_TOKEN=<github-personal-access-token>
+
+# Local or LAN OpenAI-compatible inference servers.
+LOCAL_LLM_BASE_URL=http://localhost:8000
+LOCAL_LLM_API_KEY=<optional-local-api-key>
 ```
 
 `web_search` behavior:
@@ -204,6 +367,11 @@ GITHUB_TOKEN=<github-personal-access-token>
 5. If Google credentials are configured but Google returns an error, fallback is
    disabled unless `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` is set.
 
+Google's current documentation says Custom Search JSON API requires both a
+Programmable Search Engine ID and an API key. Google also announced that
+Custom Search JSON API users must transition to an alternative solution by
+January 1, 2027, so keep this dependency explicit in `.env`.
+
 Useful links:
 
 - Google Custom Search JSON API: https://developers.google.com/custom-search/v1/overview
@@ -211,8 +379,12 @@ Useful links:
 - OpenAI API keys: https://platform.openai.com/api-keys
 - Anthropic Console: https://console.anthropic.com/
 - OpenRouter API keys: https://openrouter.ai/settings/keys
+- SiliconFlow quickstart: https://docs.siliconflow.cn/en/userguide/quickstart
 - Hugging Face access tokens: https://huggingface.co/docs/hub/security-tokens
 - GitHub personal access tokens: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+- uv sync: https://docs.astral.sh/uv/concepts/projects/sync/
+- uv tool install: https://docs.astral.sh/uv/concepts/tools/
+- Git pull: https://git-scm.com/docs/git-pull
 
 Run the live Google Search test only when real credentials are available:
 

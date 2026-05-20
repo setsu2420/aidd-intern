@@ -1,6 +1,6 @@
 # AIDD Binder Workflow Guide
 
-Last reviewed: 2026-05-19
+Last reviewed: 2026-05-20
 
 ## Purpose
 
@@ -45,6 +45,42 @@ The pack expects the agent to run a campaign in this order:
 9. When a workflow becomes stable across campaigns, export it as a reusable
    skill card with `binder_design(operation="export_skill")` so the next run
    can start from a file-backed recipe rather than raw transcript memory.
+
+## AIDD Preparation Stage
+
+Before binder generation, downloaded users should be able to complete four
+local preparation tasks without installing GPU protein-design stacks:
+
+1. Literature research. Use `literature_lookup` for official paper metadata,
+   `web_search` for current official pages, and record links, DOIs, PMIDs,
+   preprint IDs, PDB IDs, and known binder/epitope claims.
+2. PDB download. Use `aidd_prepare(operation="download_pdb")` or `aidd_bio` to
+   fetch the selected RCSB structure from
+   `https://files.rcsb.org/download/<PDB_ID>.pdb`.
+3. Structure cropping. Use `aidd_prepare(operation="crop_structure")` to keep
+   the target chain/domain and residue range that downstream generators should
+   see.
+4. Hotspot residue determination. Use
+   `aidd_prepare(operation="identify_hotspots")` to rank target residues by
+   non-hydrogen target/partner atom contacts, then cross-check the candidates
+   against the literature or mutagenesis evidence.
+
+The Python CLI exposes the complete preparation pass:
+
+```bash
+aidd-intern --prepare-aidd \
+  --target-name "PD-L1" \
+  --pdb-id 4ZQK \
+  --target-chains A \
+  --partner-chains B \
+  --residue-ranges A:19-134 \
+  --prep-project-dir runs/pd-l1-prep
+```
+
+This writes `aidd_preparation_manifest.json`, literature metadata, the raw PDB,
+the cropped PDB, `analysis/hotspots.json`, and a Markdown summary. The hotspot
+method is a deterministic contact heuristic for preparation and should not be
+described as experimental binding-energy validation.
 
 ## Binder Tool Surface
 

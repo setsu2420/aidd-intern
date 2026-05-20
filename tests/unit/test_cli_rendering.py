@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import subprocess
 import sys
 from io import StringIO
 from types import SimpleNamespace
@@ -302,6 +303,28 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
         "stream": False,
         "sandbox_tools": True,
     }
+
+
+def test_cli_doctor_runs_real_diagnostic_without_starting_chat():
+    print("STEP 1: Running the real CLI doctor command in a subprocess")
+    result = subprocess.run(
+        [sys.executable, "-m", "agent.main", "--doctor"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    print(f"STEP 2: doctor exit code = {result.returncode}")
+    assert result.returncode in {0, 1}
+
+    print("STEP 3: Checking doctor output includes diagnostic steps")
+    assert "STEP 1: Checking Python runtime" in result.stdout
+    assert "Doctor summary:" in result.stdout
+    assert "Result:" in result.stdout
+
+    print("STEP 4: Checking chat UI startup text is absent")
+    assert "--- Agent" not in result.stdout
+    assert result.stderr == ""
 
 
 @pytest.mark.asyncio
