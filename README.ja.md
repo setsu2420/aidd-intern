@@ -451,14 +451,3 @@ CLI session は Claude Code JSONL 互換形式で保存し、Hugging Face privat
 ```text
 {your-hf-username}/aidd-intern-sessions
 ```
-
-## Citation
-
-```bibtex
-@Misc{aidd-intern,
-  title =        {AIDD-Intern: an agent runtime for source-backed AI drug discovery research and binder workflows},
-  author =       {Aksel Joonas Reedi, Henri Bonamy, Yoan Di Cosmo, Leandro von Werra, Lewis Tunstall},
-  howpublished = {\url{https://github.com/setsu2420/aidd-intern}},
-  year =         {2026}
-}
-```

@@ -46,7 +46,6 @@ Hugging Face Jobs.
 - [Project Layout](#project-layout)
 - [Development And Tests](#development-and-tests)
 - [Session Traces](#session-traces)
-- [Citation](#citation)
 
 ## What It Does
 
@@ -80,14 +79,21 @@ Hugging Face Jobs.
 
 ### Requirements
 
-- Python 3.11+
-- `uv`
-- Git
-- Node.js 22+ only when working on the frontend or Node CLI harness
+- Node.js 22+ and npm for the published Node package and frontend
+- Python 3.11+, `uv`, and Git only when working from a source checkout or on the backend
 - Conda/Mamba and GPU only for local PXDesign, BindCraft, or similar scientific
   tools
 
-### Install The Python Runtime
+### Install The Node Package
+
+```bash
+npm install -g aidd-intern@latest
+```
+
+Use this path when you want the published Node CLI harness for smoke,
+integration, eval, update, and configuration helpers.
+
+### Optional: Full Python Agent Runtime From Source
 
 ```bash
 git clone https://github.com/setsu2420/aidd-intern.git
@@ -124,7 +130,7 @@ matches the model you plan to use. For example, set `OPENROUTER_API_KEY` for
 for `siliconflow/deepseek-ai/DeepSeek-V4-Flash`. If you do not run a local vLLM
 server, also set `AIDD_INTERN_DEFAULT_MODEL_ID` to a remote model in `.env`.
 
-Run the agent after the model provider is configured:
+Run the source-checkout agent after the model provider is configured:
 
 ```bash
 aidd-intern
@@ -169,7 +175,7 @@ aidd-intern update --dry-run
 
 `aidd-intern update` updates the npm harness package only. It does not edit a
 source checkout and it does not refresh the Python `uv tool install -e .`
-runtime. If your `aidd-intern` command points to the Python CLI, use the
+runtime. If you cloned the repository for the Python agent runtime, use the
 `npm run update:local` source-checkout path below instead.
 
 For an existing source checkout, update from GitHub and refresh the local Python
@@ -204,14 +210,15 @@ remote or branch.
 Existing users keep their local configuration when updating. The update path
 does not overwrite `.env`, user-level config under `~/.config/aidd-intern/`, or
 local secrets; it only pulls the Git branch, syncs dependencies, and reinstalls
-the editable CLI. Interactive Python startup and `aidd-intern --doctor` run a
-read-only GitHub version check and print the update command when the local
-checkout is behind. Set `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` to suppress this
-notice.
+the editable CLI. Interactive Python startup from a source checkout and
+`aidd-intern --doctor` run a read-only GitHub version check and print the
+update command when the local checkout is behind. Set
+`AIDD_INTERN_DISABLE_UPDATE_CHECK=1` to suppress this notice.
 
 ## Local Diagnostics
 
-Run the doctor after installation, after editing `.env`, or after updating:
+Run the doctor after setting up the source-checkout Python runtime, after
+editing `.env`, or after updating:
 
 ```bash
 aidd-intern --doctor
@@ -228,7 +235,8 @@ before enabling heavier tools.
 
 ## AIDD Preparation Stage
 
-Before running binder generation, complete the four local preparation tasks:
+Before running binder generation from the source-checkout Python runtime,
+complete the four local preparation tasks:
 
 1. Literature research: collect papers, official pages, DOIs, PMIDs, preprint
    IDs, known binders, epitopes, and assay constraints with `literature_lookup`
@@ -689,18 +697,5 @@ Override the trace repo template:
 ```json
 {
   "personal_trace_repo_template": "{hf_user}/my-custom-traces"
-}
-```
-
-## Citation
-
-If you use AIDD-Intern in your work, cite it with this BibTeX entry or similar:
-
-```bibtex
-@Misc{aidd-intern,
-  title =        {AIDD-Intern: an agent runtime for source-backed AI drug discovery research and binder workflows},
-  author =       {Aksel Joonas Reedi, Henri Bonamy, Yoan Di Cosmo, Leandro von Werra, Lewis Tunstall},
-  howpublished = {\url{https://github.com/setsu2420/aidd-intern}},
-  year =         {2026}
 }
 ```
