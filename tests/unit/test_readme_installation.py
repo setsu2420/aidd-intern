@@ -344,7 +344,8 @@ def test_package_json_exposes_npm_local_update_scripts():
         "bash scripts/update-local.sh --with-frontend"
     )
     assert scripts["update:npm:dry-run"] == "node src/cli.ts update --dry-run"
-    assert scripts["prepare"] == "npm run build"
+    assert scripts["prepack"] == "npm run build"
+    assert "prepare" not in scripts
 
 
 def test_doctor_module_documents_each_diagnostic_step():

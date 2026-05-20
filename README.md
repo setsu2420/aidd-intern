@@ -93,8 +93,8 @@ npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-
 Use this path when you want the Node CLI harness for smoke, integration, eval,
 update, and configuration helpers. The package name has not been published to
 the public npm registry yet, so `npm install -g aidd-intern@latest` returns
-404. npm can install directly from the GitHub repository and the package builds
-itself during installation.
+404. npm can install directly from the GitHub repository using the committed
+prebuilt `dist/` package files.
 
 ### Optional: Full Python Agent Runtime From Source
 

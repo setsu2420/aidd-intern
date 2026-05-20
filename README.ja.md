@@ -65,7 +65,8 @@ npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-
 この経路は smoke、integration、eval、update、configuration helper 用の Node CLI
 harness をインストールします。package name はまだ public npm registry に publish
 されていないため、`npm install -g aidd-intern@latest` は 404 になります。npm は
-GitHub repository から直接インストールでき、install 中に package を build します。
+GitHub repository から直接インストールし、committed prebuilt `dist/` package files
+を使います。
 
 ### 任意: source から full Python agent runtime をインストール
 

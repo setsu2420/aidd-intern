@@ -78,7 +78,7 @@ npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-
 这条路径用于安装 Node CLI harness，支持 smoke、integration、eval、update 和
 配置辅助命令。当前包名还没有发布到公开 npm registry，所以
 `npm install -g aidd-intern@latest` 会返回 404。npm 可以直接从 GitHub 仓库安装，
-安装过程中会自动构建 package。
+并使用仓库里已提交的预构建 `dist/` package 文件。
 
 ### 可选：从源码安装完整 Python 智能体运行时
 
