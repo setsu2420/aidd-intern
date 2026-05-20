@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "aidd-intern": "./dist/cli.js"
+    "aidd-intern": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -71,7 +71,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/setsu2420/aidd-intern"
+    "url": "git+https://github.com/setsu2420/aidd-intern.git"
   },
   "publishConfig": {
     "access": "public"

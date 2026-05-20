@@ -9,6 +9,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_REPO_URL = "https://github.com/setsu2420/aidd-intern"
 PUBLIC_CLONE_URL = f"{PUBLIC_REPO_URL}.git"
+PUBLIC_NPM_REPO_URL = f"git+{PUBLIC_CLONE_URL}"
 NPM_GITHUB_INSTALL_SPEC = (
     "git+https://github.com/setsu2420/aidd-intern.git"
     "#codex/aidd-prep-update-20260520"
@@ -80,7 +81,7 @@ def test_public_repository_links_are_aligned():
 
     print("STEP 2: Checking package metadata repository URL")
     package_json = json.loads((PROJECT_ROOT / "package.json").read_text())
-    assert package_json["repository"]["url"] == PUBLIC_REPO_URL
+    assert package_json["repository"]["url"] == PUBLIC_NPM_REPO_URL
 
     print("STEP 3: Checking backlog tooling default GitHub repo")
     backlog_script = (PROJECT_ROOT / "scripts" / "prioritize_backlog.py").read_text(
