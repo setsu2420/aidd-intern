@@ -347,6 +347,13 @@ def test_package_json_exposes_npm_local_update_scripts():
     assert scripts["prepack"] == "npm run build"
     assert "prepare" not in scripts
 
+    print("STEP 3: Checking git installs do not need nested runtime dependencies")
+    assert "dependencies" not in package_json
+
+    cli_bundle = (PROJECT_ROOT / "dist" / "cli.js").read_text(encoding="utf-8")
+    for package_name in ["commander", "chalk", "dotenv", "zod"]:
+        assert f'from "{package_name}"' not in cli_bundle
+
 
 def test_doctor_module_documents_each_diagnostic_step():
     print("STEP 1: Reading agent/core/doctor.py")

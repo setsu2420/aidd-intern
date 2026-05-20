@@ -1,16 +1,16 @@
 import {
   aggregateMetrics,
   evaluateTestCase
-} from "./chunk-4XWDWTMQ.js";
+} from "./chunk-CJ6H3CLT.js";
 import {
   AgentClient
-} from "./chunk-JEPPWU25.js";
+} from "./chunk-A6W5ZZA4.js";
 import {
-  createLogger
-} from "./chunk-OA6CDQ5U.js";
+  createLogger,
+  source_default
+} from "./chunk-4WEICLE4.js";
 
 // src/commands/eval.ts
-import chalk from "chalk";
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -113,9 +113,9 @@ function printEvalSummary(results, json, failedCount) {
     return;
   }
   console.log(`
-${chalk.bold.blue("\u2550\u2550\u2550 EVAL \u2550\u2550\u2550")}`);
+${source_default.bold.blue("\u2550\u2550\u2550 EVAL \u2550\u2550\u2550")}`);
   for (const result of results) {
-    const icon = result.passed ? chalk.green("\u2705") : chalk.red("\u274C");
+    const icon = result.passed ? source_default.green("\u2705") : source_default.red("\u274C");
     console.log(
       `  ${icon} ${result.testCase.name} \u2014 q=${result.analysis.qualityScore}/100, ${(result.trace.metrics.totalDuration / 1e3).toFixed(1)}s`
     );
@@ -130,7 +130,7 @@ ${chalk.bold.blue("\u2550\u2550\u2550 EVAL \u2550\u2550\u2550")}`);
   }
   const passed = results.filter((result) => result.passed).length;
   console.log(`
-  ${chalk.bold(`${passed}/${results.length} passed, ${failedCount} failed`)}
+  ${source_default.bold(`${passed}/${results.length} passed, ${failedCount} failed`)}
 `);
 }
 function normalizeTestCase(value, index, fixturePath) {
@@ -156,4 +156,4 @@ export {
   loadEvalTestCases,
   runEval
 };
-//# sourceMappingURL=chunk-CSFIBZNH.js.map
+//# sourceMappingURL=chunk-OZYNJ3HY.js.map
