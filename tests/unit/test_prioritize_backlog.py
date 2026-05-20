@@ -709,7 +709,7 @@ def test_cli_defaults_without_live_network_or_llm():
         None, now=datetime(2026, 5, 4, 12, 30, tzinfo=timezone.utc)
     )
 
-    assert args.github_repo == "huggingface/aidd-intern"
+    assert args.github_repo == "setsu2420/aidd-intern"
     assert args.hf_space == "smolagents/aidd-intern"
     assert args.config == "configs/cli_agent_config.json"
     assert args.resolution_ref == "main"

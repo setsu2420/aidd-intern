@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/huggingface/aidd-intern/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
+  <a href="https://github.com/setsu2420/aidd-intern/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
   <a href="https://smolagents-aidd-intern.hf.space/"><img alt="Website" src="https://img.shields.io/website/https/smolagents-aidd-intern.hf.space.svg?down_color=red&down_message=offline&up_message=online"></a>
 </p>
 
@@ -36,7 +36,7 @@ Hugging Face Jobs.
 - [API Keys And Search](#api-keys-and-search)
 - [CLI Usage](#cli-usage)
 - [Web App](#web-app)
-- [Tools, MCP, And Domain Packs](#tools-mcp-and-domain-packs)
+- [Tools And MCP](#tools-and-mcp)
 - [Context Strategy](#context-strategy)
 - [Startup Performance](#startup-performance)
 - [Project Layout](#project-layout)
@@ -57,12 +57,12 @@ Hugging Face Jobs.
 - Adaptive context windows: remote OpenAI-compatible providers are not pinned to
   a fixed 65k context. Local unknown models still use a conservative default
   unless overridden.
-- AIDD binder workflows: the default `aidd_binder` domain pack provides
-  `binder_design` for campaign planning, manifest creation, output checks,
-  candidate ranking, validation-gap tracking, and reusable skill-card export.
-- Protein design extensions: the optional `protein_design` pack exposes
-  PXDesign, BoltzGen, BindCraft, Chai-1, Protenix, Foldseek, and campaign memory
-  boundaries when external tools are installed.
+- AIDD binder workflows: `binder_design` is available as a normal built-in tool
+  for campaign planning, manifest creation, output checks, candidate ranking,
+  validation-gap tracking, and reusable skill-card export.
+- Protein design extensions: PXDesign, BoltzGen, BindCraft, Chai-1, Protenix,
+  Foldseek, and campaign memory tools are registered by default. Heavy local MCP
+  launchers still require explicit setup and opt-in.
 - Local CLI and web UI: the Python CLI runs interactive or headless sessions;
   the FastAPI + React app provides hosted browser sessions; the Node.js package
   contains smoke, integration, and evaluation harnesses.
@@ -83,11 +83,17 @@ Hugging Face Jobs.
 ### Install The Python Runtime
 
 ```bash
-git clone git@github.com:huggingface/aidd-intern.git
+git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
 uv sync --extra dev
 uv tool install -e .
 ```
+
+Use the HTTPS URL above for first-time setup. The SSH form
+`git@github.com:setsu2420/aidd-intern.git` only works after your GitHub account
+has an SSH key with access to the repository. Run the `uv` commands from inside
+`aidd-intern`, because `uv sync` and `uv tool install -e .` read this project's
+`pyproject.toml`.
 
 Run the agent:
 
@@ -95,18 +101,19 @@ Run the agent:
 aidd-intern
 ```
 
-### Research-Only Mode Without A Local GPU
+### Research Without A Local GPU
 
-Use the `none` domain pack when you only need research, code reading, planning,
-or reports:
+Use a remote model and ask for source-backed research when you only need code
+reading, planning, or reports:
 
 ```bash
-aidd-intern --domain-pack none --model openrouter/openai/gpt-5.2 \
+aidd-intern --model openrouter/openai/gpt-5.2 \
   "Research recent protein binder design tools. Prefer Google Search, cite sources, and include publication dates."
 ```
 
-This keeps generic tools, web search, paper/document/GitHub lookup, and local
-filesystem tools, while skipping binder/protein-specific workflow prompts.
+This keeps local filesystem tools, web search, paper/document/GitHub lookup, and
+the binder/protein workflow tools available without starting heavy local MCP
+servers.
 
 ## Model Configuration And Switching
 
@@ -231,9 +238,9 @@ aidd-intern "Research current AlphaFold-style complex validation methods and cit
 Common options:
 
 ```bash
-aidd-intern --domain-pack none "research-only task"
-aidd-intern --domain-pack aidd_binder "plan a binder campaign"
-aidd-intern --domain-pack protein_design "run protein design tools"
+aidd-intern "research-only task"
+aidd-intern "plan a binder campaign"
+aidd-intern "run protein design tools"
 aidd-intern --sandbox-tools "test this script in an HF Space sandbox"
 aidd-intern --max-iterations 100 "long task"
 aidd-intern --no-stream "disable streaming"
@@ -266,7 +273,7 @@ npm ci
 npm run dev
 ```
 
-## Tools, MCP, And Domain Packs
+## Tools And MCP
 
 Default config files:
 
@@ -289,18 +296,16 @@ MCP startup is intentionally lazy:
 
 - Hugging Face MCP uses `https://hf.co/mcp` and is skipped when `HF_TOKEN` is
   missing.
-- ProteinMCP launchers are skipped unless `--domain-pack protein_design` is used
-  or `AIDD_INTERN_ENABLE_PROTEINMCP=1` is set.
+- ProteinMCP launchers are skipped unless `AIDD_INTERN_ENABLE_PROTEINMCP=1` is
+  set.
 - Remote OpenAPI/catalog data is not fetched during startup; tool handlers fetch
   it only when the tool is called.
 
-Supported domain packs:
-
-- `aidd_binder`: default. Provides the `binder_design` planning and review tool.
-- `protein_design`: enables protein-design generation and validation boundaries
-  for PXDesign, BoltzGen, BindCraft, Chai-1, Protenix, Foldseek, and ACE-style
-  campaign memory.
-- `none`: generic runtime with no domain-specific workflow tools.
+Binder and protein-design tools are normal built-in tools. `binder_design`,
+`run_pxdesign`, `run_boltzgen`, `run_bindcraft`, and
+`protein_design_ace_playbook` are visible to the model without a separate
+workflow selector. The heavy local launchers only start after explicit setup and
+environment opt-in.
 
 Install local ProteinMCP tools when needed:
 
@@ -363,13 +368,11 @@ uv run pytest tests/unit/test_mcp_startup.py -q
 ## Project Layout
 
 - `agent/`: async agent runtime, CLI entrypoint, context management, model
-  switching, tool routing, session persistence, built-in tools, and domain
-  packs.
+  switching, tool routing, session persistence, and built-in tools.
 - `backend/`: FastAPI backend for hosted sessions, auth, quotas, uploads, KPI
   scheduling, and REST/SSE/WebSocket APIs.
 - `frontend/`: Vite + React + TypeScript + MUI web app.
-- `configs/`: shared CLI/frontend defaults, model catalog, MCP settings, and
-  domain-pack defaults.
+- `configs/`: shared CLI/frontend defaults, model catalog, and MCP settings.
 - `scripts/`: local dev launcher, ProteinMCP setup/run helpers, KPI/SFT tools,
   sandbox cleanup, and backlog utilities.
 - `src/`: Node.js CLI package for smoke, integration, and evaluation harnesses.
@@ -424,7 +427,7 @@ PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
   tests/unit/test_web_search_tool.py
 
 PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
-  tests/unit/test_protein_design_domain_pack.py
+  tests/unit/test_protein_design_workflow.py
 ```
 
 Protein-design benchmark smoke test:
@@ -480,7 +483,7 @@ If you use AIDD-Intern in your work, cite it with this BibTeX entry or similar:
 @Misc{aidd-intern,
   title =        {AIDD-Intern: an agent runtime for source-backed AI drug discovery research and binder workflows},
   author =       {Aksel Joonas Reedi, Henri Bonamy, Yoan Di Cosmo, Leandro von Werra, Lewis Tunstall},
-  howpublished = {\url{https://github.com/huggingface/aidd-intern}},
+  howpublished = {\url{https://github.com/setsu2420/aidd-intern}},
   year =         {2026}
 }
 ```
