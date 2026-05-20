@@ -156,3 +156,67 @@ def test_invalid_tool_runtime_is_rejected(tmp_path):
 
     with pytest.raises(ValidationError):
         config_module.load_config(str(config_path))
+
+
+def test_default_cli_config_registers_proteinmcp_and_local_model(monkeypatch):
+    monkeypatch.setenv("AIDD_INTERN_DEFAULT_MODEL_ID", "vllm/huihui-26b")
+    monkeypatch.delenv("AIDD_INTERN_WORKDIR", raising=False)
+
+    config = config_module.load_config("configs/cli_agent_config.json")
+
+    assert config.model_name == "vllm/huihui-26b"
+    assert config.models_config == "configs/models.json"
+    assert config.domain_pack == "aidd_binder"
+    hf_mcp = config.mcpServers["hf-mcp-server"]
+    bindcraft = config.mcpServers["proteinmcp-bindcraft"]
+    boltzgen = config.mcpServers["proteinmcp-boltzgen"]
+    pxdesign = config.mcpServers["proteinmcp-pxdesign"]
+    assert hf_mcp.transport == "http"
+    assert hf_mcp.url == "https://hf.co/mcp"
+    assert hf_mcp.auth is None
+    assert bindcraft.transport == "stdio"
+    assert boltzgen.transport == "stdio"
+    assert pxdesign.transport == "stdio"
+    assert bindcraft.command == "bash"
+    assert bindcraft.args[0] == "./scripts/run-proteinmcp-local.sh"
+    assert boltzgen.args[0] == "./scripts/run-proteinmcp-local.sh"
+    assert pxdesign.args[0] == "./scripts/run-proteinmcp-local.sh"
+    assert bindcraft.args[-1] == "bindcraft_mcp"
+    assert boltzgen.args[-1] == "boltzgen_mcp"
+    assert pxdesign.args[-1] == "pxdesign_mcp"
+
+
+def test_model_catalog_default_applies_when_env_default_missing(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    models_path = tmp_path / "models.json"
+    _write_json(
+        config_path,
+        {
+            "model_name": "vllm/fallback",
+            "models_config": str(models_path),
+        },
+    )
+    _write_json(
+        models_path,
+        {
+            "default": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+            "models": [],
+        },
+    )
+    monkeypatch.delenv("AIDD_INTERN_DEFAULT_MODEL_ID", raising=False)
+
+    config = config_module.load_config(str(config_path))
+
+    assert config.model_name == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+
+
+def test_domain_pack_none_is_accepted(tmp_path):
+    config_path = tmp_path / "config.json"
+    _write_json(
+        config_path,
+        {"model_name": "moonshotai/Kimi-K2.6", "domain_pack": "none"},
+    )
+
+    config = config_module.load_config(str(config_path))
+
+    assert config.domain_pack == "none"

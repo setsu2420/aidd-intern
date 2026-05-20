@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect, type ComponentPropsWithoutRef } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from 'react';
 import { Box } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -160,7 +160,7 @@ function useThrottledValue(value: string, isStreaming: boolean, intervalMs = 80)
   return throttled;
 }
 
-export default function MarkdownContent({ content, sx, isStreaming = false }: MarkdownContentProps) {
+function MarkdownContent({ content, sx, isStreaming = false }: MarkdownContentProps) {
   // Throttle re-parses during streaming to ~12fps (every 80ms)
   const displayContent = useThrottledValue(content, isStreaming);
 
@@ -180,3 +180,9 @@ export default function MarkdownContent({ content, sx, isStreaming = false }: Ma
     </Box>
   );
 }
+
+function areMarkdownContentPropsEqual(prev: MarkdownContentProps, next: MarkdownContentProps): boolean {
+  return prev.content === next.content && prev.isStreaming === next.isStreaming && prev.sx === next.sx;
+}
+
+export default memo(MarkdownContent, areMarkdownContentPropsEqual);

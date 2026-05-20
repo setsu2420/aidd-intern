@@ -20,90 +20,12 @@ const TOOL_LABELS: Record<string, string> = {
   research: 'Researching',
 };
 
-/** Format raw research log into a clean status label. */
-function formatResearchStatus(raw: string): string {
-  const s = raw.replace(/^▸\s*/, '');
-  const jsonStart = s.indexOf('{');
-  const toolName = jsonStart > 0 ? s.slice(0, jsonStart).trim() : s.trim();
-  let args: Record<string, string> = {};
-  if (jsonStart > 0) {
-    const jsonStr = s.slice(jsonStart);
-    try {
-      const parsed = JSON.parse(jsonStr);
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'string') args[k] = v;
-      }
-    } catch {
-      // JSON is likely truncated — extract complete "key": "value" pairs
-      for (const m of jsonStr.matchAll(/"(\w+)":\s*"([^"]*)"/g)) {
-        args[m[1]] = m[2];
-      }
-      // Also try to extract a truncated value for known keys if not found yet
-      if (!args.query && !args.arxiv_id) {
-        const partial = jsonStr.match(/"(query|arxiv_id)":\s*"([^"]*)/);
-        if (partial) args[partial[1]] = partial[2];
-      }
-    }
-  }
-
-  if (toolName === 'github_find_examples') {
-    const d = (args.keyword) || (args.repo);
-    return d ? `Finding examples: ${d}` : 'Finding examples';
-  }
-  if (toolName === 'github_read_file') {
-    const f = ((args.path) || '').split('/').pop();
-    return f ? `Reading ${f}` : 'Reading file';
-  }
-  if (toolName === 'explore_hf_docs') {
-    const d = (args.endpoint) || (args.query);
-    return d ? `Exploring docs: ${d}` : 'Exploring docs';
-  }
-  if (toolName === 'fetch_hf_docs') {
-    const p = ((args.url) || '').split('/').pop()?.replace(/\.md$/, '');
-    return p ? `Reading docs: ${p}` : 'Fetching docs';
-  }
-  if (toolName === 'hf_inspect_dataset') {
-    const d = args.dataset as string;
-    return d ? `Inspecting dataset: ${d}` : 'Inspecting dataset';
-  }
-  if (toolName === 'hf_papers') {
-    const op = args.operation as string;
-    const detail = (args.query) || (args.arxiv_id) || (args.positive_ids);
-    const opLabels: Record<string, string> = {
-      trending: 'Browsing trending papers',
-      search: 'Searching papers',
-      paper_details: 'Reading paper details',
-      read_paper: 'Reading paper',
-      citation_graph: 'Tracing citations',
-      snippet_search: 'Searching paper passages',
-      recommend: 'Finding similar papers',
-      find_datasets: 'Finding paper datasets',
-      find_models: 'Finding paper models',
-      find_collections: 'Finding paper collections',
-      find_all_resources: 'Finding paper resources',
-    };
-    const base = (op && opLabels[op]) || 'Searching papers';
-    return detail ? `${base}: ${detail}` : base;
-  }
-  if (toolName === 'find_hf_api') {
-    const d = (args.query) || (args.tag);
-    return d ? `Finding API: ${d}` : 'Finding API endpoints';
-  }
-  if (toolName === 'hf_repo_files') {
-    const d = (args.repo_id) || (args.repo);
-    return d ? `Reading ${d} files` : 'Reading repo files';
-  }
-  return 'Researching';
-}
-
 function statusLabel(status: ActivityStatus): string {
   switch (status.type) {
     case 'thinking': return 'Thinking';
     case 'streaming': return 'Writing';
     case 'tool': {
-      if (status.toolName === 'research' && status.description) {
-        return formatResearchStatus(status.description);
-      }
+      if (status.toolName === 'research') return 'Researching';
       const base = status.description || TOOL_LABELS[status.toolName] || `Running ${status.toolName}`;
       if (status.toolName === 'bash' && status.description && /install/i.test(status.description)) {
         return `${base} — this can take a few minutes, sit tight`;

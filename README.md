@@ -1,447 +1,489 @@
+<p align="center">
+  <a href="https://github.com/setsu2420/aidd-intern/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
+  <a href="https://smolagents-aidd-intern.hf.space/"><img alt="Website" src="https://img.shields.io/website/https/smolagents-aidd-intern.hf.space.svg?down_color=red&down_message=offline&up_message=online"></a>
+</p>
+
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a>
+</p>
+
 # AIDD-Intern
 
-An Agent that autonomously researches, writes, and ships good quality ML related code using the Hugging Face ecosystem — with deep access to docs, papers, datasets, and cloud compute.
+AIDD-Intern is an asynchronous agent runtime for AI drug discovery research and
+binder/protein-design workflows. It separates LLM calls, context management,
+tool routing, MCP integration, session tracing, the web backend, and AIDD
+domain tools so the same project can run source-backed research on a laptop and
+delegate heavier binder workflows to external compute when available.
+
+AIDD-Intern does not load LLM weights inside the CLI or FastAPI process. It also
+does not import heavy scientific stacks such as BindCraft, BoltzGen, PXDesign,
+Chai-1, or Protenix into the web backend. Use remote LLM APIs or an
+OpenAI-compatible local inference server for the model layer, and connect heavy
+protein-design tools through MCP, subprocesses, containers, clusters, or
+Hugging Face Jobs.
+
+## Languages
+
+- English: [README.md](README.md)
+- 简体中文: [README.zh-CN.md](README.zh-CN.md)
+- 日本語: [README.ja.md](README.ja.md)
+
+## Contents
+
+- [What It Does](#what-it-does)
+- [Quick Start](#quick-start)
+- [Model Configuration And Switching](#model-configuration-and-switching)
+- [API Keys And Search](#api-keys-and-search)
+- [CLI Usage](#cli-usage)
+- [Web App](#web-app)
+- [Tools And MCP](#tools-and-mcp)
+- [Context Strategy](#context-strategy)
+- [Startup Performance](#startup-performance)
+- [Project Layout](#project-layout)
+- [Development And Tests](#development-and-tests)
+- [Session Traces](#session-traces)
+- [Citation](#citation)
+
+## What It Does
+
+- Source-backed research: `research`, `web_search`, `literature_lookup`,
+  `hf_papers`, Hugging Face docs, GitHub code search/read tools, and `aidd_bio`
+  help gather current sources before implementation or scientific decisions.
+- Real Google Search support: when `GOOGLE_SEARCH_API_KEY` and
+  `GOOGLE_SEARCH_ENGINE_ID` are set, `web_search` uses Google Custom Search JSON
+  API with freshness and date sorting options.
+- Model switching: select models with `--model`, configure aliases in
+  `configs/models.json`, and switch interactively with `/model`.
+- Adaptive context windows: remote OpenAI-compatible providers are not pinned to
+  a fixed 65k context. Local unknown models still use a conservative default
+  unless overridden.
+- AIDD binder workflows: `binder_design` is available as a normal built-in tool
+  for campaign planning, manifest creation, output checks, candidate ranking,
+  validation-gap tracking, and reusable skill-card export.
+- Protein design extensions: PXDesign, BoltzGen, BindCraft, Chai-1, Protenix,
+  Foldseek, and campaign memory tools are registered by default. Heavy local MCP
+  launchers still require explicit setup and opt-in.
+- Local CLI and web UI: the Python CLI runs interactive or headless sessions;
+  the FastAPI + React app provides hosted browser sessions; the Node.js package
+  contains smoke, integration, and evaluation harnesses.
+- Session tracing: sessions can be saved as Claude Code compatible JSONL and
+  uploaded to a private Hugging Face dataset for review.
 
 ## Quick Start
 
-### Installation
+### Requirements
+
+- Python 3.11+
+- `uv`
+- Git
+- Node.js 22+ only when working on the frontend or Node CLI harness
+- Conda/Mamba and GPU only for local PXDesign, BindCraft, or similar scientific
+  tools
+
+### Install The Python Runtime
 
 ```bash
-git clone git@github.com:huggingface/aidd-intern.git
+git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
-uv sync
+uv sync --extra dev
 uv tool install -e .
 ```
 
-#### That's it. Now `aidd-intern` works from any directory:
+Use the HTTPS URL above for first-time setup. The SSH form
+`git@github.com:setsu2420/aidd-intern.git` only works after your GitHub account
+has an SSH key with access to the repository. Run the `uv` commands from inside
+`aidd-intern`, because `uv sync` and `uv tool install -e .` read this project's
+`pyproject.toml`.
+
+Run the agent:
 
 ```bash
 aidd-intern
 ```
 
-Create a `.env` file in the project root (or export these in your shell):
+### Research Without A Local GPU
+
+Use a remote model and ask for source-backed research when you only need code
+reading, planning, or reports:
 
 ```bash
-ANTHROPIC_API_KEY=<your-anthropic-api-key> # if using anthropic models
-OPENAI_API_KEY=<your-openai-api-key> # if using openai models
-OPENROUTER_API_KEY=<your-openrouter-api-key> # if using openrouter/<model>
-SILICONFLOW_API_KEY=<your-siliconflow-api-key> # if using siliconflow/<model>
-AIDD_INTERN_DEFAULT_MODEL_ID=siliconflow/deepseek-ai/DeepSeek-V4-Flash
-LOCAL_LLM_BASE_URL=http://localhost:8000 # shared fallback for local model prefixes
-LOCAL_LLM_API_KEY=<optional-local-api-key> # optional shared local API key
-HF_TOKEN=<your-hugging-face-token>
-GITHUB_TOKEN=<github-personal-access-token> 
+aidd-intern --model openrouter/openai/gpt-5.2 \
+  "Research recent protein binder design tools. Prefer Google Search, cite sources, and include publication dates."
 ```
-If no `HF_TOKEN` is set, the CLI will prompt you to paste one on first launch
-unless you start on a local model. To get a GITHUB_TOKEN follow the tutorial
-[here](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
 
-### Local Web App
+This keeps local filesystem tools, web search, paper/document/GitHub lookup, and
+the binder/protein workflow tools available without starting heavy local MCP
+servers.
 
-To start the local backend and frontend together:
+## Model Configuration And Switching
+
+The shared model catalog lives at [configs/models.json](configs/models.json).
+It controls the default model, visible model list, aliases, providers, tiers,
+and recommended entries for both CLI and web surfaces.
+
+Set the default model with either environment variables or the catalog:
+
+```bash
+AIDD_INTERN_DEFAULT_MODEL_ID=siliconflow/deepseek-ai/DeepSeek-V4-Flash
+AIDD_INTERN_MODELS_CONFIG=configs/models.json
+```
+
+Start with a specific model:
+
+```bash
+aidd-intern --model openai/gpt-5.5 "your prompt"
+aidd-intern --model anthropic/claude-opus-4-6 "your prompt"
+aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"
+aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt"
+```
+
+Interactive model commands:
+
+```text
+/model list
+/model status
+/model 2
+/model flash
+/model openrouter/openai/gpt-5.2
+/model ollama/llama3.1:8b
+/model --global siliconflow/deepseek-ai/DeepSeek-V4-Flash
+```
+
+`/model <id|alias|number>` changes only the current session. `/model --global
+<id|alias|number>` also writes the selected model back to `configs/models.json`
+as the default for future sessions.
+
+### Local OpenAI-Compatible Models
+
+AIDD-Intern calls local models through LiteLLM-compatible OpenAI HTTP endpoints.
+Start your own inference server first, then use provider prefixes:
+
+```bash
+aidd-intern --model ollama/llama3.1:8b "your prompt"
+aidd-intern --model vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct "your prompt"
+aidd-intern --model lm_studio/google/gemma-3-4b "your prompt"
+aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
+```
+
+Common environment variables:
+
+```bash
+LOCAL_LLM_BASE_URL=http://localhost:8000
+LOCAL_LLM_API_KEY=<optional-local-api-key>
+OLLAMA_BASE_URL=http://localhost:11434
+VLLM_API_KEY=<optional-vllm-key>
+```
+
+## API Keys And Search
+
+Create a root `.env` file or export variables in your shell. Do not commit
+tokens, model weights, checkpoints, databases, generated structures, or traces.
+
+```bash
+OPENAI_API_KEY=<your-openai-api-key>
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
+OPENROUTER_API_KEY=<your-openrouter-api-key>
+SILICONFLOW_API_KEY=<your-siliconflow-api-key>
+
+GOOGLE_SEARCH_API_KEY=<google-custom-search-json-api-key>
+GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id>
+GOOGLE_API_KEY=<optional-google-api-key-alias>
+GOOGLE_CSE_ID=<optional-google-cse-id-alias>
+
+HF_TOKEN=<your-hugging-face-token>
+GITHUB_TOKEN=<github-personal-access-token>
+```
+
+`web_search` behavior:
+
+1. If both Google variables are set, it uses Google Custom Search JSON API.
+2. `recent_days` sends `dateRestrict=dN`.
+3. `sort_by_date=true` sends `sort=date`.
+4. Without Google credentials, local development uses the built-in HTML search
+   fallback and reports the provider in the result.
+5. If Google credentials are configured but Google returns an error, fallback is
+   disabled unless `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` is set.
+
+Useful links:
+
+- Google Custom Search JSON API: https://developers.google.com/custom-search/v1/overview
+- Google Programmable Search Engine: https://programmablesearchengine.google.com/
+- OpenAI API keys: https://platform.openai.com/api-keys
+- Anthropic Console: https://console.anthropic.com/
+- OpenRouter API keys: https://openrouter.ai/settings/keys
+- Hugging Face access tokens: https://huggingface.co/docs/hub/security-tokens
+- GitHub personal access tokens: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+
+Run the live Google Search test only when real credentials are available:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 AIDD_INTERN_LIVE_WEB_SEARCH_TESTS=1 \
+  uv run pytest -p no:cacheprovider tests/integration/test_web_search_live.py -s
+```
+
+## CLI Usage
+
+Interactive:
+
+```bash
+aidd-intern
+```
+
+Headless one-shot:
+
+```bash
+aidd-intern "Research current AlphaFold-style complex validation methods and cite sources."
+```
+
+Common options:
+
+```bash
+aidd-intern "research-only task"
+aidd-intern "plan a binder campaign"
+aidd-intern "run protein design tools"
+aidd-intern --sandbox-tools "test this script in an HF Space sandbox"
+aidd-intern --max-iterations 100 "long task"
+aidd-intern --no-stream "disable streaming"
+```
+
+## Web App
+
+Start backend and frontend together:
 
 ```bash
 ./scripts/dev.sh
 ```
 
-The script resolves the repository path from its own location, so it also works
-from any directory:
+Default URLs:
+
+- Frontend: `http://localhost:5173/`
+- Backend health: `curl -g http://[::1]:7860/api`
+- Frontend proxy health: `curl http://localhost:5173/api`
+
+Start them separately:
 
 ```bash
-/path/to/aidd-intern/scripts/dev.sh
+cd backend
+uv run python -m uvicorn main:app --host ::1 --port 7860
 ```
-
-To install a user-level launcher:
 
 ```bash
-./scripts/install-local-launcher.sh
-aidd-intern-dev
+cd frontend
+npm ci
+npm run dev
 ```
 
-By default, this creates `~/.local/bin/aidd-intern-dev`. Make sure
-`~/.local/bin` is in your `PATH`.
+## Tools And MCP
 
-### Usage
+Default config files:
 
-**Interactive mode** (start a chat session):
+- CLI: [configs/cli_agent_config.json](configs/cli_agent_config.json)
+- Web: [configs/frontend_agent_config.json](configs/frontend_agent_config.json)
+
+User-level CLI config:
 
 ```bash
-aidd-intern
+~/.config/aidd-intern/cli_agent_config.json
 ```
 
-**Headless mode** (single prompt, auto-approve):
+Override the CLI config path:
 
 ```bash
-aidd-intern "fine-tune llama on my dataset"
+AIDD_INTERN_CLI_CONFIG=/path/to/cli_agent_config.json
 ```
 
-**Options:**
+MCP startup is intentionally lazy:
+
+- Hugging Face MCP uses `https://hf.co/mcp` and is skipped when `HF_TOKEN` is
+  missing.
+- ProteinMCP launchers are skipped unless `AIDD_INTERN_ENABLE_PROTEINMCP=1` is
+  set.
+- Remote OpenAPI/catalog data is not fetched during startup; tool handlers fetch
+  it only when the tool is called.
+
+Binder and protein-design tools are normal built-in tools. `binder_design`,
+`run_pxdesign`, `run_boltzgen`, `run_bindcraft`, and
+`protein_design_ace_playbook` are visible to the model without a separate
+workflow selector. The heavy local launchers only start after explicit setup and
+environment opt-in.
+
+Install local ProteinMCP tools when needed:
 
 ```bash
-aidd-intern --model anthropic/claude-opus-4-7 "your prompt"   # requires ANTHROPIC_API_KEY
-aidd-intern --model openai/gpt-5.5 "your prompt"              # requires OPENAI_API_KEY
-aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"   # requires OPENROUTER_API_KEY
-aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt" # requires SILICONFLOW_API_KEY
-aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
-aidd-intern --sandbox-tools "your prompt"                         # use HF Space sandbox tools
-aidd-intern --max-iterations 100 "your prompt"
-aidd-intern --no-stream "your prompt"
+scripts/setup-proteinmcp-local.sh all
+scripts/setup-proteinmcp-local.sh bindcraft_mcp
+scripts/setup-proteinmcp-local.sh boltzgen_mcp
+scripts/setup-proteinmcp-local.sh pxdesign_mcp
 ```
 
-Run `aidd-intern` then `/model` to see the full list of suggested model ids
-(Claude, GPT, HF-router models like MiniMax, Kimi, GLM, DeepSeek, and local
-model prefixes).
-
-**Local models:**
-
-Local model support uses OpenAI-compatible HTTP endpoints through LiteLLM. The
-agent does not load model weights directly from disk; start your inference
-server first, then select it with a provider-specific model prefix:
+Run one local MCP server:
 
 ```bash
-aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model vllm/meta-llama/Llama-3.1-8B-Instruct "your prompt"
+scripts/run-proteinmcp-local.sh bindcraft_mcp
+scripts/run-proteinmcp-local.sh boltzgen_mcp
+scripts/run-proteinmcp-local.sh pxdesign_mcp
 ```
 
-Inside interactive mode, switch with `/model`:
+## Context Strategy
 
-```text
-/model ollama/llama3.1:8b
-/model lm_studio/google/gemma-3-4b
-/model llamacpp/llama-3.1-8b-instruct
-```
+Context size is model-aware:
 
-Supported local prefixes are `ollama/`, `vllm/`, `lm_studio/`, and
-`llamacpp/`. Set `LOCAL_LLM_BASE_URL` and optional `LOCAL_LLM_API_KEY` to use
-one shared local endpoint, or override a specific provider with its matching
-`*_BASE_URL` / `*_API_KEY` variable, such as `OLLAMA_BASE_URL` or
-`VLLM_API_KEY`. Provider-specific variables take precedence over the shared
-local variables. Base URLs may include or omit `/v1`.
+- Known remote models use provider/catalog metadata when available.
+- Unknown local models default to a conservative 65,536-token policy.
+- Remote OpenAI-compatible models are not forced into the local 65k policy.
+- Compaction runs before the model is likely to exceed its context window.
 
-**CLI tool runtime:**
-
-By default, the CLI runs `bash`, `read`, `write`, and `edit` on your local
-filesystem. To use HF Space sandbox tools instead, including `sandbox_create`,
-opt in with `--sandbox-tools`:
+Overrides:
 
 ```bash
-aidd-intern --sandbox-tools "test this training script in a GPU sandbox"
-aidd-intern --model llamacpp/ggml-org/gemma-3-1b-it-GGUF --sandbox-tools
+AIDD_INTERN_FORCE_MODEL_MAX_TOKENS=1000000
+AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS=131072
+SILICONFLOW_MODEL_MAX_TOKENS=1000000
+OPENROUTER_MODEL_MAX_TOKENS=1048576
 ```
 
-Sandbox tool runtime requires `HF_TOKEN`, even when the selected model is local,
-because it creates private HF Spaces. You can also make sandbox tools your CLI
-default in `~/.config/aidd-intern/cli_agent_config.json`:
+## Startup Performance
 
-```json
-{ "tool_runtime": "sandbox" }
-```
+The CLI startup path is split into a fast banner/config phase and deferred
+runtime loading. Built-in tool schemas are registered without importing heavy
+tool implementations, and handlers are loaded only when called. This keeps
+packages such as `whoosh` and `nbconvert` out of the cold-start path for normal
+local sessions.
 
-Use the default local runtime when you want tools to inspect or edit files in
-your checkout. Use sandbox runtime when you want the agent to create or replace
-an HF Space sandbox, test code remotely, or request GPU sandbox hardware before
-launching larger HF Jobs.
-
-**Google Search:**
-
-`web_search` uses Google Custom Search JSON API when these variables are set:
+To profile imports:
 
 ```bash
-GOOGLE_SEARCH_API_KEY=...
-GOOGLE_SEARCH_ENGINE_ID=...
+PYTHONPROFILEIMPORTTIME=1 uv run python -X importtime -m agent.main \
+  --model siliconflow/deepseek-ai/DeepSeek-V4-Flash </dev/null
 ```
 
-Without those credentials, local development falls back to the built-in HTML
-search backend and the tool output labels the provider as a fallback.
-
-**AIDD biomedical sources:**
-
-The built-in `aidd_bio` tool searches and fetches records from RCSB PDB,
-AlphaFold DB, UniProt, and Foldseek. It supports bounded previews for
-PDB/mmCIF/FASTA/JSON content so long structure files do not flood the model
-context.
-
-## Sharing Traces
-
-Every session is auto-uploaded to your **own private Hugging Face dataset**
-in [Claude Code JSONL format](https://huggingface.co/changelog/agent-trace-viewer),
-which the HF Agent Trace Viewer auto-detects so you can browse turns, tool
-calls, and model responses directly on the Hub.
-
-By default the dataset is named `{your-hf-username}/aidd-intern-sessions` and is
-**created private**. You can flip it to public from inside the CLI:
+There is a regression test that starts a fresh Python subprocess, registers
+local-mode tools, prints each step, and asserts that `docs_tools`,
+`github_read_file`, `whoosh`, and `nbconvert` are still lazy:
 
 ```bash
-/share-traces            # show current visibility + dataset URL
-/share-traces public     # publish (anyone can view)
-/share-traces private    # lock it back down
+uv run pytest tests/unit/test_mcp_startup.py -q
 ```
 
-You can also flip visibility from the dataset page on huggingface.co — the
-agent honours whatever you set there for subsequent uploads.
+## Project Layout
 
-To opt out entirely, set in your CLI config (e.g. `configs/cli_agent_config.json`
-or `~/.config/aidd-intern/cli_agent_config.json`):
+- `agent/`: async agent runtime, CLI entrypoint, context management, model
+  switching, tool routing, session persistence, and built-in tools.
+- `backend/`: FastAPI backend for hosted sessions, auth, quotas, uploads, KPI
+  scheduling, and REST/SSE/WebSocket APIs.
+- `frontend/`: Vite + React + TypeScript + MUI web app.
+- `configs/`: shared CLI/frontend defaults, model catalog, and MCP settings.
+- `scripts/`: local dev launcher, ProteinMCP setup/run helpers, KPI/SFT tools,
+  sandbox cleanup, and backlog utilities.
+- `src/`: Node.js CLI package for smoke, integration, and evaluation harnesses.
+- `fixtures/`: evaluation prompts for the Node CLI.
+- `tests/`: Python and Node tests.
+- `evals/protein_design/`: protein-design benchmark scaffold.
+- `docs/`: architecture, context management, multi-agent, binder workflow, and
+  protein-design guides.
 
-```json
-{ "share_traces": false }
-```
+## Development And Tests
 
-To override the destination repo, set:
-
-```json
-{ "personal_trace_repo_template": "{hf_user}/my-custom-traces" }
-```
-
-The shared `smolagents/aidd-intern-sessions` dataset is unrelated and only
-receives anonymized telemetry rows used by the backend KPI scheduler.
-
-## Supported Gateways
-
-AIDD-Intern currently supports one-way notification gateways from CLI sessions.
-These gateways send out-of-band status updates; they do not accept inbound chat
-messages.
-
-### Slack
-
-Slack notifications use the Slack Web API to post messages when the agent needs
-approval, hits an error, or completes a turn. Create a Slack app with a bot token
-that has `chat:write`, invite the bot to the target channel, then set:
-
-```bash
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_CHANNEL_ID=C...
-```
-
-The CLI automatically creates a `slack.default` destination when both variables
-are present. Optional environment variables for the env-only default:
-
-```bash
-AIDD_INTERN_SLACK_NOTIFICATIONS=false
-AIDD_INTERN_SLACK_DESTINATION=slack.ops
-AIDD_INTERN_SLACK_AUTO_EVENTS=approval_required,error,turn_complete
-AIDD_INTERN_SLACK_ALLOW_AGENT_TOOL=true
-AIDD_INTERN_SLACK_ALLOW_AUTO_EVENTS=true
-```
-
-For a persistent user-level config, put overrides in
-`~/.config/aidd-intern/cli_agent_config.json` or point `AIDD_INTERN_CLI_CONFIG` at a
-JSON file:
-
-```json
-{
-  "messaging": {
-    "enabled": true,
-    "auto_event_types": ["approval_required", "error", "turn_complete"],
-    "destinations": {
-      "slack.ops": {
-        "provider": "slack",
-        "token": "${SLACK_BOT_TOKEN}",
-        "channel": "${SLACK_CHANNEL_ID}",
-        "allow_agent_tool": true,
-        "allow_auto_events": true
-      }
-    }
-  }
-}
-```
-
-## Architecture
-
-### Component Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         User/CLI                            │
-└────────────┬─────────────────────────────────────┬──────────┘
-             │ Operations                          │ Events
-             ↓ (user_input, exec_approval,         ↑
-      submission_queue  interrupt, compact, ...)  event_queue
-             │                                          │
-             ↓                                          │
-┌────────────────────────────────────────────────────┐  │
-│            submission_loop (agent_loop.py)         │  │
-│  ┌──────────────────────────────────────────────┐  │  │
-│  │  1. Receive Operation from queue             │  │  │
-│  │  2. Route to handler (run_agent/compact/...) │  │  │
-│  └──────────────────────────────────────────────┘  │  │
-│                      ↓                             │  │
-│  ┌──────────────────────────────────────────────┐  │  │
-│  │         Handlers.run_agent()                 │  ├──┤
-│  │                                              │  │  │
-│  │  ┌────────────────────────────────────────┐  │  │  │
-│  │  │  Agentic Loop (max 300 iterations)     │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  ┌──────────────────────────────────┐  │  │  │  │
-│  │  │  │ Session                          │  │  │  │  │
-│  │  │  │  ┌────────────────────────────┐  │  │  │  │  │
-│  │  │  │  │ ContextManager             │  │  │  │  │  │
-│  │  │  │  │ • Message history          │  │  │  │  │  │
-│  │  │  │  │   (litellm.Message[])      │  │  │  │  │  │
-│  │  │  │  │ • Auto-compaction (170k)   │  │  │  │  │  │
-│  │  │  │  │ • Session upload to HF     │  │  │  │  │  │
-│  │  │  │  └────────────────────────────┘  │  │  │  │  │
-│  │  │  │                                  │  │  │  │  │
-│  │  │  │  ┌────────────────────────────┐  │  │  │  │  │
-│  │  │  │  │ ToolRouter                 │  │  │  │  │  │
-│  │  │  │  │  ├─ HF docs & research     │  │  │  │  │  │
-│  │  │  │  │  ├─ HF repos, datasets,    │  │  │  │  │  │
-│  │  │  │  │  │  jobs, papers           │  │  │  │  │  │
-│  │  │  │  │  ├─ GitHub code search     │  │  │  │  │  │
-│  │  │  │  │  ├─ Sandbox & local tools  │  │  │  │  │  │
-│  │  │  │  │  ├─ Planning               │  │  │  │  │  │
-│  │  │  │  │  └─ MCP server tools       │  │  │  │  │  │
-│  │  │  │  └────────────────────────────┘  │  │  │  │  │
-│  │  │  └──────────────────────────────────┘  │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  ┌──────────────────────────────────┐  │  │  │  │
-│  │  │  │ Doom Loop Detector               │  │  │  │  │
-│  │  │  │ • Detects repeated tool patterns │  │  │  │  │
-│  │  │  │ • Injects corrective prompts     │  │  │  │  │
-│  │  │  └──────────────────────────────────┘  │  │  │  │
-│  │  │                                        │  │  │  │
-│  │  │  Loop:                                 │  │  │  │
-│  │  │    1. LLM call (litellm.acompletion)   │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    2. Parse tool_calls[]               │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    3. Approval check                   │  │  │  │
-│  │  │       (jobs, sandbox, destructive ops) │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    4. Execute via ToolRouter           │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    5. Add results to ContextManager    │  │  │  │
-│  │  │       ↓                                │  │  │  │
-│  │  │    6. Repeat if tool_calls exist       │  │  │  │
-│  │  └────────────────────────────────────────┘  │  │  │
-│  └──────────────────────────────────────────────┘  │  │
-└────────────────────────────────────────────────────┴──┘
-```
-
-### Agentic Loop Flow
-
-```
-User Message
-     ↓
-[Add to ContextManager]
-     ↓
-     ╔═══════════════════════════════════════════╗
-     ║      Iteration Loop (max 300)             ║
-     ║                                           ║
-     ║  Get messages + tool specs                ║
-     ║         ↓                                 ║
-     ║  litellm.acompletion()                    ║
-     ║         ↓                                 ║
-     ║  Has tool_calls? ──No──> Done             ║
-     ║         │                                 ║
-     ║        Yes                                ║
-     ║         ↓                                 ║
-     ║  Add assistant msg (with tool_calls)      ║
-     ║         ↓                                 ║
-     ║  Doom loop check                          ║
-     ║         ↓                                 ║
-     ║  For each tool_call:                      ║
-     ║    • Needs approval? ──Yes──> Wait for    ║
-     ║    │                         user confirm ║
-     ║    No                                     ║
-     ║    ↓                                      ║
-     ║    • ToolRouter.execute_tool()            ║
-     ║    • Add result to ContextManager         ║
-     ║         ↓                                 ║
-     ║  Continue loop ─────────────────┐         ║
-     ║         ↑                       │         ║
-     ║         └───────────────────────┘         ║
-     ╚═══════════════════════════════════════════╝
-```
-
-## Events
-
-The agent emits the following events via `event_queue`:
-
-- `processing` - Starting to process user input
-- `ready` - Agent is ready for input
-- `assistant_chunk` - Streaming token chunk
-- `assistant_message` - Complete LLM response text
-- `assistant_stream_end` - Token stream finished
-- `tool_call` - Tool being called with arguments
-- `tool_output` - Tool execution result
-- `tool_log` - Informational tool log message
-- `tool_state_change` - Tool execution state transition
-- `approval_required` - Requesting user approval for sensitive operations
-- `turn_complete` - Agent finished processing
-- `error` - Error occurred during processing
-- `interrupted` - Agent was interrupted
-- `compacted` - Context was compacted
-- `undo_complete` - Undo operation completed
-- `shutdown` - Agent shutting down
-
-## Development
-
-### Pre-commit Checks
-
-Run Ruff before every commit:
+Python checks:
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
+uv run pytest
 ```
 
-If the format check fails, run `uv run ruff format .` and re-run the checks
-before committing.
+Format when needed:
 
-### Adding Built-in Tools
-
-Edit `agent/core/tools.py`:
-
-```python
-def create_builtin_tools() -> list[ToolSpec]:
-    return [
-        ToolSpec(
-            name="your_tool",
-            description="What your tool does",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "param": {"type": "string", "description": "Parameter description"}
-                },
-                "required": ["param"]
-            },
-            handler=your_async_handler
-        ),
-        # ... existing tools
-    ]
+```bash
+uv run ruff format .
+uv run ruff check .
+uv run ruff format --check .
 ```
 
-### Adding MCP Servers
+Frontend checks:
 
-Edit `configs/cli_agent_config.json` for CLI defaults, or
-`configs/frontend_agent_config.json` for web-session defaults:
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+Node CLI harness:
+
+```bash
+npm run build
+npm run lint
+npm test
+npm pack --dry-run
+```
+
+Focused checks:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
+  tests/unit/test_binder_design_tool.py \
+  tests/unit/test_mcp_startup.py \
+  tests/unit/test_config.py \
+  tests/unit/test_web_search_tool.py
+
+PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
+  tests/unit/test_protein_design_workflow.py
+```
+
+Protein-design benchmark smoke test:
+
+```bash
+uv run python evals/protein_design/runner.py \
+  --model test-model \
+  --output /tmp/protein_design_eval_results.json
+```
+
+Do not commit benchmark outputs or generated temporary files.
+
+## Session Traces
+
+CLI sessions can be uploaded to a private Hugging Face dataset in Claude Code
+compatible JSONL format.
+
+Default target:
+
+```text
+{your-hf-username}/aidd-intern-sessions
+```
+
+CLI commands:
+
+```text
+/share-traces
+/share-traces public
+/share-traces private
+```
+
+Disable sharing:
 
 ```json
 {
-  "model_name": "anthropic/claude-sonnet-4-5-20250929",
-  "mcpServers": {
-    "your-server-name": {
-      "transport": "http",
-      "url": "https://example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${YOUR_TOKEN}"
-      }
-    }
-  }
+  "share_traces": false
 }
 ```
 
-Note: Environment variables like `${YOUR_TOKEN}` are auto-substituted from `.env`.
+Override the trace repo template:
 
-## Cite aidd-intern
-If you use `aidd-intern` in your work, please cite it by using the following BibTeX entry or similar.
+```json
+{
+  "personal_trace_repo_template": "{hf_user}/my-custom-traces"
+}
+```
+
+## Citation
+
+If you use AIDD-Intern in your work, cite it with this BibTeX entry or similar:
+
 ```bibtex
 @Misc{aidd-intern,
-  title =        {aidd-intern: an agent that autonomously researches, writes, and ships good quality ML related code using the Hugging Face ecosystem},
+  title =        {AIDD-Intern: an agent runtime for source-backed AI drug discovery research and binder workflows},
   author =       {Aksel Joonas Reedi, Henri Bonamy, Yoan Di Cosmo, Leandro von Werra, Lewis Tunstall},
-  howpublished = {\url{https://github.com/huggingface/aidd-intern}},
+  howpublished = {\url{https://github.com/setsu2420/aidd-intern}},
   year =         {2026}
 }
 ```

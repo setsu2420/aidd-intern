@@ -1,6 +1,7 @@
 """Regression tests for interactive CLI rendering and research model routing."""
 
 import asyncio
+import json
 import sys
 from io import StringIO
 from types import SimpleNamespace
@@ -75,6 +76,89 @@ def test_help_output_recomputes_widths_from_rows():
     assert len(set(description_columns)) == 1
 
 
+def test_context_status_formats_live_usage():
+    class FakeContext:
+        def __init__(self):
+            self.items = [object(), object()]
+            self.model_max_tokens = 65_536
+            self.compaction_threshold = 58_982
+
+        def estimate_usage(self, model_name: str) -> int:
+            assert model_name == "openai/gpt-5.5"
+            return 12_345
+
+    session = SimpleNamespace(
+        context_manager=FakeContext(),
+        config=SimpleNamespace(model_name="openai/gpt-5.5"),
+        turn_count=3,
+    )
+
+    assert (
+        terminal_display.format_context_status(
+            session, include_turns=True, include_items=True
+        )
+        == "Context [##----------] 12.3k / 65.5k (18.8%) | compact @ 59.0k | turns 3 | items 2"
+    )
+
+
+def test_banner_defers_command_hint_until_ready(monkeypatch):
+    output = StringIO()
+    console = Console(
+        file=output,
+        color_system=None,
+        theme=terminal_display._THEME,
+        width=120,
+    )
+    monkeypatch.setattr(terminal_display, "_console", console)
+    monkeypatch.delenv("AIDD_INTERN_BOOT_ANIMATION", raising=False)
+
+    terminal_display.print_banner(
+        model="siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+        hf_user=None,
+        tool_runtime="local filesystem",
+    )
+    terminal_display.print_init_done(tool_count=23)
+
+    rendered = output.getvalue()
+    assert rendered.count("/help for commands") == 1
+    assert "Tools: loading..." in rendered
+    assert "Tools: 23 loaded" in rendered
+
+
+@pytest.mark.asyncio
+async def test_get_user_input_attaches_context_toolbar(monkeypatch):
+    class FakeContext:
+        def __init__(self):
+            self.items = [object(), object()]
+            self.model_max_tokens = 65_536
+            self.compaction_threshold = 58_982
+
+        def estimate_usage(self, model_name: str) -> int:
+            assert model_name == "openai/gpt-5.5"
+            return 12_345
+
+    captured = {}
+
+    class FakePromptSession:
+        async def prompt_async(self, message, **kwargs):
+            captured["message"] = message
+            captured["kwargs"] = kwargs
+            return "hello"
+
+    session = SimpleNamespace(
+        context_manager=FakeContext(),
+        config=SimpleNamespace(model_name="openai/gpt-5.5"),
+        turn_count=3,
+    )
+
+    result = await main_mod.get_user_input(FakePromptSession(), session=session)
+
+    assert result == "hello"
+    assert captured["kwargs"][
+        "bottom_toolbar"
+    ] == terminal_display.format_context_status(session)
+
+
 def test_subagent_display_does_not_spawn_background_redraw(monkeypatch):
     calls: list[object] = []
 
@@ -100,32 +184,88 @@ def test_subagent_display_does_not_spawn_background_redraw(monkeypatch):
 def test_cli_forwards_model_flag_to_interactive_main(monkeypatch):
     seen: dict[str, object] = {}
 
-    async def fake_main(*, model=None, sandbox_tools=False):
+    async def fake_main(*, model=None, sandbox_tools=False, domain_pack=None):
         seen["model"] = model
         seen["sandbox_tools"] = sandbox_tools
+        seen["domain_pack"] = domain_pack
 
     monkeypatch.setattr(sys, "argv", ["aidd-intern", "--model", "openai/gpt-5.5"])
     monkeypatch.setattr(main_mod, "main", fake_main)
 
     main_mod.cli()
 
-    assert seen["model"] == "openai/gpt-5.5"
-    assert seen["sandbox_tools"] is False
+    assert seen == {
+        "model": "openai/gpt-5.5",
+        "sandbox_tools": False,
+        "domain_pack": None,
+    }
 
 
 def test_cli_forwards_sandbox_flag_to_interactive_main(monkeypatch):
     seen: dict[str, object] = {}
 
-    async def fake_main(*, model=None, sandbox_tools=False):
+    async def fake_main(*, model=None, sandbox_tools=False, domain_pack=None):
         seen["model"] = model
         seen["sandbox_tools"] = sandbox_tools
+        seen["domain_pack"] = domain_pack
 
     monkeypatch.setattr(sys, "argv", ["aidd-intern", "--sandbox-tools"])
     monkeypatch.setattr(main_mod, "main", fake_main)
 
     main_mod.cli()
 
-    assert seen == {"model": None, "sandbox_tools": True}
+    assert seen == {"model": None, "sandbox_tools": True, "domain_pack": None}
+
+
+@pytest.mark.asyncio
+async def test_model_command_global_saves_catalog_default(monkeypatch, tmp_path):
+    models_path = tmp_path / "models.json"
+    models_path.write_text(
+        json.dumps(
+            {
+                "default": "openrouter/openai/gpt-5.2",
+                "models": [
+                    {
+                        "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+                        "label": "DeepSeek Flash",
+                        "aliases": ["flash"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class Config:
+        model_name = "openrouter/openai/gpt-5.2"
+        models_config = str(models_path)
+        reasoning_effort = None
+
+    class Session:
+        model_effective_effort = {}
+
+        def update_model(self, model_id):
+            Config.model_name = model_id
+
+    async def fake_probe(model_id, config, session, console, hf_token):
+        session.update_model(model_id)
+
+    from agent.core import model_switcher
+
+    monkeypatch.setattr(model_switcher, "probe_and_switch_model", fake_probe)
+    monkeypatch.setattr("agent.core.hf_tokens.resolve_hf_token", lambda: None)
+
+    result = await main_mod._handle_slash_command(
+        "/model --global flash",
+        Config,
+        [Session()],
+        asyncio.Queue(),
+        [0],
+    )
+
+    assert result is None
+    payload = json.loads(models_path.read_text(encoding="utf-8"))
+    assert payload["default"] == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
 
 
 def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
@@ -138,6 +278,7 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
         max_iterations=None,
         stream=True,
         sandbox_tools=False,
+        domain_pack=None,
     ):
         seen.update(
             {
@@ -146,6 +287,7 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
                 "max_iterations": max_iterations,
                 "stream": stream,
                 "sandbox_tools": sandbox_tools,
+                "domain_pack": domain_pack,
             }
         )
 
@@ -164,6 +306,35 @@ def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
         "max_iterations": None,
         "stream": False,
         "sandbox_tools": True,
+        "domain_pack": None,
+    }
+
+
+def test_cli_forwards_domain_pack_flag(monkeypatch):
+    seen: dict[str, object] = {}
+
+    async def fake_main(*, model=None, sandbox_tools=False, domain_pack=None):
+        seen.update(
+            {
+                "model": model,
+                "sandbox_tools": sandbox_tools,
+                "domain_pack": domain_pack,
+            }
+        )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["aidd-intern", "--domain-pack", "none", "--model", "openai/gpt-5.5"],
+    )
+    monkeypatch.setattr(main_mod, "main", fake_main)
+
+    main_mod.cli()
+
+    assert seen == {
+        "model": "openai/gpt-5.5",
+        "sandbox_tools": False,
+        "domain_pack": "none",
     }
 
 
@@ -181,7 +352,9 @@ async def test_interactive_main_applies_model_override_before_banner(monkeypatch
     monkeypatch.setattr(main_mod.os, "system", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main_mod, "PromptSession", lambda: object())
     monkeypatch.setattr(main_mod, "resolve_hf_token", lambda: "hf-token")
-    monkeypatch.setattr(main_mod, "_get_hf_user", lambda _token: "tester")
+    monkeypatch.setattr(
+        main_mod, "_validated_hf_token", lambda token: (token, "tester")
+    )
     monkeypatch.setattr(
         main_mod,
         "load_config",
@@ -215,7 +388,7 @@ async def test_local_model_local_runtime_skips_hf_token_prompt(monkeypatch):
     monkeypatch.setattr(main_mod, "PromptSession", lambda: object())
     monkeypatch.setattr(main_mod, "resolve_hf_token", lambda: None)
     monkeypatch.setattr(main_mod, "_prompt_and_save_hf_token", fail_prompt)
-    monkeypatch.setattr(main_mod, "_get_hf_user", lambda _token: None)
+    monkeypatch.setattr(main_mod, "_validated_hf_token", lambda _token: (None, None))
     monkeypatch.setattr(
         main_mod,
         "load_config",
@@ -229,6 +402,55 @@ async def test_local_model_local_runtime_skips_hf_token_prompt(monkeypatch):
 
     with pytest.raises(StopAfterBanner):
         await main_mod.main()
+
+
+@pytest.mark.asyncio
+async def test_local_model_local_runtime_drops_invalid_hf_token_for_mcp(monkeypatch):
+    class StopAfterToolRouter(Exception):
+        pass
+
+    seen: dict[str, object] = {}
+
+    class FakeGateway:
+        def __init__(self, _config):
+            pass
+
+        async def start(self):
+            pass
+
+    class FakeToolRouter:
+        def __init__(self, mcp_servers, *, hf_token=None, local_mode=True):
+            seen["mcp_servers"] = mcp_servers
+            seen["hf_token"] = hf_token
+            seen["local_mode"] = local_mode
+            raise StopAfterToolRouter
+
+    from agent.core import hf_router_catalog
+
+    monkeypatch.setattr(main_mod.os, "system", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main_mod, "PromptSession", lambda: object())
+    monkeypatch.setattr(main_mod, "resolve_hf_token", lambda: "stale-token")
+    monkeypatch.setattr(main_mod, "_validated_hf_token", lambda _token: (None, None))
+    monkeypatch.setattr(main_mod, "print_banner", lambda **_kwargs: None)
+    monkeypatch.setattr(hf_router_catalog, "prewarm", lambda: None)
+    monkeypatch.setattr(
+        main_mod,
+        "load_config",
+        lambda _path, **_kwargs: SimpleNamespace(
+            model_name="vllm/qwen3.6-35b-a3b",
+            mcpServers={"hf-mcp-server": object()},
+            messaging=SimpleNamespace(default_auto_destinations=lambda: []),
+            tool_runtime="local",
+        ),
+    )
+    monkeypatch.setattr(main_mod, "NotificationGateway", FakeGateway)
+    monkeypatch.setattr(main_mod, "ToolRouter", FakeToolRouter)
+
+    with pytest.raises(StopAfterToolRouter):
+        await main_mod.main()
+
+    assert seen["hf_token"] is None
+    assert seen["local_mode"] is True
 
 
 @pytest.mark.asyncio
@@ -253,7 +475,9 @@ async def test_local_model_sandbox_runtime_prompts_for_hf_token(monkeypatch):
     monkeypatch.setattr(main_mod, "PromptSession", lambda: object())
     monkeypatch.setattr(main_mod, "resolve_hf_token", lambda: None)
     monkeypatch.setattr(main_mod, "_prompt_and_save_hf_token", fake_prompt)
-    monkeypatch.setattr(main_mod, "_get_hf_user", lambda _token: "tester")
+    monkeypatch.setattr(
+        main_mod, "_validated_hf_token", lambda token: (token, "tester")
+    )
     monkeypatch.setattr(
         main_mod,
         "load_config",
@@ -297,7 +521,9 @@ async def test_interactive_main_passes_sandbox_runtime_to_tool_router(monkeypatc
     monkeypatch.setattr(main_mod.os, "system", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main_mod, "PromptSession", lambda: object())
     monkeypatch.setattr(main_mod, "resolve_hf_token", lambda: "hf-token")
-    monkeypatch.setattr(main_mod, "_get_hf_user", lambda _token: "tester")
+    monkeypatch.setattr(
+        main_mod, "_validated_hf_token", lambda token: (token, "tester")
+    )
     monkeypatch.setattr(main_mod, "print_banner", lambda **_kwargs: None)
     monkeypatch.setattr(hf_router_catalog, "prewarm", lambda: None)
     monkeypatch.setattr(

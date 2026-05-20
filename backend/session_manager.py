@@ -6,7 +6,7 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -40,6 +40,10 @@ class Submission:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 class EventBroadcaster:
@@ -95,7 +99,7 @@ class AgentSession:
     hf_username: str | None = None  # HF namespace used for personal trace uploads
     hf_token: str | None = None  # User's HF OAuth token for tool execution
     task: asyncio.Task | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utc_now)
     is_active: bool = True
     is_processing: bool = False  # True while a submission is being executed
     broadcaster: Any = None
@@ -175,7 +179,11 @@ class SessionManager:
         import time as _time
 
         t0 = _time.monotonic()
-        tool_router = ToolRouter(self.config.mcpServers, hf_token=hf_token)
+        tool_router = ToolRouter(
+            self.config.mcpServers,
+            hf_token=hf_token,
+            domain_pack=self.config.domain_pack,
+        )
         # Deep-copy config so each session's model switches independently —
         # tab A picking GLM doesn't flip tab B off Claude.
         session_config = self.config.model_copy(deep=True)
@@ -647,7 +655,7 @@ class SessionManager:
 
         created_at = meta.get("created_at")
         if not isinstance(created_at, datetime):
-            created_at = datetime.utcnow()
+            created_at = _utc_now()
 
         agent_session = AgentSession(
             session_id=session_id,
@@ -1246,7 +1254,7 @@ class SessionManager:
                 if isinstance(created_at, datetime):
                     created_at_str = created_at.isoformat()
                 else:
-                    created_at_str = str(created_at or datetime.utcnow().isoformat())
+                    created_at_str = str(created_at or _utc_now().isoformat())
                 pending = self._pending_docs_for_api(row.get("pending_approval") or [])
                 results.append(
                     {

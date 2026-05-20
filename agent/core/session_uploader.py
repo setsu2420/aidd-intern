@@ -376,7 +376,7 @@ with one file per session.
 ## Links
 
 - AIDD-Intern demo: https://smolagents-aidd-intern.hf.space
-- AIDD-Intern CLI: https://github.com/huggingface/aidd-intern
+- AIDD-Intern CLI: https://github.com/setsu2420/aidd-intern
 
 ## Data description
 

@@ -1,0 +1,70 @@
+{
+  "default": "${AIDD_INTERN_DEFAULT_MODEL_ID:-vllm/qwen3.6-35b-a3b}",
+  "models": [
+    {
+      "id": "vllm/qwen3.6-35b-a3b",
+      "label": "Local vLLM",
+      "provider": "vllm",
+      "tier": "local",
+      "aliases": ["local", "vllm"],
+      "recommended": true
+    },
+    {
+      "id": "moonshotai/Kimi-K2.6",
+      "label": "Kimi K2.6",
+      "provider": "huggingface",
+      "tier": "free",
+      "aliases": ["kimi"]
+    },
+    {
+      "id": "anthropic/claude-opus-4-6",
+      "label": "Claude Opus 4.6",
+      "provider": "anthropic",
+      "tier": "pro",
+      "aliases": ["claude", "opus"]
+    },
+    {
+      "id": "openai/gpt-5.5",
+      "label": "GPT-5.5",
+      "provider": "openai",
+      "tier": "pro",
+      "aliases": ["gpt", "gpt55"]
+    },
+    {
+      "id": "MiniMaxAI/MiniMax-M2.7",
+      "label": "MiniMax M2.7",
+      "provider": "huggingface",
+      "tier": "free",
+      "aliases": ["minimax"]
+    },
+    {
+      "id": "zai-org/GLM-5.1",
+      "label": "GLM 5.1",
+      "provider": "huggingface",
+      "tier": "free",
+      "aliases": ["glm"]
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4-Pro:deepinfra",
+      "label": "DeepSeek V4 Pro",
+      "provider": "huggingface",
+      "tier": "free",
+      "aliases": ["deepseek-pro"]
+    },
+    {
+      "id": "openrouter/openai/gpt-5.2",
+      "label": "GPT-5.2 via OpenRouter",
+      "provider": "openrouter",
+      "tier": "external",
+      "aliases": ["openrouter", "gpt52"]
+    },
+    {
+      "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+      "label": "DeepSeek V4 Flash via SiliconFlow",
+      "provider": "siliconflow",
+      "tier": "external",
+      "aliases": ["siliconflow", "deepseek-flash"],
+      "recommended": true
+    }
+  ]
+}

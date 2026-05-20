@@ -7,33 +7,27 @@
  */
 import type { UIMessage } from 'ai';
 import { logger } from '@/utils/logger';
+import { createJsonMapStore } from './json-map-store';
 
 const STORAGE_KEY = 'hf-agent-messages';
 const MAX_SESSIONS = 50;
 
 type MessagesMap = Record<string, UIMessage[]>;
 
-function readAll(): MessagesMap {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    // Legacy format was { messagesBySession: {...} }
-    if (parsed.messagesBySession) return parsed.messagesBySession;
-    // New flat format
-    if (typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-    return {};
-  } catch {
-    return {};
-  }
-}
+const store = createJsonMapStore<UIMessage[]>(STORAGE_KEY, (e) => {
+  logger.warn('Failed to persist messages:', e);
+});
 
-function writeAll(map: MessagesMap): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    logger.warn('Failed to persist messages:', e);
+function readAll(): MessagesMap {
+  const map = store.readAll();
+  if ('messagesBySession' in map) {
+    const legacy = (map as { messagesBySession?: MessagesMap }).messagesBySession;
+    if (legacy && typeof legacy === 'object') {
+      store.writeAll(legacy);
+      return legacy;
+    }
   }
+  return map;
 }
 
 export function loadMessages(sessionId: string): UIMessage[] {
@@ -53,13 +47,14 @@ export function saveMessages(sessionId: string, messages: UIMessage[]): void {
     for (const k of toRemove) delete map[k];
   }
 
-  writeAll(map);
+  store.writeAll(map);
 }
 
 export function deleteMessages(sessionId: string): void {
   const map = readAll();
+  if (!(sessionId in map)) return;
   delete map[sessionId];
-  writeAll(map);
+  store.writeAll(map);
 }
 
 export function moveMessages(fromId: string, toId: string): void {
@@ -67,5 +62,5 @@ export function moveMessages(fromId: string, toId: string): void {
   if (!map[fromId]) return;
   map[toId] = map[fromId];
   delete map[fromId];
-  writeAll(map);
+  store.writeAll(map);
 }

@@ -34,7 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 GITHUB_API = "https://api.github.com"
-DEFAULT_GITHUB_REPO = "huggingface/aidd-intern"
+DEFAULT_GITHUB_REPO = "setsu2420/aidd-intern"
 DEFAULT_HF_SPACE = "smolagents/aidd-intern"
 DEFAULT_CONFIG = "configs/cli_agent_config.json"
 DEFAULT_BATCH_SIZE = 12

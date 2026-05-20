@@ -27,6 +27,58 @@ def test_premium_model_predicate_includes_bedrock_claude_and_gpt55_only():
     assert agent._is_premium_model("openai/gpt-5.5")
     assert not agent._is_premium_model("anthropic/claude-opus-4-6")
     assert not agent._is_premium_model("moonshotai/Kimi-K2.6")
+    assert not agent._is_premium_model("vllm/huihui-26b")
+
+
+def test_available_models_include_configured_local_vllm(monkeypatch):
+    monkeypatch.setattr(
+        agent.session_manager.config,
+        "model_name",
+        "vllm/current-server-model",
+    )
+
+    models = agent._available_models()
+
+    assert models[0]["id"] == "vllm/current-server-model"
+    assert models[0]["provider"] == "vllm"
+    assert models[0]["tier"] == "local"
+
+
+def test_available_models_come_from_shared_catalog(monkeypatch, tmp_path):
+    models_path = tmp_path / "models.json"
+    models_path.write_text(
+        """
+        {
+          "default": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+          "models": [
+            {
+              "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+              "label": "DeepSeek Flash",
+              "provider": "siliconflow",
+              "tier": "external",
+              "aliases": ["flash"]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        agent.session_manager.config,
+        "models_config",
+        str(models_path),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        agent.session_manager.config,
+        "model_name",
+        "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+    )
+
+    models = agent._available_models()
+
+    assert models[0]["id"] == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+    assert models[0]["aliases"] == ["flash"]
 
 
 @pytest.mark.asyncio

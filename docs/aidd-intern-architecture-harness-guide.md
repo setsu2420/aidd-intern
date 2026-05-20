@@ -411,15 +411,6 @@ Local development notes from `AGENTS.md`:
 - Backend: `cd backend && uv run uvicorn main:app --host ::1 --port 7860`.
 - Vite proxies `/api` and `/auth` to backend.
 
-HF Space deploy notes:
-
-- GitHub changes should go through PRs first.
-- Space remote is `space`.
-- Deploy `origin/main` to `space-main` with a merge commit, preserving Space
-  README frontmatter through `.gitattributes`.
-- HF OAuth scopes must match actual Hub API usage. A local broad PAT can hide
-  missing production OAuth scopes.
-
 ## How AIDD-Intern Compares to Agent Frameworks
 
 AIDD-Intern resembles a JSON tool-calling `MultiStepAgent` more than a code-agent.

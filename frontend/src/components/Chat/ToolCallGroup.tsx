@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Stack, Typography, Chip, Button, TextField, IconButton, Link, CircularProgress } from '@mui/material';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
@@ -54,11 +54,6 @@ function computeElapsed(startedAt: number | null): number | null {
   return Math.round((Date.now() - startedAt) / 1000);
 }
 
-/** Format token count like the CLI: "12.4k" or "800". */
-function formatTokens(tokens: number): string {
-  return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
-}
-
 /** Format elapsed seconds like the CLI: "18s" or "2m 5s". */
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -78,6 +73,11 @@ function researchChipLabel(
   if (stats.tokenCount > 0) parts.push(`${formatTokens(stats.tokenCount)} tokens`);
   if (elapsed !== null) parts.push(formatElapsed(elapsed));
   return parts.join(' \u00B7 ');
+}
+
+/** Format token count like the CLI: "12.4k" or "800". */
+function formatTokens(tokens: number): string {
+  return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
 }
 
 /** Parse JSON args from a step string like "tool_name  {json}" (may be truncated at 80 chars). */
@@ -155,6 +155,17 @@ function formatResearchStep(raw: string): { label: string } {
       find_all_resources: 'Finding paper resources',
     };
     const base = (op && opLabels[op]) || 'Searching papers';
+    return { label: detail ? `${base}: ${detail}` : base };
+  }
+  if (step.startsWith('literature_lookup')) {
+    const op = args.operation as string;
+    const detail = (args.query) || (args.identifier);
+    const opLabels: Record<string, string> = {
+      search: 'Searching literature APIs',
+      details: 'Fetching paper metadata',
+      recent_preprints: 'Checking recent preprints',
+    };
+    const base = (op && opLabels[op]) || 'Searching literature APIs';
     return { label: detail ? `${base}: ${detail}` : base };
   }
   if (step.startsWith('find_hf_api')) {
@@ -721,7 +732,35 @@ function InlineApproval({
 
 const EMPTY_AGENTS: Record<string, ResearchAgentState> = {};
 
-export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProps) {
+function sameDynamicToolParts(prevTools: DynamicToolPart[], nextTools: DynamicToolPart[]): boolean {
+  if (prevTools === nextTools) return true;
+  if (prevTools.length !== nextTools.length) return false;
+
+  for (let i = 0; i < prevTools.length; i++) {
+    const prevTool = prevTools[i];
+    const nextTool = nextTools[i];
+
+    if (prevTool === nextTool) continue;
+    if (
+      prevTool.toolCallId !== nextTool.toolCallId ||
+      prevTool.toolName !== nextTool.toolName ||
+      prevTool.state !== nextTool.state
+    ) {
+      return false;
+    }
+    if (!Object.is(prevTool.input, nextTool.input)) return false;
+    if (!Object.is(prevTool.output, nextTool.output)) return false;
+    if (!Object.is(prevTool.errorText, nextTool.errorText)) return false;
+
+    const prevApprovalId = prevTool.approval?.id ?? null;
+    const nextApprovalId = nextTool.approval?.id ?? null;
+    if (prevApprovalId !== nextApprovalId) return false;
+  }
+
+  return true;
+}
+
+function ToolCallGroup({ tools, approveTools }: ToolCallGroupProps) {
   const { setPanel, lockPanel, getJobUrl, getEditedScript, setJobStatus, getJobStatus, getTrackioDashboard, setToolError, getToolError, setToolRejected, getToolRejected } = useAgentStore();
   const researchAgents = useAgentStore(s => {
     const activeId = s.activeSessionId;
@@ -1334,3 +1373,9 @@ export default function ToolCallGroup({ tools, approveTools }: ToolCallGroupProp
     </Box>
   );
 }
+
+function areToolCallGroupPropsEqual(prev: ToolCallGroupProps, next: ToolCallGroupProps): boolean {
+  return prev.approveTools === next.approveTools && sameDynamicToolParts(prev.tools, next.tools);
+}
+
+export default memo(ToolCallGroup, areToolCallGroupPropsEqual);

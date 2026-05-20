@@ -1,0 +1,82 @@
+{
+  "name": "aidd-intern",
+  "version": "1.0.0",
+  "description": "Node.js CLI for AIDD-Intern smoke tests, integration checks, and evaluation runs",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "aidd-intern": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./trace": {
+      "types": "./dist/trace/index.d.ts",
+      "default": "./dist/trace/index.js"
+    },
+    "./evaluator": {
+      "types": "./dist/evaluator/index.d.ts",
+      "default": "./dist/evaluator/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "default": "./dist/utils/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands/index.d.ts",
+      "default": "./dist/commands/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "fixtures",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "zod": "^3.24.0",
+    "chalk": "^5.4.0",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsup": "^8.4.0",
+    "vitest": "^3.2.0",
+    "@types/node": "^22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/setsu2420/aidd-intern"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ai-agent",
+    "drug-design",
+    "protein-design",
+    "llm",
+    "cli"
+  ]
+}

@@ -198,35 +198,60 @@ def test_web_search_uses_google_custom_search_when_configured(monkeypatch):
 
 
 def test_web_search_google_errors_do_not_echo_credentials(monkeypatch):
-    def fake_get(url, params, headers, timeout, allow_redirects):
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        if url == web_search_tool.GOOGLE_SEARCH_URL:
+            assert kwargs["params"]["key"] == "api-key"
+            assert kwargs["params"]["cx"] == "engine-id"
+            return _FakeResponse(
+                status_code=403,
+                payload={
+                    "error": {
+                        "code": 403,
+                        "status": "PERMISSION_DENIED",
+                        "message": "Custom Search API is disabled.",
+                        "details": [
+                            {
+                                "reason": "SERVICE_DISABLED",
+                                "domain": "googleapis.com",
+                            }
+                        ],
+                    }
+                },
+            )
         return _FakeResponse(
-            status_code=403,
-            payload={
-                "error": {
-                    "code": 403,
-                    "status": "PERMISSION_DENIED",
-                    "message": "Custom Search API is disabled.",
-                    "details": [
-                        {"reason": "SERVICE_DISABLED", "domain": "googleapis.com"}
-                    ],
-                }
-            },
+            """
+            <html><body>
+              <a class="result__a" href="https://search.rcsb.org/">RCSB Search API</a>
+            </body></html>
+            """,
+            url,
         )
 
     monkeypatch.setenv(web_search_tool.GOOGLE_SEARCH_API_KEY_ENV, "api-key")
     monkeypatch.setenv(web_search_tool.GOOGLE_SEARCH_ENGINE_ID_ENV, "engine-id")
+    monkeypatch.setenv(web_search_tool.ALLOW_GOOGLE_FALLBACK_ENV, "1")
+    monkeypatch.setenv(
+        web_search_tool.WEB_SEARCH_BASE_URL_ENV, "http://search.test/search"
+    )
     monkeypatch.setattr(web_search_tool.requests, "get", fake_get)
 
-    with pytest.raises(RuntimeError) as excinfo:
-        web_search_tool.execute_web_search("RCSB API")
+    output = web_search_tool.execute_web_search("RCSB API")
 
-    message = str(excinfo.value)
-    assert "HTTP 403" in message
-    assert "PERMISSION_DENIED" in message
-    assert "SERVICE_DISABLED" in message
-    assert "api-key" not in message
-    assert "engine-id" not in message
-    assert "customsearch/v1?key" not in message
+    assert output["provider"] == "DuckDuckGo fallback"
+    assert _content_block(output) == [
+        {"title": "RCSB Search API", "url": "https://search.rcsb.org/"}
+    ]
+    rendered = json.dumps(output)
+    assert "api-key" not in rendered
+    assert "engine-id" not in rendered
+    assert "customsearch/v1?key" not in rendered
+    assert [call[0] for call in calls] == [
+        web_search_tool.GOOGLE_SEARCH_URL,
+        "http://search.test/search?q=RCSB+API",
+    ]
 
 
 @pytest.mark.asyncio

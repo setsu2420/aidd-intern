@@ -11,6 +11,7 @@ from fastmcp.mcp_config import (
 )
 from pydantic import BaseModel
 
+from agent.domain_packs import DEFAULT_DOMAIN_PACK
 from agent.messaging.models import MessagingConfig
 
 # These two are the canonical server config types for MCP servers.
@@ -24,6 +25,8 @@ class Config(BaseModel):
     """Configuration manager"""
 
     model_name: str
+    models_config: str = "configs/models.json"
+    domain_pack: Literal["aidd_binder", "none", "protein_design"] = DEFAULT_DOMAIN_PACK
     mcpServers: dict[str, MCPServerConfig] = {}
     save_sessions: bool = True
     session_dataset_repo: str = "smolagents/aidd-intern-sessions"
@@ -219,4 +222,8 @@ def load_config(
         raw_config = apply_slack_user_defaults(raw_config)
 
     config_with_env = substitute_env_vars(raw_config)
-    return Config.model_validate(config_with_env)
+    config = Config.model_validate(config_with_env)
+    from agent.core.model_catalog import apply_catalog_default
+
+    apply_catalog_default(config)
+    return config

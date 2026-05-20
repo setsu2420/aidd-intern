@@ -5,10 +5,12 @@ Main agent implementation with integrated tool system and MCP support
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from litellm import (
     ChatCompletionMessageToolCall,
@@ -28,15 +30,16 @@ from agent.messaging.gateway import NotificationGateway
 from agent.core import telemetry
 from agent.core.doom_loop import check_for_doom_loop
 from agent.core.llm_params import _resolve_llm_params
+from agent.core.local_models import is_local_model_id, local_model_provider
 from agent.core.prompt_caching import with_prompt_caching
-from agent.core.session import DEFAULT_SESSION_LOG_DIR, Event, OpType, Session
-from agent.core.tools import ToolRouter
-from agent.tools.jobs_tool import CPU_FLAVORS
-from agent.tools.sandbox_tool import (
-    DEFAULT_CPU_SANDBOX_HARDWARE,
-    start_cpu_sandbox_preload,
-    teardown_session_sandbox,
+from agent.core.session import (
+    DEFAULT_SESSION_LOG_DIR,
+    Event,
+    OpType,
+    Session,
+    _get_max_tokens_safe,
 )
+from agent.core.tools import ToolRouter
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,32 @@ ToolCall = ChatCompletionMessageToolCall
 _MALFORMED_TOOL_PREFIX = "ERROR: Tool call to '"
 _MALFORMED_TOOL_SUFFIX = "' had malformed JSON arguments"
 _NO_TOOL_INCOMPLETE_PLAN_RETRY_LIMIT = 2
+_LOCAL_LLM_PREFLIGHT_TIMEOUT_SECONDS = 1.0
+_SILICONFLOW_FALLBACK_MODEL = "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+DEFAULT_CPU_SANDBOX_HARDWARE = "cpu-basic"
+CPU_FLAVORS = {"cpu-basic", "cpu-upgrade"}
+
+
+def start_cpu_sandbox_preload(session: Session) -> None:
+    from agent.tools.sandbox_tool import start_cpu_sandbox_preload as _start
+
+    _start(session)
+
+
+async def teardown_session_sandbox(session: Session) -> None:
+    from agent.tools.sandbox_tool import teardown_session_sandbox as _teardown
+
+    await _teardown(session)
+
+
+class LocalLLMConnectionError(ConnectionError):
+    """Raised when a configured local OpenAI-compatible server is unreachable."""
+
+    def __init__(self, *, model_name: str, api_base: str, detail: str):
+        self.model_name = model_name
+        self.api_base = api_base
+        self.detail = detail
+        super().__init__(f"Local LLM endpoint is not reachable: {api_base} ({detail})")
 
 
 def _unfinished_plan_items(session: Session) -> list[dict[str, str]]:
@@ -228,6 +257,12 @@ def _base_needs_approval(
 
         return True
 
+    if tool_name in {"run_pxdesign", "run_boltzgen"}:
+        return int(tool_args.get("num_samples") or 0) > 200
+
+    if tool_name == "run_bindcraft":
+        return int(tool_args.get("iterations") or 0) > 100
+
     # Check for file upload operations (hf_private_repos or other tools)
     if tool_name == "hf_private_repos":
         operation = tool_args.get("operation", "")
@@ -406,6 +441,8 @@ async def _record_manual_approved_spend_if_needed(
 _MAX_LLM_RETRIES = 3
 _LLM_RETRY_DELAYS = [5, 15, 30]  # seconds between retries
 _LLM_RATE_LIMIT_RETRY_DELAYS = [30, 60]  # exceed Bedrock's ~60s TPM bucket window
+_DEFAULT_MAX_COMPLETION_TOKENS = 4096
+_MIN_MAX_COMPLETION_TOKENS = 512
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
@@ -441,8 +478,92 @@ def _is_context_overflow_error(error: Exception) -> bool:
     return any(pattern in err_str for pattern in overflow_patterns)
 
 
+def _context_window_from_error(error: Exception) -> int | None:
+    """Extract the provider-reported context window from overflow errors."""
+    import re
+
+    err = str(error)
+    patterns = [
+        r"maximum context length is\s+(\d+)",
+        r"model maximum context length:\s*(\d+)",
+        r"max(?:imum)? context length(?: is|:)?\s*(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, err, flags=re.IGNORECASE)
+        if match:
+            try:
+                value = int(match.group(1))
+            except ValueError:
+                continue
+            if value > 0:
+                return value
+    return None
+
+
+def _apply_context_window_hint(session: Session, error: Exception) -> None:
+    """Shrink local budgeting when the provider reports a smaller window."""
+    window = _context_window_from_error(error)
+    if not window:
+        return
+    cm = session.context_manager
+    if window < cm.model_max_tokens:
+        logger.warning(
+            "Provider reported smaller context window for %s: %d -> %d",
+            session.config.model_name,
+            cm.model_max_tokens,
+            window,
+        )
+        cm.apply_context_policy(window)
+    else:
+        cm.apply_context_policy(cm.model_max_tokens)
+
+
+def _with_safe_completion_budget(
+    session: Session,
+    messages: list,
+    llm_params: dict,
+) -> dict:
+    """Set max_completion_tokens so prompt + output stays inside the window."""
+    from litellm import token_counter
+
+    params = dict(llm_params)
+    if "max_completion_tokens" in params or "max_tokens" in params:
+        return params
+
+    cm = getattr(session, "context_manager", None)
+    model_max_tokens = getattr(cm, "model_max_tokens", None) or _get_max_tokens_safe(
+        getattr(session.config, "model_name", "")
+    )
+    prompt_tokens = getattr(cm, "running_context_usage", 0) or 0
+    try:
+        prompt_tokens = token_counter(
+            model=params.get("model", session.config.model_name),
+            messages=[
+                msg.model_dump() if hasattr(msg, "model_dump") else msg
+                for msg in messages
+            ],
+        )
+    except Exception:
+        pass
+
+    # Keep a small reserve for provider/tool-call overhead not counted by
+    # litellm.token_counter. This matters for OpenAI-compatible local servers
+    # that hard-fail at exactly 65,536 tokens.
+    reserve = max(256, int(model_max_tokens * 0.02))
+    headroom = model_max_tokens - prompt_tokens - reserve
+    max_completion = min(_DEFAULT_MAX_COMPLETION_TOKENS, max(0, headroom))
+    if max_completion < _MIN_MAX_COMPLETION_TOKENS:
+        if cm is not None:
+            cm.running_context_usage = model_max_tokens + 1
+        max_completion = _MIN_MAX_COMPLETION_TOKENS
+    params["max_completion_tokens"] = int(max_completion)
+    return params
+
+
 def _retry_delay_for(error: Exception, attempt_index: int) -> int | None:
     """Return the delay for this retry attempt, or None if it should not retry."""
+    if isinstance(error, LocalLLMConnectionError):
+        return None
     if _is_rate_limit_error(error):
         schedule = _LLM_RATE_LIMIT_RETRY_DELAYS
     elif _is_transient_error(error):
@@ -457,6 +578,8 @@ def _retry_delay_for(error: Exception, attempt_index: int) -> int | None:
 
 def _is_transient_error(error: Exception) -> bool:
     """Return True for errors that are likely transient and worth retrying."""
+    if isinstance(error, LocalLLMConnectionError):
+        return False
     err_str = str(error).lower()
     transient_patterns = [
         "timeout",
@@ -480,6 +603,37 @@ def _is_transient_error(error: Exception) -> bool:
     )
 
 
+def _is_local_llm_transport_error(error: Exception) -> bool:
+    """Return True for LiteLLM/OpenAI wrappers around local transport failures."""
+    err_str = str(error).lower()
+    patterns = [
+        "cannot connect to host",
+        "connect call failed",
+        "connection refused",
+        "api connection error",
+        "connection error",
+        "clientconnectorerror",
+        "connecterror",
+    ]
+    return any(pattern in err_str for pattern in patterns)
+
+
+def _local_llm_error_from_completion_error(
+    model_name: str,
+    llm_params: dict,
+    error: Exception,
+) -> LocalLLMConnectionError | None:
+    if not is_local_model_id(model_name):
+        return None
+    if not _is_local_llm_transport_error(error):
+        return None
+    return LocalLLMConnectionError(
+        model_name=model_name,
+        api_base=str(llm_params.get("api_base") or ""),
+        detail=str(error),
+    )
+
+
 def _is_effort_config_error(error: Exception) -> bool:
     """Catch the two 400s the effort probe also handles — thinking
     unsupported for this model, or the specific effort level invalid.
@@ -491,6 +645,123 @@ def _is_effort_config_error(error: Exception) -> bool:
     from agent.core.effort_probe import _is_invalid_effort, _is_thinking_unsupported
 
     return _is_thinking_unsupported(error) or _is_invalid_effort(error)
+
+
+def _local_llm_base_url_for_model(model_name: str) -> str | None:
+    provider = local_model_provider(model_name)
+    if provider is None:
+        return None
+    return (
+        os.environ.get(provider["base_url_env"])
+        or os.environ.get("LOCAL_LLM_BASE_URL")
+        or provider["base_url_default"]
+    )
+
+
+def _env_value(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value is not None:
+        return value.strip() or None
+    try:
+        from dotenv import dotenv_values
+
+        dot_env_value = dotenv_values(".env").get(name)
+    except Exception:
+        return None
+    return dot_env_value.strip() if dot_env_value else None
+
+
+def _siliconflow_fallback_model() -> str | None:
+    if not _env_value("SILICONFLOW_API_KEY"):
+        return None
+    return _env_value("AIDD_INTERN_SILICONFLOW_FALLBACK_MODEL") or (
+        _SILICONFLOW_FALLBACK_MODEL
+    )
+
+
+async def _ensure_local_llm_reachable(model_name: str, llm_params: dict) -> None:
+    if not is_local_model_id(model_name):
+        return
+
+    api_base = str(llm_params.get("api_base") or "")
+    parsed = urlparse(api_base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise LocalLLMConnectionError(
+            model_name=model_name,
+            api_base=api_base or "(missing api_base)",
+            detail="invalid api_base",
+        )
+
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(parsed.hostname, port),
+            timeout=_LOCAL_LLM_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+    except OSError as exc:
+        raise LocalLLMConnectionError(
+            model_name=model_name,
+            api_base=api_base,
+            detail=str(exc),
+        ) from exc
+    except asyncio.TimeoutError as exc:
+        raise LocalLLMConnectionError(
+            model_name=model_name,
+            api_base=api_base,
+            detail=(
+                f"connection timed out after "
+                f"{_LOCAL_LLM_PREFLIGHT_TIMEOUT_SECONDS:.0f}s"
+            ),
+        ) from exc
+
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        pass
+
+
+async def _maybe_fallback_from_local_llm(
+    session: Session,
+    error: LocalLLMConnectionError,
+) -> dict | None:
+    fallback_model = _siliconflow_fallback_model()
+    if not fallback_model or fallback_model == session.config.model_name:
+        return None
+
+    try:
+        llm_params = _resolve_llm_params(
+            fallback_model,
+            session.hf_token,
+            reasoning_effort=session.effective_effort_for(fallback_model),
+        )
+    except Exception as exc:
+        logger.warning("SiliconFlow fallback params failed: %s", exc)
+        return None
+
+    if hasattr(session, "update_model"):
+        session.update_model(fallback_model)
+    else:
+        session.config.model_name = fallback_model
+    if hasattr(session, "model_effective_effort"):
+        session.model_effective_effort[fallback_model] = None
+
+    await session.send_event(
+        Event(
+            event_type="tool_log",
+            data={
+                "tool": "system",
+                "log": (
+                    f"Local LLM unavailable at {error.api_base}; "
+                    f"using {fallback_model}."
+                ),
+            },
+        )
+    )
+    return llm_params
 
 
 async def _heal_effort_and_rebuild_params(
@@ -546,6 +817,29 @@ async def _heal_effort_and_rebuild_params(
 
 def _friendly_error_message(error: Exception) -> str | None:
     """Return a user-friendly message for known error types, or None to fall back to traceback."""
+    if isinstance(error, LocalLLMConnectionError):
+        configured_base = _local_llm_base_url_for_model(error.model_name)
+        lines = [
+            "Local LLM is not reachable.",
+            "",
+            f"Model: {error.model_name}",
+            f"Endpoint: {error.api_base}",
+            f"Problem: {error.detail}",
+            "",
+            "Start the local OpenAI-compatible server, or switch models.",
+        ]
+        if configured_base:
+            lines.extend(
+                [
+                    "",
+                    "Checks:",
+                    f"  • curl {configured_base.rstrip('/')}/v1/models",
+                    f"  • /model {error.model_name}",
+                    "  • /model <another-model-id>",
+                ]
+            )
+        return "\n".join(lines)
+
     err_str = str(error).lower()
 
     if (
@@ -855,6 +1149,7 @@ async def _call_llm_streaming(
     response = None
     _healed_effort = False  # one-shot safety net per call
     _healed_thinking_signature = False
+    llm_params = _with_safe_completion_budget(session, messages, llm_params)
     messages, tools = with_prompt_caching(messages, tools, llm_params.get("model"))
     t_start = time.monotonic()
     for _llm_attempt in range(_MAX_LLM_RETRIES):
@@ -869,11 +1164,18 @@ async def _call_llm_streaming(
                 **llm_params,
             )
             break
-        except ContextWindowExceededError:
+        except ContextWindowExceededError as e:
+            _apply_context_window_hint(session, e)
             raise
         except Exception as e:
             if _is_context_overflow_error(e):
+                _apply_context_window_hint(session, e)
                 raise ContextWindowExceededError(str(e)) from e
+            local_error = _local_llm_error_from_completion_error(
+                session.config.model_name, llm_params, e
+            )
+            if local_error is not None:
+                raise local_error from e
             if not _healed_effort and _is_effort_config_error(e):
                 _healed_effort = True
                 llm_params = await _heal_effort_and_rebuild_params(
@@ -899,27 +1201,21 @@ async def _call_llm_streaming(
                 continue
             _delay = _retry_delay_for(e, _llm_attempt)
             if _llm_attempt < _MAX_LLM_RETRIES - 1 and _delay is not None:
-                logger.warning(
+                logger.debug(
                     "Transient LLM error (attempt %d/%d): %s — retrying in %ds",
                     _llm_attempt + 1,
                     _MAX_LLM_RETRIES,
                     e,
                     _delay,
                 )
-                await session.send_event(
-                    Event(
-                        event_type="tool_log",
-                        data={
-                            "tool": "system",
-                            "log": f"LLM connection error, retrying in {_delay}s...",
-                        },
-                    )
-                )
                 await asyncio.sleep(_delay)
                 continue
             raise
 
-    full_content = ""
+    content_parts: list[str] = []
+    pending_content_parts: list[str] = []
+    pending_content_chars = 0
+    last_content_flush = t_start
     tool_calls_acc: dict[int, dict] = {}
     token_count = 0
     finish_reason = None
@@ -927,9 +1223,30 @@ async def _call_llm_streaming(
     chunks = []
     should_replay_thinking = _should_replay_thinking_state(llm_params.get("model"))
 
+    async def flush_pending_content(*, force: bool = False) -> None:
+        nonlocal pending_content_parts, pending_content_chars, last_content_flush
+        if not pending_content_parts:
+            return
+        now = time.monotonic()
+        if (
+            not force
+            and pending_content_chars < 128
+            and now - last_content_flush < 0.05
+        ):
+            return
+        content = "".join(pending_content_parts)
+        pending_content_parts = []
+        pending_content_chars = 0
+        last_content_flush = now
+        await session.send_event(
+            Event(event_type="assistant_chunk", data={"content": content})
+        )
+
     async for chunk in response:
-        chunks.append(chunk)
+        if should_replay_thinking:
+            chunks.append(chunk)
         if session.is_cancelled:
+            await flush_pending_content(force=True)
             tool_calls_acc.clear()
             break
 
@@ -945,12 +1262,13 @@ async def _call_llm_streaming(
             finish_reason = choice.finish_reason
 
         if delta.content:
-            full_content += delta.content
-            await session.send_event(
-                Event(event_type="assistant_chunk", data={"content": delta.content})
-            )
+            content_parts.append(delta.content)
+            pending_content_parts.append(delta.content)
+            pending_content_chars += len(delta.content)
+            await flush_pending_content(force="\n" in delta.content)
 
         if delta.tool_calls:
+            await flush_pending_content(force=True)
             for tc_delta in delta.tool_calls:
                 idx = tc_delta.index
                 if idx not in tool_calls_acc:
@@ -974,6 +1292,9 @@ async def _call_llm_streaming(
         if hasattr(chunk, "usage") and chunk.usage:
             token_count = chunk.usage.total_tokens
             final_usage_chunk = chunk
+
+    await flush_pending_content(force=True)
+    full_content = "".join(content_parts)
 
     usage = await telemetry.record_llm_call(
         session,
@@ -1013,6 +1334,7 @@ async def _call_llm_non_streaming(
     response = None
     _healed_effort = False
     _healed_thinking_signature = False
+    llm_params = _with_safe_completion_budget(session, messages, llm_params)
     messages, tools = with_prompt_caching(messages, tools, llm_params.get("model"))
     t_start = time.monotonic()
     for _llm_attempt in range(_MAX_LLM_RETRIES):
@@ -1026,11 +1348,18 @@ async def _call_llm_non_streaming(
                 **llm_params,
             )
             break
-        except ContextWindowExceededError:
+        except ContextWindowExceededError as e:
+            _apply_context_window_hint(session, e)
             raise
         except Exception as e:
             if _is_context_overflow_error(e):
+                _apply_context_window_hint(session, e)
                 raise ContextWindowExceededError(str(e)) from e
+            local_error = _local_llm_error_from_completion_error(
+                session.config.model_name, llm_params, e
+            )
+            if local_error is not None:
+                raise local_error from e
             if not _healed_effort and _is_effort_config_error(e):
                 _healed_effort = True
                 llm_params = await _heal_effort_and_rebuild_params(
@@ -1056,21 +1385,12 @@ async def _call_llm_non_streaming(
                 continue
             _delay = _retry_delay_for(e, _llm_attempt)
             if _llm_attempt < _MAX_LLM_RETRIES - 1 and _delay is not None:
-                logger.warning(
+                logger.debug(
                     "Transient LLM error (attempt %d/%d): %s — retrying in %ds",
                     _llm_attempt + 1,
                     _MAX_LLM_RETRIES,
                     e,
                     _delay,
-                )
-                await session.send_event(
-                    Event(
-                        event_type="tool_log",
-                        data={
-                            "tool": "system",
-                            "log": f"LLM connection error, retrying in {_delay}s...",
-                        },
-                    )
                 )
                 await asyncio.sleep(_delay)
                 continue
@@ -1257,14 +1577,32 @@ class Handlers:
                         session.config.model_name
                     ),
                 )
-                if session.stream:
-                    llm_result = await _call_llm_streaming(
-                        session, messages, tools, llm_params
+                try:
+                    await _ensure_local_llm_reachable(
+                        session.config.model_name, llm_params
                     )
-                else:
-                    llm_result = await _call_llm_non_streaming(
-                        session, messages, tools, llm_params
+                except LocalLLMConnectionError as e:
+                    fallback_params = await _maybe_fallback_from_local_llm(session, e)
+                    if fallback_params is None:
+                        raise
+                    llm_params = fallback_params
+
+                async def _call_current_model(params: dict) -> LLMResult:
+                    if session.stream:
+                        return await _call_llm_streaming(
+                            session, messages, tools, params
+                        )
+                    return await _call_llm_non_streaming(
+                        session, messages, tools, params
                     )
+
+                try:
+                    llm_result = await _call_current_model(llm_params)
+                except LocalLLMConnectionError as e:
+                    fallback_params = await _maybe_fallback_from_local_llm(session, e)
+                    if fallback_params is None:
+                        raise
+                    llm_result = await _call_current_model(fallback_params)
 
                 content = llm_result.content
                 tool_calls_acc = llm_result.tool_calls_acc
@@ -1689,9 +2027,10 @@ class Handlers:
 
                 iteration += 1
 
-            except ContextWindowExceededError:
+            except ContextWindowExceededError as e:
                 # Force compact and retry this iteration.
                 cm = session.context_manager
+                _apply_context_window_hint(session, e)
                 logger.warning(
                     "ContextWindowExceededError at iteration %d — forcing compaction "
                     "(usage=%d, model_max_tokens=%d, messages=%d)",
@@ -1711,11 +2050,10 @@ class Handlers:
                 continue
 
             except Exception as e:
-                import traceback
-
                 error_msg = _friendly_error_message(e)
                 if error_msg is None:
-                    error_msg = str(e) + "\n" + traceback.format_exc()
+                    logger.exception("Agent loop failed")
+                    error_msg = str(e) or e.__class__.__name__
 
                 await session.send_event(
                     Event(

@@ -13,10 +13,14 @@ Covers two regressions on 2026-04-25:
 """
 
 from agent.core.agent_loop import (
+    LocalLLMConnectionError,
     _MAX_LLM_RETRIES,
     _LLM_RATE_LIMIT_RETRY_DELAYS,
     _LLM_RETRY_DELAYS,
+    _context_window_from_error,
+    _friendly_error_message,
     _is_context_overflow_error,
+    _local_llm_error_from_completion_error,
     _is_rate_limit_error,
     _is_transient_error,
     _retry_delay_for,
@@ -38,6 +42,23 @@ def test_kimi_prompt_too_long_is_context_overflow():
 def test_openai_context_length_exceeded_is_context_overflow():
     err = Exception("Error: This model's maximum context length is 8192 tokens.")
     assert _is_context_overflow_error(err)
+
+
+def test_provider_context_window_is_extracted_from_openai_error():
+    err = Exception(
+        "This model's maximum context length is 65536 tokens. "
+        "However, you requested 20000 output tokens."
+    )
+
+    assert _context_window_from_error(err) == 65536
+
+
+def test_provider_context_window_is_extracted_from_kimi_error():
+    err = Exception(
+        "The prompt is too long: 365407, model maximum context length: 262143"
+    )
+
+    assert _context_window_from_error(err) == 262143
 
 
 def test_random_error_is_not_context_overflow():
@@ -68,6 +89,54 @@ def test_timeout_is_transient_but_not_rate_limit():
     err = Exception("Request timed out after 600s")
     assert _is_transient_error(err)
     assert not _is_rate_limit_error(err)
+
+
+def test_local_llm_connection_error_is_not_retried(monkeypatch):
+    monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:30000")
+    err = LocalLLMConnectionError(
+        model_name="vllm/qwen3.6-35b-a3b",
+        api_base="http://127.0.0.1:30000/v1",
+        detail="Connect call failed ('127.0.0.1', 30000)",
+    )
+
+    assert not _is_transient_error(err)
+    assert _retry_delay_for(err, 0) is None
+
+    message = _friendly_error_message(err)
+    assert message is not None
+    assert "Local LLM is not reachable." in message
+    assert "Model: vllm/qwen3.6-35b-a3b" in message
+    assert "Endpoint: http://127.0.0.1:30000/v1" in message
+    assert "curl http://127.0.0.1:30000/v1/models" in message
+    assert "Traceback" not in message
+    assert "litellm.InternalServerError" not in message
+
+
+def test_litellm_wrapped_local_connection_error_is_upcast(monkeypatch):
+    monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:30000")
+    err = Exception(
+        "litellm.InternalServerError: InternalServerError: OpenAIException - "
+        "Connection error. Cannot connect to host 127.0.0.1:30000 "
+        "[Connect call failed ('127.0.0.1', 30000)]"
+    )
+
+    local_err = _local_llm_error_from_completion_error(
+        "vllm/qwen3.6-35b-a3b",
+        {"api_base": "http://127.0.0.1:30000/v1"},
+        err,
+    )
+
+    assert isinstance(local_err, LocalLLMConnectionError)
+    assert local_err.api_base == "http://127.0.0.1:30000/v1"
+    assert _retry_delay_for(local_err, 0) is None
+    assert (
+        _local_llm_error_from_completion_error(
+            "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+            {"api_base": "https://api.siliconflow.cn/v1"},
+            err,
+        )
+        is None
+    )
 
 
 # ── retry schedule selection ────────────────────────────────────────────

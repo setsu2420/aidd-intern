@@ -1,5 +1,7 @@
 {
-  "model_name": "${AIDD_INTERN_DEFAULT_MODEL_ID:-siliconflow/deepseek-ai/DeepSeek-V4-Flash}",
+  "model_name": "${AIDD_INTERN_DEFAULT_MODEL_ID:-vllm/qwen3.6-35b-a3b}",
+  "models_config": "configs/models.json",
+  "domain_pack": "aidd_binder",
   "save_sessions": true,
   "session_dataset_repo": "smolagents/aidd-intern-sessions",
   "share_traces": true,
@@ -10,7 +12,37 @@
   "mcpServers": {
     "hf-mcp-server": {
       "transport": "http",
-      "url": "https://huggingface.co/mcp?login"
+      "url": "https://hf.co/mcp"
+    },
+    "proteinmcp-bindcraft": {
+      "transport": "stdio",
+      "command": "bash",
+      "args": [
+        "${AIDD_INTERN_WORKDIR:-.}/scripts/run-proteinmcp-local.sh",
+        "bindcraft_mcp"
+      ],
+      "cwd": "${AIDD_INTERN_WORKDIR:-.}",
+      "timeout": 120
+    },
+    "proteinmcp-boltzgen": {
+      "transport": "stdio",
+      "command": "bash",
+      "args": [
+        "${AIDD_INTERN_WORKDIR:-.}/scripts/run-proteinmcp-local.sh",
+        "boltzgen_mcp"
+      ],
+      "cwd": "${AIDD_INTERN_WORKDIR:-.}",
+      "timeout": 120
+    },
+    "proteinmcp-pxdesign": {
+      "transport": "stdio",
+      "command": "bash",
+      "args": [
+        "${AIDD_INTERN_WORKDIR:-.}/scripts/run-proteinmcp-local.sh",
+        "pxdesign_mcp"
+      ],
+      "cwd": "${AIDD_INTERN_WORKDIR:-.}",
+      "timeout": 120
     }
   }
 }

@@ -2,6 +2,7 @@
 Context management for conversation history
 """
 
+import hashlib
 import logging
 import time
 import zoneinfo
@@ -14,11 +15,14 @@ from jinja2 import Template
 from litellm import Message, acompletion
 
 from agent.core.prompt_caching import with_prompt_caching
+from agent.domain_packs import DEFAULT_DOMAIN_PACK
 
 logger = logging.getLogger(__name__)
 
 _HF_WHOAMI_URL = "https://huggingface.co/api/whoami-v2"
 _HF_WHOAMI_TIMEOUT = 5  # seconds
+_HF_USERNAME_CACHE_TTL_SECONDS = 300
+_hf_username_cache: dict[str, tuple[str, float]] = {}
 
 
 def _get_hf_username(hf_token: str | None = None) -> str:
@@ -33,10 +37,18 @@ def _get_hf_username(hf_token: str | None = None) -> str:
     import time as _t
 
     if not hf_token:
-        logger.warning("No hf_token provided, using 'unknown' as username")
+        logger.debug("No hf_token provided, using 'unknown' as username")
         return "unknown"
 
+    cache_key = hashlib.sha256(hf_token.encode("utf-8")).hexdigest()
     t0 = _t.monotonic()
+    cached = _hf_username_cache.get(cache_key)
+    if cached is not None:
+        username, expires_at = cached
+        if t0 < expires_at:
+            return username
+        _hf_username_cache.pop(cache_key, None)
+
     try:
         result = subprocess.run(
             [
@@ -57,15 +69,27 @@ def _get_hf_username(hf_token: str | None = None) -> str:
         if result.returncode == 0 and result.stdout:
             data = json.loads(result.stdout)
             username = data.get("name", "unknown")
+            _hf_username_cache[cache_key] = (
+                username,
+                t1 + _HF_USERNAME_CACHE_TTL_SECONDS,
+            )
             logger.info(f"HF username resolved to '{username}' in {t1 - t0:.2f}s")
             return username
         else:
+            _hf_username_cache[cache_key] = (
+                "unknown",
+                t1 + _HF_USERNAME_CACHE_TTL_SECONDS,
+            )
             logger.warning(
                 f"curl whoami failed (rc={result.returncode}) in {t1 - t0:.2f}s"
             )
             return "unknown"
     except Exception as e:
         t1 = _t.monotonic()
+        _hf_username_cache[cache_key] = (
+            "unknown",
+            t1 + _HF_USERNAME_CACHE_TTL_SECONDS,
+        )
         logger.warning(f"HF whoami failed in {t1 - t0:.2f}s: {e}")
         return "unknown"
 
@@ -84,6 +108,35 @@ _COMPACT_PROMPT = (
 # context shrinks to 200k+ because one tool output is 80k tokens). We replace
 # such messages with a placeholder before compaction runs.
 _MAX_TOKENS_PER_MESSAGE = 50_000
+
+
+def context_policy_for_window(model_max_tokens: int) -> dict[str, int | float]:
+    """Return context-management knobs for a model context window.
+
+    Small local models fail hard near 65k, so they need earlier compaction,
+    shorter summaries, and fewer untouched tail messages. Larger hosted models
+    can afford a wider tail and bigger summaries.
+    """
+    if model_max_tokens <= 70_000:
+        return {
+            "threshold_ratio": 0.68,
+            "compact_size": 1_500,
+            "untouched_messages": 3,
+            "max_tokens_per_message": 12_000,
+        }
+    if model_max_tokens <= 131_072:
+        return {
+            "threshold_ratio": 0.75,
+            "compact_size": 2_500,
+            "untouched_messages": 4,
+            "max_tokens_per_message": 20_000,
+        }
+    return {
+        "threshold_ratio": 0.9,
+        "compact_size": min(8_000, max(2_000, int(model_max_tokens * 0.05))),
+        "untouched_messages": 5,
+        "max_tokens_per_message": _MAX_TOKENS_PER_MESSAGE,
+    }
 
 
 class CompactionFailedError(Exception):
@@ -183,22 +236,28 @@ class ContextManager:
         prompt_file_suffix: str = "system_prompt_v3.yaml",
         hf_token: str | None = None,
         local_mode: bool = False,
+        domain_pack: str = DEFAULT_DOMAIN_PACK,
     ):
         self.prompt_file_suffix = prompt_file_suffix
         self.tool_specs = tool_specs or []
         self.hf_token = hf_token
         self.local_mode = local_mode
+        self.domain_pack = domain_pack
         self.system_prompt = self._load_system_prompt(
             self.tool_specs,
             prompt_file_suffix=self.prompt_file_suffix,
             hf_token=hf_token,
             local_mode=local_mode,
+            domain_pack=domain_pack,
         )
-        # The model's real input-token ceiling (from litellm.get_model_info).
-        # Compaction triggers at _COMPACT_THRESHOLD_RATIO below it — see
-        # the compaction_threshold property.
+        # The model's real input-token ceiling (from litellm.get_model_info or
+        # conservative local defaults). Context policy is window-aware so 65k
+        # local models compact much earlier than 200k+ hosted models.
         self.model_max_tokens = model_max_tokens
+        self._compaction_threshold_ratio = self._COMPACT_THRESHOLD_RATIO
+        self.max_tokens_per_message = _MAX_TOKENS_PER_MESSAGE
         self.compact_size = int(model_max_tokens * compact_size)
+        self.apply_context_policy(model_max_tokens)
         # Running count of tokens the last LLM call reported. Drives the
         # compaction gate; updated in add_message() with each response's
         # usage.total_tokens.
@@ -207,12 +266,36 @@ class ContextManager:
         self.items: list[Message] = [Message(role="system", content=self.system_prompt)]
         self.on_message_added = None
 
+    def apply_context_policy(self, model_max_tokens: int) -> None:
+        """Apply model-window-specific context and compaction settings."""
+        policy = context_policy_for_window(model_max_tokens)
+        self.model_max_tokens = model_max_tokens
+        self._compaction_threshold_ratio = float(policy["threshold_ratio"])
+        self.compact_size = int(policy["compact_size"])
+        self.untouched_messages = int(policy["untouched_messages"])
+        self.max_tokens_per_message = int(policy["max_tokens_per_message"])
+
+    def estimate_usage(self, model_name: str) -> int:
+        """Return the current context footprint without mutating state."""
+        from litellm import token_counter
+
+        try:
+            return token_counter(
+                model=model_name,
+                messages=[m.model_dump() for m in self.items],
+            )
+        except Exception as e:
+            logger.warning("token_counter failed (%s); rough estimate", e)
+            # Rough fallback: 4 chars per token.
+            return sum(len(getattr(m, "content", "") or "") for m in self.items) // 4
+
     def refresh_system_prompt(
         self,
         *,
         tool_specs: list[dict[str, Any]] | None = None,
         hf_token: str | None = None,
         local_mode: bool | None = None,
+        domain_pack: str | None = None,
     ) -> Message:
         """Re-render the system prompt and return it as a system message."""
         if tool_specs is not None:
@@ -221,6 +304,8 @@ class ContextManager:
             self.hf_token = hf_token
         if local_mode is not None:
             self.local_mode = local_mode
+        if domain_pack is not None:
+            self.domain_pack = domain_pack
         self.system_prompt = self._load_system_prompt(
             self.tool_specs,
             prompt_file_suffix=getattr(
@@ -228,15 +313,17 @@ class ContextManager:
             ),
             hf_token=getattr(self, "hf_token", None),
             local_mode=getattr(self, "local_mode", False),
+            domain_pack=getattr(self, "domain_pack", DEFAULT_DOMAIN_PACK),
         )
         return Message(role="system", content=self.system_prompt)
 
     def _load_system_prompt(
         self,
         tool_specs: list[dict[str, Any]],
-        prompt_file_suffix: str = "system_prompt.yaml",
+        prompt_file_suffix: str = "system_prompt_v3.yaml",
         hf_token: str | None = None,
         local_mode: bool = False,
+        domain_pack: str = DEFAULT_DOMAIN_PACK,
     ):
         """Load and render the system prompt from YAML file with Jinja2"""
         prompt_file = Path(__file__).parent.parent / "prompts" / f"{prompt_file_suffix}"
@@ -277,6 +364,18 @@ class ContextManager:
                 f"The sandbox_create tool is NOT available. Run code directly with bash."
             )
             static_prompt += local_context
+
+        if domain_pack == "none":
+            research_context = (
+                "\n\n# Research-only mode\n\n"
+                "The active domain pack is `none`. Focus on research tasks: "
+                "literature search, official docs, GitHub examples, dataset and "
+                "model inspection, and web search with cited links. Do not "
+                "invent binder/protein generation workflows when the related "
+                "domain tools are unavailable. For local no-GPU use, favor "
+                "research, synthesis, and link-backed recommendations."
+            )
+            static_prompt += research_context
 
         return (
             f"{static_prompt}\n\n"
@@ -418,7 +517,10 @@ class ContextManager:
     @property
     def compaction_threshold(self) -> int:
         """Token count at which `compact()` kicks in."""
-        return int(self.model_max_tokens * self._COMPACT_THRESHOLD_RATIO)
+        ratio = getattr(
+            self, "_compaction_threshold_ratio", self._COMPACT_THRESHOLD_RATIO
+        )
+        return int(self.model_max_tokens * ratio)
 
     @property
     def needs_compaction(self) -> bool:
@@ -454,7 +556,8 @@ class ContextManager:
                 # don't drop the message, just keep it as-is.
                 out.append(msg)
                 continue
-            if n <= _MAX_TOKENS_PER_MESSAGE:
+            limit = getattr(self, "max_tokens_per_message", _MAX_TOKENS_PER_MESSAGE)
+            if n <= limit:
                 out.append(msg)
                 continue
             placeholder = (
@@ -489,19 +592,7 @@ class ContextManager:
 
     def _recompute_usage(self, model_name: str) -> None:
         """Refresh ``running_context_usage`` from current items via real tokenizer."""
-        from litellm import token_counter
-
-        try:
-            self.running_context_usage = token_counter(
-                model=model_name,
-                messages=[m.model_dump() for m in self.items],
-            )
-        except Exception as e:
-            logger.warning("token_counter failed (%s); rough estimate", e)
-            # Rough fallback: 4 chars per token.
-            self.running_context_usage = (
-                sum(len(getattr(m, "content", "") or "") for m in self.items) // 4
-            )
+        self.running_context_usage = self.estimate_usage(model_name)
 
     async def compact(
         self,

@@ -27,6 +27,8 @@ behavioral test of #3 — that gap is closed by the
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,7 +38,9 @@ from agent.context_manager.manager import (
     CompactionFailedError,
     ContextManager,
     _MAX_TOKENS_PER_MESSAGE,
+    context_policy_for_window,
 )
+from agent.core.agent_loop import Handlers
 
 
 # ── helpers ────────────────────────────────────────────────────────────
@@ -61,6 +65,15 @@ def _make_cm(
 
 def _msg(role: str, content: str | None = "x", **extra) -> Message:
     return Message(role=role, content=content, **extra)
+
+
+def test_context_policy_for_65k_models_compacts_early():
+    policy = context_policy_for_window(65_536)
+
+    assert policy["threshold_ratio"] < 0.75
+    assert policy["compact_size"] <= 1500
+    assert policy["untouched_messages"] == 3
+    assert policy["max_tokens_per_message"] < _MAX_TOKENS_PER_MESSAGE
 
 
 # ── _truncate_oversized ────────────────────────────────────────────────
@@ -366,3 +379,309 @@ async def test_compact_and_notify_passes_through_on_success():
     for call in session.send_event.await_args_list:
         ev = call.args[0]
         assert ev.event_type != "session_terminated"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_reports_local_llm_connection_without_traceback(monkeypatch):
+    """A refused local vLLM port is a configuration problem, not useful retry
+    material. The user-facing event should name the endpoint and avoid internal
+    LiteLLM traceback noise.
+    """
+
+    class Context:
+        items: list[Message] = []
+        running_context_usage = 0
+        model_max_tokens = 65_536
+        compaction_threshold = 44_564
+        needs_compaction = False
+
+        def add_message(self, message, token_count=0):
+            self.items.append(message)
+
+        def get_messages(self):
+            return self.items
+
+        async def compact(self, *args, **kwargs):
+            return None
+
+    events = []
+
+    async def send_event(event):
+        events.append(event)
+
+    async def no_sleep(_seconds):
+        raise AssertionError("local connection refusal should not retry")
+
+    async def no_auto_save():
+        return None
+
+    monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:9")
+    monkeypatch.delenv("SILICONFLOW_API_KEY", raising=False)
+    monkeypatch.setattr("agent.core.agent_loop._env_value", lambda _name: None)
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    session = SimpleNamespace(
+        reset_cancel=lambda: None,
+        pending_approval=None,
+        context_manager=Context(),
+        send_event=send_event,
+        is_cancelled=False,
+        is_running=True,
+        config=SimpleNamespace(
+            model_name="vllm/qwen3.6-35b-a3b",
+            max_iterations=1,
+            reasoning_effort=None,
+        ),
+        tool_router=SimpleNamespace(get_tool_specs_for_llm=lambda: []),
+        hf_token=None,
+        stream=True,
+        current_plan=[],
+        effective_effort_for=lambda _model: None,
+        increment_turn=lambda: None,
+        auto_save_if_needed=no_auto_save,
+    )
+
+    await Handlers.run_agent(session, "hello")
+
+    error_events = [event for event in events if event.event_type == "error"]
+    assert len(error_events) == 1
+    error = error_events[0].data["error"]
+    assert "Local LLM is not reachable." in error
+    assert "Model: vllm/qwen3.6-35b-a3b" in error
+    assert "Endpoint: http://127.0.0.1:9/v1" in error
+    assert "curl http://127.0.0.1:9/v1/models" in error
+    assert "Traceback" not in error
+    assert "litellm.InternalServerError" not in error
+
+    assert not any(
+        event.event_type == "tool_log"
+        and "LLM connection error, retrying" in event.data.get("log", "")
+        for event in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_falls_back_to_siliconflow_when_local_llm_is_down(
+    monkeypatch,
+):
+    """When a shell export pins the default to a dead local vLLM, a configured
+    SiliconFlow key gives the CLI a usable remote fallback.
+    """
+    from agent.core import agent_loop
+
+    class Context:
+        def __init__(self):
+            self.items: list[Message] = []
+            self.running_context_usage = 0
+            self.model_max_tokens = 65_536
+            self.compaction_threshold = 44_564
+            self.needs_compaction = False
+
+        def add_message(self, message, token_count=0):
+            self.items.append(message)
+
+        def get_messages(self):
+            return self.items
+
+        def apply_context_policy(self, _model_max_tokens):
+            return None
+
+        async def compact(self, *args, **kwargs):
+            return None
+
+    class SessionStub:
+        def __init__(self):
+            self.pending_approval = None
+            self.context_manager = Context()
+            self.events = []
+            self.is_running = True
+            self.config = SimpleNamespace(
+                model_name="vllm/qwen3.6-35b-a3b",
+                max_iterations=1,
+                reasoning_effort=None,
+            )
+            self.tool_router = SimpleNamespace(get_tool_specs_for_llm=lambda: [])
+            self.hf_token = None
+            self.stream = False
+            self.current_plan = []
+            self.model_effective_effort = {}
+
+        def reset_cancel(self):
+            return None
+
+        @property
+        def is_cancelled(self):
+            return False
+
+        def effective_effort_for(self, _model):
+            return None
+
+        def update_model(self, model_name):
+            self.config.model_name = model_name
+
+        def increment_turn(self):
+            return None
+
+        async def auto_save_if_needed(self):
+            return None
+
+        async def send_event(self, event):
+            self.events.append(event)
+
+    async def fake_non_streaming(session, _messages, _tools, llm_params):
+        assert session.config.model_name == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+        assert llm_params["model"] == "openai/deepseek-ai/DeepSeek-V4-Flash"
+        await session.send_event(
+            agent_loop.Event(
+                event_type="assistant_message",
+                data={"content": "fallback ok"},
+            )
+        )
+        return agent_loop.LLMResult(
+            content="fallback ok",
+            tool_calls_acc={},
+            token_count=1,
+            finish_reason="stop",
+        )
+
+    async def no_sleep(_seconds):
+        raise AssertionError("local connection refusal should not retry")
+
+    monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "siliconflow-secret")
+    monkeypatch.delenv("AIDD_INTERN_SILICONFLOW_FALLBACK_MODEL", raising=False)
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(agent_loop, "_call_llm_non_streaming", fake_non_streaming)
+
+    session = SessionStub()
+    await Handlers.run_agent(session, "hello")
+
+    assert session.config.model_name == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+    assert any(
+        event.event_type == "tool_log"
+        and "using siliconflow/deepseek-ai/DeepSeek-V4-Flash" in event.data["log"]
+        for event in session.events
+    )
+    assert any(
+        event.event_type == "assistant_message"
+        and event.data["content"] == "fallback ok"
+        for event in session.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_agent_falls_back_when_litellm_reports_local_connection_error(
+    monkeypatch,
+):
+    """Defense in depth for cases where the preflight misses a local endpoint
+    failure and the wrapped LiteLLM call reports it instead.
+    """
+    from agent.core import agent_loop
+
+    class Context:
+        def __init__(self):
+            self.items: list[Message] = []
+            self.running_context_usage = 0
+            self.model_max_tokens = 65_536
+            self.compaction_threshold = 44_564
+            self.needs_compaction = False
+
+        def add_message(self, message, token_count=0):
+            self.items.append(message)
+
+        def get_messages(self):
+            return self.items
+
+        def apply_context_policy(self, _model_max_tokens):
+            return None
+
+        async def compact(self, *args, **kwargs):
+            return None
+
+    class SessionStub:
+        def __init__(self):
+            self.pending_approval = None
+            self.context_manager = Context()
+            self.events = []
+            self.is_running = True
+            self.config = SimpleNamespace(
+                model_name="vllm/qwen3.6-35b-a3b",
+                max_iterations=1,
+                reasoning_effort=None,
+            )
+            self.tool_router = SimpleNamespace(get_tool_specs_for_llm=lambda: [])
+            self.hf_token = None
+            self.stream = False
+            self.current_plan = []
+            self.model_effective_effort = {}
+
+        def reset_cancel(self):
+            return None
+
+        @property
+        def is_cancelled(self):
+            return False
+
+        def effective_effort_for(self, _model):
+            return None
+
+        def update_model(self, model_name):
+            self.config.model_name = model_name
+
+        def increment_turn(self):
+            return None
+
+        async def auto_save_if_needed(self):
+            return None
+
+        async def send_event(self, event):
+            self.events.append(event)
+
+    calls = []
+
+    async def reachable_preflight(_model_name, _llm_params):
+        return None
+
+    async def fake_non_streaming(session, _messages, _tools, llm_params):
+        calls.append(session.config.model_name)
+        if session.config.model_name.startswith("vllm/"):
+            raise agent_loop.LocalLLMConnectionError(
+                model_name=session.config.model_name,
+                api_base=llm_params["api_base"],
+                detail="OpenAIException - Connection error.",
+            )
+        await session.send_event(
+            agent_loop.Event(
+                event_type="assistant_message",
+                data={"content": "runtime fallback ok"},
+            )
+        )
+        return agent_loop.LLMResult(
+            content="runtime fallback ok",
+            tool_calls_acc={},
+            token_count=1,
+            finish_reason="stop",
+        )
+
+    async def no_sleep(_seconds):
+        raise AssertionError("local completion connection error should not retry")
+
+    monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:30000")
+    monkeypatch.setenv("SILICONFLOW_API_KEY", "siliconflow-secret")
+    monkeypatch.setattr(agent_loop, "_ensure_local_llm_reachable", reachable_preflight)
+    monkeypatch.setattr(agent_loop, "_call_llm_non_streaming", fake_non_streaming)
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    session = SessionStub()
+    await Handlers.run_agent(session, "hello")
+
+    assert calls == [
+        "vllm/qwen3.6-35b-a3b",
+        "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+    ]
+    assert session.config.model_name == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+    assert any(
+        event.event_type == "assistant_message"
+        and event.data["content"] == "runtime fallback ok"
+        for event in session.events
+    )

@@ -26,18 +26,14 @@ from agent.core.local_models import (
     is_local_model_id,
     is_reserved_local_model_id,
 )
+from agent.core.model_catalog import load_model_catalog
 from agent.core.openai_compatible_models import (
     OPENAI_COMPATIBLE_MODEL_PREFIXES,
     is_openai_compatible_model_id,
 )
 
 
-# Suggested models shown by `/model` (not a gate). Users can paste any HF
-# model id (e.g. "MiniMaxAI/MiniMax-M2.7") or an `anthropic/` / `openai/`
-# prefix for direct API access. For HF ids, append ":fastest" /
-# ":cheapest" / ":preferred" / ":<provider>" to override the default
-# routing policy (auto = fastest with failover).
-SUGGESTED_MODELS = [
+_FALLBACK_SUGGESTED_MODELS = [
     {"id": "openai/gpt-5.5", "label": "GPT-5.5"},
     {"id": "openai/gpt-5.4", "label": "GPT-5.4"},
     {"id": "anthropic/claude-opus-4-7", "label": "Claude Opus 4.7"},
@@ -56,6 +52,7 @@ SUGGESTED_MODELS = [
         "label": "DeepSeek V4 Flash via SiliconFlow",
     },
 ]
+SUGGESTED_MODELS = _FALLBACK_SUGGESTED_MODELS
 
 
 _ROUTING_POLICIES = {"fastest", "cheapest", "preferred"}
@@ -172,14 +169,26 @@ def _print_hf_routing_info(model_id: str, console) -> bool:
 def print_model_listing(config, console) -> None:
     """Render the default ``/model`` (no-arg) view: current + suggested."""
     current = config.model_name if config else ""
+    catalog = load_model_catalog(config)
+    models = catalog.available_models(current) or _FALLBACK_SUGGESTED_MODELS
     console.print("[bold]Current model:[/bold]")
     console.print(f"  {current}")
-    console.print("\n[bold]Suggested:[/bold]")
-    for m in SUGGESTED_MODELS:
+    if catalog.default:
+        console.print(f"[dim]Default: {catalog.default} ({catalog.path})[/dim]")
+    console.print("\n[bold]Available:[/bold]")
+    for index, m in enumerate(models, 1):
         marker = " [dim]<-- current[/dim]" if m["id"] == current else ""
-        console.print(f"  {m['id']}  [dim]({m['label']})[/dim]{marker}")
+        aliases = m.get("aliases") or []
+        alias_text = f" aliases: {', '.join(aliases)}" if aliases else ""
+        console.print(
+            f"  {index}. {m['id']}  [dim]({m['label']}; "
+            f"{m.get('provider', 'custom')}/{m.get('tier', 'external')}"
+            f"{alias_text})[/dim]{marker}"
+        )
     console.print(
         "\n[dim]Paste any HF model id (e.g. 'MiniMaxAI/MiniMax-M2.7').\n"
+        "Use '/model <number|alias|id>' to switch this session, or "
+        "'/model --global <number|alias|id>' to switch and save the default.\n"
         "Add ':fastest', ':cheapest', ':preferred', or ':<provider>' to override routing.\n"
         "Use 'anthropic/<model>' or 'openai/<model>' for direct API access.\n"
         "Use 'ollama/<model>', 'vllm/<model>', 'lm_studio/<model>', or "
@@ -322,6 +331,11 @@ async def probe_and_switch_model(
         f"[green]Model switched to {model_id}[/green] "
         f"[dim](effort: {effort_label}{suffix}, {outcome.elapsed_ms}ms)[/dim]"
     )
+
+
+def resolve_selector(selector: str, config) -> str:
+    catalog = load_model_catalog(config)
+    return (catalog.resolve(selector) or selector).removeprefix("huggingface/")
 
 
 def _commit_switch(model_id, config, session, effective, cache: bool) -> None:

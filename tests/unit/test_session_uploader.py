@@ -27,7 +27,7 @@ def test_dataset_card_readme_has_metadata_and_public_warning():
     assert "- aidd-intern" in readme
     assert 'path: "sessions/**/*.jsonl"' in readme
     assert "AIDD-Intern demo: https://smolagents-aidd-intern.hf.space" in readme
-    assert "AIDD-Intern CLI: https://github.com/huggingface/aidd-intern" in readme
+    assert "AIDD-Intern CLI: https://github.com/setsu2420/aidd-intern" in readme
     assert "Repository: https://huggingface.co/datasets/" not in readme
     assert (
         "**WARNING: no comprehensive redaction or human review has been performed for this dataset.**"

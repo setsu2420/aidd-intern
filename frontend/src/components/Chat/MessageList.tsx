@@ -82,29 +82,22 @@ export default function MessageList({ messages, isProcessing, sessionId, approve
     if (stickToBottom.current) scrollToBottom();
   }, [messages, isProcessing, scrollToBottom]);
 
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const observer = new MutationObserver(() => {
-      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
-    });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
-  }, []);
-
-  const lastUserMsgId = useMemo(() => {
+  const { lastUserMsgId, lastAssistantId } = useMemo(() => {
+    let lastUserMsgId: string | null = null;
+    let lastAssistantId: string | null = null;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user') return messages[i].id;
+      const msg = messages[i];
+      if (lastAssistantId === null && msg.role === 'assistant') {
+        lastAssistantId = msg.id;
+      }
+      if (lastUserMsgId === null && msg.role === 'user') {
+        lastUserMsgId = msg.id;
+      }
+      if (lastUserMsgId !== null && lastAssistantId !== null) {
+        break;
+      }
     }
-    return null;
-  }, [messages]);
-
-  // The last assistant message is "streaming" when we're processing
-  const lastAssistantId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'assistant') return messages[i].id;
-    }
-    return null;
+    return { lastUserMsgId, lastAssistantId };
   }, [messages]);
 
   return (

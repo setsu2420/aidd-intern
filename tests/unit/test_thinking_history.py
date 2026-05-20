@@ -160,6 +160,52 @@ async def test_streaming_call_rebuilds_anthropic_thinking_state(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_streaming_call_batches_small_text_deltas(monkeypatch):
+    async def fake_stream():
+        for text in ("he", "ll", "o"):
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content=text, tool_calls=None),
+                        finish_reason=None,
+                    )
+                ],
+            )
+        yield SimpleNamespace(choices=[], usage=SimpleNamespace(total_tokens=3))
+
+    async def fake_acompletion(**_kwargs):
+        return fake_stream()
+
+    events = []
+
+    async def send_event(event):
+        events.append(event)
+
+    session = SimpleNamespace(
+        config=SimpleNamespace(model_name="openai/gpt-5.1"),
+        is_cancelled=False,
+        send_event=send_event,
+    )
+    monkeypatch.setattr(agent_loop, "acompletion", fake_acompletion)
+    monkeypatch.setattr(agent_loop.time, "monotonic", lambda: 100.0)
+
+    result = await _call_llm_streaming(
+        session,
+        messages=[Message(role="user", content="hi")],
+        tools=[],
+        llm_params={"model": "openai/gpt-5.1"},
+    )
+
+    assistant_chunks = [
+        event.data["content"]
+        for event in events
+        if event.event_type == "assistant_chunk"
+    ]
+    assert result.content == "hello"
+    assert assistant_chunks == ["hello"]
+
+
+@pytest.mark.asyncio
 async def test_streaming_call_rebuilds_anthropic_delta_thinking_state(monkeypatch):
     async def fake_stream():
         yield SimpleNamespace(

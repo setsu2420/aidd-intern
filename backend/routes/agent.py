@@ -54,6 +54,8 @@ import user_quotas
 from agent.core.hf_access import get_jobs_access
 from agent.core.hf_tokens import resolve_hf_request_token, resolve_hf_router_token
 from agent.core.llm_params import _resolve_llm_params
+from agent.core.local_models import is_local_model_id
+from agent.core.model_catalog import load_model_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ router = APIRouter(prefix="/api", tags=["agent"])
 _background_teardown_tasks: set[asyncio.Task] = set()
 
 DEFAULT_CLAUDE_MODEL_ID = "bedrock/us.anthropic.claude-opus-4-6-v1"
+DEFAULT_LOCAL_MODEL_ID = "vllm/qwen3.6-35b-a3b"
 DEFAULT_FREE_MODEL_ID = "moonshotai/Kimi-K2.6"
 PREMIUM_MODEL_IDS = {
     DEFAULT_CLAUDE_MODEL_ID,
@@ -84,59 +87,46 @@ def _claude_picker_model_id() -> str:
     return DEFAULT_CLAUDE_MODEL_ID
 
 
+def _local_picker_model_id() -> str:
+    """Return the configured local model id, or a sane vLLM placeholder."""
+    configured = session_manager.config.model_name
+    if is_local_model_id(configured):
+        return configured
+    return DEFAULT_LOCAL_MODEL_ID
+
+
 def _available_models() -> list[dict[str, Any]]:
-    models = [
-        {
-            "id": "moonshotai/Kimi-K2.6",
-            "label": "Kimi K2.6",
-            "provider": "huggingface",
-            "tier": "free",
-            "recommended": True,
-        },
-        {
-            "id": _claude_picker_model_id(),
-            "label": "Claude Opus 4.6",
-            "provider": "anthropic",
-            "tier": "pro",
-            "recommended": True,
-        },
-        {
-            "id": "openai/gpt-5.5",
-            "label": "GPT-5.5",
-            "provider": "openai",
-            "tier": "pro",
-        },
-        {
-            "id": "MiniMaxAI/MiniMax-M2.7",
-            "label": "MiniMax M2.7",
-            "provider": "huggingface",
-            "tier": "free",
-        },
-        {
-            "id": "zai-org/GLM-5.1",
-            "label": "GLM 5.1",
-            "provider": "huggingface",
-            "tier": "free",
-        },
-        {
-            "id": "deepseek-ai/DeepSeek-V4-Pro:deepinfra",
-            "label": "DeepSeek V4 Pro",
-            "provider": "huggingface",
-            "tier": "free",
-        },
-        {
-            "id": "openrouter/openai/gpt-5.2",
-            "label": "GPT-5.2",
-            "provider": "openrouter",
-            "tier": "external",
-        },
-        {
-            "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
-            "label": "DeepSeek V4 Flash",
-            "provider": "siliconflow",
-            "tier": "external",
-        },
-    ]
+    catalog = load_model_catalog(session_manager.config)
+    models = catalog.available_models(session_manager.config.model_name)
+    configured_ids = {model["id"] for model in models}
+
+    local_id = _local_picker_model_id()
+    if local_id not in configured_ids and is_local_model_id(
+        session_manager.config.model_name
+    ):
+        models.insert(
+            0,
+            {
+                "id": local_id,
+                "label": "Local vLLM",
+                "provider": "vllm",
+                "tier": "local",
+                "recommended": True,
+            },
+        )
+        configured_ids.add(local_id)
+
+    claude_id = _claude_picker_model_id()
+    if claude_id not in configured_ids:
+        models.append(
+            {
+                "id": claude_id,
+                "label": "Claude Opus 4.6",
+                "provider": "anthropic",
+                "tier": "pro",
+                "recommended": True,
+            }
+        )
     return models
 
 

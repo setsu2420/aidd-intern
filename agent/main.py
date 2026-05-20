@@ -19,46 +19,116 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-import litellm
-from prompt_toolkit import PromptSession
-
-from agent.config import load_config
 from agent.core.approval_policy import is_scheduled_operation
-from agent.core.agent_loop import submission_loop
-from agent.core import model_switcher
-from agent.core.hf_tokens import resolve_hf_token
-from agent.core.local_models import is_local_model_id
-from agent.core.openai_compatible_models import is_openai_compatible_model_id
-from agent.core.session import OpType
-from agent.core.tools import ToolRouter
-from agent.messaging.gateway import NotificationGateway
-from agent.utils.reliability_checks import check_training_script_save_pattern
-from agent.utils.terminal_display import (
-    get_console,
-    print_approval_header,
-    print_approval_item,
-    print_banner,
-    print_compacted,
-    print_error,
-    print_help,
-    print_init_done,
-    print_interrupted,
-    print_markdown,
-    print_plan,
-    print_tool_call,
-    print_tool_log,
-    print_tool_output,
-    print_turn_complete,
-    print_yolo_approve,
-)
-
-litellm.drop_params = True
-# Suppress the "Give Feedback / Get Help" banner LiteLLM prints to stderr
-# on every error — users don't need it, and our friendly errors cover the case.
-litellm.suppress_debug_info = True
+from agent.domain_packs import DEFAULT_DOMAIN_PACK
 
 CLI_CONFIG_PATH = Path(__file__).parent.parent / "configs" / "cli_agent_config.json"
 logger = logging.getLogger(__name__)
+PromptSession: Any | None = None
+load_config: Any | None = None
+resolve_hf_token: Any | None = None
+submission_loop: Any | None = None
+NotificationGateway: Any | None = None
+ToolRouter: Any | None = None
+print_banner: Any | None = None
+
+
+def _configure_litellm_runtime() -> None:
+    import litellm
+
+    litellm.drop_params = True
+    # Suppress the "Give Feedback / Get Help" banner LiteLLM prints to stderr
+    # on every error — users don't need it, and our friendly errors cover it.
+    litellm.suppress_debug_info = True
+
+
+def _terminal_display():
+    from agent.utils import terminal_display as td
+
+    return td
+
+
+def _get_load_config():
+    loader = globals().get("load_config")
+    if loader is not None:
+        return loader
+
+    from agent.config import load_config as loader
+
+    globals()["load_config"] = loader
+    return loader
+
+
+def _get_resolve_hf_token():
+    resolver = globals().get("resolve_hf_token")
+    if resolver is not None:
+        return resolver
+
+    from agent.core.hf_tokens import resolve_hf_token as resolver
+
+    globals()["resolve_hf_token"] = resolver
+    return resolver
+
+
+def _get_submission_loop():
+    loop = globals().get("submission_loop")
+    if loop is not None:
+        return loop
+    return None
+
+
+def _load_submission_loop():
+    loop = globals().get("submission_loop")
+    if loop is not None:
+        return loop
+
+    from agent.core.agent_loop import submission_loop as loop
+
+    globals()["submission_loop"] = loop
+    return loop
+
+
+def _get_notification_gateway_cls():
+    gateway_cls = globals().get("NotificationGateway")
+    if gateway_cls is not None:
+        return gateway_cls
+
+    from agent.messaging.gateway import NotificationGateway as gateway_cls
+
+    globals()["NotificationGateway"] = gateway_cls
+    return gateway_cls
+
+
+def _get_tool_router_cls():
+    router_cls = globals().get("ToolRouter")
+    if router_cls is not None:
+        return router_cls
+
+    from agent.core.tools import ToolRouter as router_cls
+
+    globals()["ToolRouter"] = router_cls
+    return router_cls
+
+
+def _get_print_banner():
+    banner = globals().get("print_banner")
+    if banner is not None:
+        return banner
+
+    banner = _terminal_display().print_banner
+    globals()["print_banner"] = banner
+    return banner
+
+
+def _get_prompt_session_factory():
+    factory = globals().get("PromptSession")
+    if factory is not None:
+        return factory
+
+    from prompt_toolkit import PromptSession as prompt_session_factory
+
+    globals()["PromptSession"] = prompt_session_factory
+    return prompt_session_factory
 
 
 def _apply_tool_runtime_override(config: Any, *, sandbox_tools: bool) -> str:
@@ -73,6 +143,38 @@ def _is_local_tool_runtime(config: Any) -> bool:
 
 def _tool_runtime_label(local_mode: bool) -> str:
     return "local filesystem" if local_mode else "HF sandbox"
+
+
+def _op_type(name: str) -> Any:
+    from agent.core.session import OpType
+
+    return getattr(OpType, name)
+
+
+def _create_tool_router(
+    mcp_servers: dict[str, Any],
+    *,
+    hf_token: str | None,
+    local_mode: bool,
+    domain_pack: str,
+) -> Any:
+    router_cls = _get_tool_router_cls()
+
+    try:
+        return router_cls(
+            mcp_servers,
+            hf_token=hf_token,
+            local_mode=local_mode,
+            domain_pack=domain_pack,
+        )
+    except TypeError as exc:
+        if "domain_pack" not in str(exc):
+            raise
+        return router_cls(
+            mcp_servers,
+            hf_token=hf_token,
+            local_mode=local_mode,
+        )
 
 
 async def _wait_for_initial_sandbox_preload(session_holder: list | None) -> None:
@@ -109,6 +211,9 @@ def _configure_runtime_logging() -> None:
 
     logging.getLogger("LiteLLM").setLevel(logging.ERROR)
     logging.getLogger("litellm").setLevel(logging.ERROR)
+    logging.getLogger("fastmcp").setLevel(logging.CRITICAL)
+    logging.getLogger("mcp").setLevel(logging.CRITICAL)
+    logging.getLogger("httpx").setLevel(logging.ERROR)
 
 
 def _safe_get_args(arguments: dict) -> dict:
@@ -132,7 +237,20 @@ def _get_hf_user(token: str | None) -> str | None:
         return None
 
 
-async def _prompt_and_save_hf_token(prompt_session: PromptSession) -> str:
+def _validated_hf_token(token: str | None) -> tuple[str | None, str | None]:
+    """Return (usable_token, username) after a lightweight HF token check."""
+    if not token:
+        return None, None
+    try:
+        from huggingface_hub import HfApi
+
+        username = HfApi(token=token).whoami().get("name")
+    except Exception:
+        return None, None
+    return token, username
+
+
+async def _prompt_and_save_hf_token(prompt_session: Any) -> str:
     """Prompt user for HF token, validate it, save via huggingface_hub.login(). Loops until valid."""
     from prompt_toolkit.formatted_text import HTML
     from huggingface_hub import HfApi, login
@@ -180,7 +298,7 @@ async def _prompt_and_save_hf_token(prompt_session: PromptSession) -> str:
 class Operation:
     """Operation to be executed by the agent"""
 
-    op_type: OpType
+    op_type: Any
     data: Optional[dict[str, Any]] = None
 
 
@@ -194,7 +312,7 @@ class Submission:
 
 def _create_rich_console():
     """Get the shared rich Console."""
-    return get_console()
+    return _terminal_display().get_console()
 
 
 def _clear_terminal() -> None:
@@ -300,6 +418,7 @@ class _StreamBuffer:
         instant: bool = False,
     ):
         """Render any complete blocks that have accumulated; leave the tail."""
+        td = _terminal_display()
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 return
@@ -307,7 +426,9 @@ class _StreamBuffer:
             if block is None:
                 return
             if block.strip():
-                await print_markdown(block, cancel_event=cancel_event, instant=instant)
+                await td.print_markdown(
+                    block, cancel_event=cancel_event, instant=instant
+                )
 
     async def finish(
         self,
@@ -315,9 +436,10 @@ class _StreamBuffer:
         instant: bool = False,
     ):
         """Flush complete blocks, then render whatever incomplete tail remains."""
+        td = _terminal_display()
         await self.flush_ready(cancel_event=cancel_event, instant=instant)
         if self._buffer.strip():
-            await print_markdown(
+            await td.print_markdown(
                 self._buffer, cancel_event=cancel_event, instant=instant
             )
         self._buffer = ""
@@ -331,11 +453,12 @@ async def event_listener(
     submission_queue: asyncio.Queue,
     turn_complete_event: asyncio.Event,
     ready_event: asyncio.Event,
-    prompt_session: PromptSession,
+    prompt_session: Any,
     config=None,
     session_holder=None,
 ) -> None:
     """Background task that listens for events and displays them"""
+    td = _terminal_display()
     submission_id = [1000]
     last_tool_name = [None]
     console = _create_rich_console()
@@ -354,13 +477,16 @@ async def event_listener(
 
             if event.event_type == "ready":
                 tool_count = event.data.get("tool_count", 0) if event.data else 0
-                print_init_done(tool_count=tool_count)
+                td.print_init_done(tool_count=tool_count)
+                session = session_holder[0] if session_holder else None
+                if session is not None:
+                    td.print_context_status(session)
                 ready_event.set()
             elif event.event_type == "assistant_message":
                 shimmer.stop()
                 content = event.data.get("content", "") if event.data else ""
                 if content:
-                    await print_markdown(content, cancel_event=_cancel_event())
+                    await td.print_markdown(content, cancel_event=_cancel_event())
             elif event.event_type == "assistant_chunk":
                 content = event.data.get("content", "") if event.data else ""
                 if content:
@@ -383,27 +509,29 @@ async def event_listener(
                     # Skip printing research tool_call — the tool_log handler shows it
                     if tool_name != "research":
                         args_str = json.dumps(arguments)[:80]
-                        print_tool_call(tool_name, args_str)
+                        td.print_tool_call(tool_name, args_str)
             elif event.event_type == "tool_output":
                 output = event.data.get("output", "") if event.data else ""
                 success = event.data.get("success", False) if event.data else False
                 # Only show output for plan_tool — everything else is noise
                 if last_tool_name[0] == "plan_tool" and output:
-                    print_tool_output(output, success, truncate=False)
+                    td.print_tool_output(output, success, truncate=False)
                 shimmer.start()
             elif event.event_type == "turn_complete":
                 shimmer.stop()
                 stream_buf.discard()
-                print_turn_complete()
-                print_plan()
+                td.print_turn_complete()
                 session = session_holder[0] if session_holder else None
+                if session is not None:
+                    td.print_context_status(session, include_turns=True)
+                td.print_plan()
                 if session is not None:
                     await session.send_deferred_turn_complete_notification(event)
                 turn_complete_event.set()
             elif event.event_type == "interrupted":
                 shimmer.stop()
                 stream_buf.discard()
-                print_interrupted()
+                td.print_interrupted()
                 turn_complete_event.set()
             elif event.event_type == "undo_complete":
                 console.print("[dim]Undone.[/dim]")
@@ -466,7 +594,7 @@ async def event_listener(
                 if log:
                     agent_id = event.data.get("agent_id", "") if event.data else ""
                     label = event.data.get("label", "") if event.data else ""
-                    print_tool_log(tool, log, agent_id=agent_id, label=label)
+                    td.print_tool_log(tool, log, agent_id=agent_id, label=label)
             elif event.event_type == "tool_state_change":
                 pass  # visual noise — approval flow handles this
             elif event.event_type == "error":
@@ -477,18 +605,26 @@ async def event_listener(
                     if event.data
                     else "Unknown error"
                 )
-                print_error(error)
+                td.print_error(error)
                 turn_complete_event.set()
             elif event.event_type == "shutdown":
                 shimmer.stop()
                 stream_buf.discard()
                 break
             elif event.event_type == "processing":
+                session = session_holder[0] if session_holder else None
+                if session is not None:
+                    td.print_context_status(
+                        session, include_turns=True, include_items=True
+                    )
                 shimmer.start()
             elif event.event_type == "compacted":
                 old_tokens = event.data.get("old_tokens", 0) if event.data else 0
                 new_tokens = event.data.get("new_tokens", 0) if event.data else 0
-                print_compacted(old_tokens, new_tokens)
+                td.print_compacted(old_tokens, new_tokens)
+                session = session_holder[0] if session_holder else None
+                if session is not None:
+                    td.print_context_status(session)
             elif event.event_type == "approval_required":
                 # Handle batch approval format
                 tools_data = event.data.get("tools", []) if event.data else []
@@ -509,19 +645,19 @@ async def event_listener(
                         }
                         for t in tools_data
                     ]
-                    print_yolo_approve(count)
+                    td.print_yolo_approve(count)
                     submission_id[0] += 1
                     approval_submission = Submission(
                         id=f"approval_{submission_id[0]}",
                         operation=Operation(
-                            op_type=OpType.EXEC_APPROVAL,
+                            op_type=_op_type("EXEC_APPROVAL"),
                             data={"approvals": approvals},
                         ),
                     )
                     await submission_queue.put(approval_submission)
                     continue
 
-                print_approval_header(count)
+                td.print_approval_header(count)
                 approvals = []
 
                 # Ask for approval for each tool
@@ -540,7 +676,7 @@ async def event_listener(
 
                     operation = arguments.get("operation", "")
 
-                    print_approval_item(i, count, tool_name, operation)
+                    td.print_approval_item(i, count, tool_name, operation)
 
                     # Handle different tool types
                     if tool_name == "hf_jobs":
@@ -549,6 +685,10 @@ async def event_listener(
                         command = arguments.get("command")
 
                         if script:
+                            from agent.utils.reliability_checks import (
+                                check_training_script_save_pattern,
+                            )
+
                             # Python mode
                             dependencies = arguments.get("dependencies", [])
                             python_version = arguments.get("python")
@@ -743,7 +883,7 @@ async def event_listener(
                             f"Approve item {i}? (y=yes, yolo=approve all, n=no, or provide feedback): "
                         )
                     except (KeyboardInterrupt, EOFError):
-                        get_console().print(
+                        td.get_console().print(
                             "[dim]Approval cancelled — rejecting remaining items[/dim]"
                         )
                         approvals.append(
@@ -805,7 +945,7 @@ async def event_listener(
                 approval_submission = Submission(
                     id=f"approval_{submission_id[0]}",
                     operation=Operation(
-                        op_type=OpType.EXEC_APPROVAL,
+                        op_type=_op_type("EXEC_APPROVAL"),
                         data={"approvals": approvals},
                     ),
                 )
@@ -819,11 +959,16 @@ async def event_listener(
             print(f"Event listener error: {e}")
 
 
-async def get_user_input(prompt_session: PromptSession) -> str:
+async def get_user_input(prompt_session: Any, session: Any | None = None) -> str:
     """Get user input asynchronously"""
     from prompt_toolkit.formatted_text import HTML
 
-    return await prompt_session.prompt_async(HTML("\n<b><cyan>></cyan></b> "))
+    td = _terminal_display()
+    bottom_toolbar = td.format_context_status(session) if session else None
+    return await prompt_session.prompt_async(
+        HTML("\n<b><cyan>></cyan></b> "),
+        bottom_toolbar=bottom_toolbar,
+    )
 
 
 # ── Slash command helpers ────────────────────────────────────────────────
@@ -833,7 +978,7 @@ async def get_user_input(prompt_session: PromptSession) -> str:
 
 async def _resume_picker(
     arg: str,
-    prompt_session: PromptSession | None,
+    prompt_session: Any | None,
 ) -> Path | None:
     """Resolve a session log path via ``arg`` or interactive selection.
 
@@ -847,7 +992,7 @@ async def _resume_picker(
     )
     from agent.core.session import DEFAULT_SESSION_LOG_DIR
 
-    console = get_console()
+    console = _terminal_display().get_console()
     directory = DEFAULT_SESSION_LOG_DIR
     entries = list_session_logs(directory)
     if not entries:
@@ -893,7 +1038,7 @@ async def _handle_slash_command(
     session_holder: list,
     submission_queue: asyncio.Queue,
     submission_id: list[int],
-    prompt_session: PromptSession | None = None,
+    prompt_session: Any | None = None,
 ) -> Submission | None:
     """
     Handle a slash command. Returns a Submission to enqueue, or None if
@@ -902,38 +1047,39 @@ async def _handle_slash_command(
     Async because ``/model`` fires a probe ping to validate the model+effort
     combo before committing the switch.
     """
+    td = _terminal_display()
     parts = cmd.strip().split(None, 1)
     command = parts[0].lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     if command == "/help":
-        print_help()
+        td.print_help()
         return None
 
     if command == "/undo":
         submission_id[0] += 1
         return Submission(
             id=f"sub_{submission_id[0]}",
-            operation=Operation(op_type=OpType.UNDO),
+            operation=Operation(op_type=_op_type("UNDO")),
         )
 
     if command == "/compact":
         submission_id[0] += 1
         return Submission(
             id=f"sub_{submission_id[0]}",
-            operation=Operation(op_type=OpType.COMPACT),
+            operation=Operation(op_type=_op_type("COMPACT")),
         )
 
     if command in {"/new", "/clear"}:
         session = session_holder[0] if session_holder else None
         if session is None:
-            get_console().print("[bold red]No active session to reset.[/bold red]")
+            td.get_console().print("[bold red]No active session to reset.[/bold red]")
             return None
         submission_id[0] += 1
         return Submission(
             id=f"sub_{submission_id[0]}",
             operation=Operation(
-                op_type=OpType.NEW,
+                op_type=_op_type("NEW"),
                 data={"clear_screen": command == "/clear"},
             ),
         )
@@ -941,7 +1087,7 @@ async def _handle_slash_command(
     if command == "/resume":
         session = session_holder[0] if session_holder else None
         if session is None:
-            get_console().print(
+            td.get_console().print(
                 "[bold red]No active session to restore into.[/bold red]"
             )
             return None
@@ -952,19 +1098,40 @@ async def _handle_slash_command(
         return Submission(
             id=f"sub_{submission_id[0]}",
             operation=Operation(
-                op_type=OpType.RESUME, data={"path": str(selected_path)}
+                op_type=_op_type("RESUME"), data={"path": str(selected_path)}
             ),
         )
 
     if command == "/model":
-        console = get_console()
-        if not arg:
+        from agent.core import model_switcher
+        from agent.core.hf_tokens import resolve_hf_token
+        from agent.core.model_catalog import load_model_catalog, set_default_model
+
+        console = td.get_console()
+        if not arg or arg.lower() in {"list", "ls"}:
             model_switcher.print_model_listing(config, console)
             return None
-        if not model_switcher.is_valid_model_id(arg):
-            model_switcher.print_invalid_id(arg, console)
+        if arg.lower() == "status":
+            catalog = load_model_catalog(config)
+            console.print(f"[bold]Current model:[/bold] {config.model_name}")
+            console.print(f"[bold]Default model:[/bold] {catalog.default or '(none)'}")
+            console.print(f"[dim]Model file: {catalog.path}[/dim]")
             return None
-        normalized = arg.removeprefix("huggingface/")
+
+        save_default = False
+        selector = arg
+        for prefix in ("--global ", "--save ", "--default "):
+            if selector.startswith(prefix):
+                save_default = True
+                selector = selector[len(prefix) :].strip()
+                break
+        if selector in {"--global", "--save", "--default"}:
+            console.print("[bold red]Missing model id after --global.[/bold red]")
+            return None
+        normalized = model_switcher.resolve_selector(selector, config)
+        if not model_switcher.is_valid_model_id(normalized):
+            model_switcher.print_invalid_id(selector, console)
+            return None
         session = session_holder[0] if session_holder else None
         await model_switcher.probe_and_switch_model(
             normalized,
@@ -973,6 +1140,10 @@ async def _handle_slash_command(
             console,
             resolve_hf_token(),
         )
+        if config.model_name == normalized and save_default:
+            path = set_default_model(normalized, config)
+            console.print(f"[green]Default model saved:[/green] {normalized}")
+            console.print(f"[dim]{path}[/dim]")
         return None
 
     if command == "/yolo":
@@ -982,7 +1153,7 @@ async def _handle_slash_command(
         return None
 
     if command == "/effort":
-        console = get_console()
+        console = td.get_console()
         valid = {"minimal", "low", "medium", "high", "xhigh", "max", "off"}
         session = session_holder[0] if session_holder else None
         if not arg:
@@ -1025,6 +1196,7 @@ async def _handle_slash_command(
         if session:
             print(f"Turns: {session.turn_count}")
             print(f"Context items: {len(session.context_manager.items)}")
+            td.print_context_status(session, include_turns=True, include_items=True)
         return None
 
     if command == "/share-traces":
@@ -1043,10 +1215,11 @@ async def _handle_share_traces_command(arg: str, config, session) -> None:
     operates on the personal trace repo configured via
     ``personal_trace_repo_template`` — never touches the shared org dataset.
     """
+    from agent.core.hf_tokens import resolve_hf_token
     from huggingface_hub import HfApi
     from huggingface_hub.utils import HfHubHTTPError
 
-    console = get_console()
+    console = _terminal_display().get_console()
     if session is None:
         console.print("[bold red]No active session.[/bold red]")
         return
@@ -1141,38 +1314,56 @@ async def _handle_share_traces_command(arg: str, config, session) -> None:
     console.print(f"[green]Dataset is now {label}.[/green] {url}")
 
 
-async def main(model: str | None = None, sandbox_tools: bool = False):
+async def main(
+    model: str | None = None,
+    sandbox_tools: bool = False,
+    domain_pack: str | None = None,
+):
     """Interactive chat with the agent"""
+    _configure_litellm_runtime()
+    from agent.core.local_models import is_local_model_id
+    from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
     # Clear screen
     _clear_terminal()
 
     # Create prompt session for input (needed early for token prompt)
-    prompt_session = PromptSession()
+    prompt_session = _get_prompt_session_factory()()
 
-    config = load_config(CLI_CONFIG_PATH, include_user_defaults=True)
+    load_config_fn = _get_load_config()
+    resolve_hf_token_fn = _get_resolve_hf_token()
+    notification_gateway_cls = _get_notification_gateway_cls()
+    banner_fn = _get_print_banner()
+
+    config = load_config_fn(CLI_CONFIG_PATH, include_user_defaults=True)
     if model:
         config.model_name = model
+    if domain_pack:
+        config.domain_pack = domain_pack
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
     # HF token — required for Hub-backed models/tools and sandbox tools, but
     # not for non-HF LLMs using only local filesystem tools.
-    hf_token = resolve_hf_token()
+    hf_token = resolve_hf_token_fn()
     non_hf_model = is_local_model_id(
         config.model_name
     ) or is_openai_compatible_model_id(config.model_name)
     if not hf_token and (not non_hf_model or not local_mode):
         hf_token = await _prompt_and_save_hf_token(prompt_session)
 
-    # Resolve username for banner
-    hf_user = _get_hf_user(hf_token)
+    hf_token, hf_user = _validated_hf_token(hf_token)
+    if not hf_token and (not non_hf_model or not local_mode):
+        hf_token = await _prompt_and_save_hf_token(prompt_session)
+        hf_token, hf_user = _validated_hf_token(hf_token)
 
-    print_banner(
+    td = _terminal_display()
+    banner_fn(
         model=config.model_name,
         hf_user=hf_user,
         tool_runtime=_tool_runtime_label(local_mode),
     )
+    submission_loop_fn = _load_submission_loop()
 
     # Pre-warm the HF router catalog in the background so /model switches
     # don't block on a network fetch.
@@ -1189,18 +1380,21 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
     turn_complete_event.set()
     ready_event = asyncio.Event()
 
-    notification_gateway = NotificationGateway(config.messaging)
+    notification_gateway = notification_gateway_cls(config.messaging)
     await notification_gateway.start()
     # Create tool router with the selected CLI tool runtime.
-    tool_router = ToolRouter(
-        config.mcpServers, hf_token=hf_token, local_mode=local_mode
+    tool_router = _create_tool_router(
+        config.mcpServers,
+        hf_token=hf_token,
+        local_mode=local_mode,
+        domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
     )
 
     # Session holder for interrupt/model/status access
     session_holder = [None]
 
     agent_task = asyncio.create_task(
-        submission_loop(
+        submission_loop_fn(
             submission_queue,
             event_queue,
             config=config,
@@ -1230,8 +1424,6 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
     )
 
     await ready_event.wait()
-    if not local_mode:
-        await _wait_for_initial_sandbox_preload(session_holder)
 
     submission_id = [0]
     # Mirrors codex-rs/tui/src/bottom_pane/mod.rs:137
@@ -1264,7 +1456,7 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
         interrupt_state["last"] = now
         if session and not session.is_cancelled:
             session.cancel()
-        get_console().print(f"\n{CTRL_C_HINT}")
+        td.get_console().print(f"\n{CTRL_C_HINT}")
 
     def _install_sigint() -> bool:
         try:
@@ -1298,8 +1490,9 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
             # installs its own SIGINT handling; ^C arrives as \x03 and surfaces
             # as KeyboardInterrupt here. On return, prompt_toolkit removes the
             # loop's SIGINT handler — we re-arm at the top of the next iter.
+            session = session_holder[0] if session_holder else None
             try:
-                user_input = await get_user_input(prompt_session)
+                user_input = await get_user_input(prompt_session, session=session)
             except EOFError:
                 break
             except KeyboardInterrupt:
@@ -1307,7 +1500,7 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
                 if now - interrupt_state["last"] < CTRL_C_QUIT_WINDOW:
                     break
                 interrupt_state["last"] = now
-                get_console().print(CTRL_C_HINT)
+                td.get_console().print(CTRL_C_HINT)
                 turn_complete_event.set()
                 continue
 
@@ -1347,7 +1540,7 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
             submission = Submission(
                 id=f"sub_{submission_id[0]}",
                 operation=Operation(
-                    op_type=OpType.USER_INPUT, data={"text": user_input}
+                    op_type=_op_type("USER_INPUT"), data={"text": user_input}
                 ),
             )
             await submission_queue.put(submission)
@@ -1363,7 +1556,7 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
 
     # Shutdown
     shutdown_submission = Submission(
-        id="sub_shutdown", operation=Operation(op_type=OpType.SHUTDOWN)
+        id="sub_shutdown", operation=Operation(op_type=_op_type("SHUTDOWN"))
     )
     await submission_queue.put(shutdown_submission)
 
@@ -1381,7 +1574,7 @@ async def main(model: str | None = None, sandbox_tools: bool = False):
     # Now safe to cancel the listener (agent is done emitting events)
     listener_task.cancel()
 
-    get_console().print("\n[dim]Bye.[/dim]\n")
+    td.get_console().print("\n[dim]Bye.[/dim]\n")
 
 
 async def headless_main(
@@ -1390,22 +1583,31 @@ async def headless_main(
     max_iterations: int | None = None,
     stream: bool = True,
     sandbox_tools: bool = False,
+    domain_pack: str | None = None,
 ) -> None:
     """Run a single prompt headlessly and exit."""
     import logging
 
     logging.basicConfig(level=logging.WARNING)
     _configure_runtime_logging()
+    from agent.core.local_models import is_local_model_id
+    from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
-    config = load_config(CLI_CONFIG_PATH, include_user_defaults=True)
+    load_config_fn = _get_load_config()
+    resolve_hf_token_fn = _get_resolve_hf_token()
+    notification_gateway_cls = _get_notification_gateway_cls()
+
+    config = load_config_fn(CLI_CONFIG_PATH, include_user_defaults=True)
     config.yolo_mode = True  # Auto-approve everything in headless mode
 
     if model:
         config.model_name = model
+    if domain_pack:
+        config.domain_pack = domain_pack
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
-    hf_token = resolve_hf_token()
+    hf_token = resolve_hf_token_fn()
     non_hf_model = is_local_model_id(
         config.model_name
     ) or is_openai_compatible_model_id(config.model_name)
@@ -1416,17 +1618,28 @@ async def headless_main(
         )
         sys.exit(1)
 
+    hf_token, hf_user = _validated_hf_token(hf_token)
+    if not hf_token and (not non_hf_model or not local_mode):
+        print(
+            "ERROR: HF token is missing or invalid. Set HF_TOKEN or run `hf auth login`.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if hf_token:
         print("HF token loaded", file=sys.stderr)
 
-    notification_gateway = NotificationGateway(config.messaging)
+    notification_gateway = notification_gateway_cls(config.messaging)
     await notification_gateway.start()
-    hf_user = _get_hf_user(hf_token)
 
     if max_iterations is not None:
         config.max_iterations = max_iterations
 
     print(f"Model: {config.model_name}", file=sys.stderr)
+    print(
+        f"Domain pack: {getattr(config, 'domain_pack', DEFAULT_DOMAIN_PACK)}",
+        file=sys.stderr,
+    )
     print(f"Tool runtime: {_tool_runtime_label(local_mode)}", file=sys.stderr)
     print(f"Max iterations: {config.max_iterations}", file=sys.stderr)
     print(f"Prompt: {prompt}", file=sys.stderr)
@@ -1435,13 +1648,17 @@ async def headless_main(
     submission_queue: asyncio.Queue = asyncio.Queue()
     event_queue: asyncio.Queue = asyncio.Queue()
 
-    tool_router = ToolRouter(
-        config.mcpServers, hf_token=hf_token, local_mode=local_mode
+    submission_loop_fn = _load_submission_loop()
+    tool_router = _create_tool_router(
+        config.mcpServers,
+        hf_token=hf_token,
+        local_mode=local_mode,
+        domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
     )
     session_holder: list = [None]
 
     agent_task = asyncio.create_task(
-        submission_loop(
+        submission_loop_fn(
             submission_queue,
             event_queue,
             config=config,
@@ -1466,7 +1683,7 @@ async def headless_main(
     # Submit the prompt
     submission = Submission(
         id="sub_1",
-        operation=Operation(op_type=OpType.USER_INPUT, data={"text": prompt}),
+        operation=Operation(op_type=_op_type("USER_INPUT"), data={"text": prompt}),
     )
     await submission_queue.put(submission)
 
@@ -1495,7 +1712,7 @@ async def headless_main(
         elif event.event_type == "assistant_message":
             content = event.data.get("content", "") if event.data else ""
             if content:
-                await print_markdown(content, instant=True)
+                await _terminal_display().print_markdown(content, instant=True)
         elif event.event_type == "tool_call":
             stream_buf.discard()
             tool_name = event.data.get("tool", "") if event.data else ""
@@ -1504,48 +1721,41 @@ async def headless_main(
                 _hl_last_tool[0] = tool_name
                 if tool_name != "research":
                     args_str = json.dumps(arguments)[:80]
-                    print_tool_call(tool_name, args_str)
+                    _terminal_display().print_tool_call(tool_name, args_str)
         elif event.event_type == "tool_output":
             output = event.data.get("output", "") if event.data else ""
             success = event.data.get("success", False) if event.data else False
             if _hl_last_tool[0] == "plan_tool" and output:
-                print_tool_output(output, success, truncate=False)
+                _terminal_display().print_tool_output(output, success, truncate=False)
         elif event.event_type == "tool_log":
             tool = event.data.get("tool", "") if event.data else ""
             log = event.data.get("log", "") if event.data else ""
             if not log:
                 pass
             elif tool == "research":
-                # Headless mode: buffer research sub-agent activity per-agent,
-                # then dump each as a static block on completion. The live
-                # SubAgentDisplayManager uses terminal cursor tricks that are
-                # unfit for non-TTY output, but parallel agents still need
-                # distinct output so we key buffers by agent_id.
                 agent_id = event.data.get("agent_id", "") if event.data else ""
                 label = event.data.get("label", "") if event.data else ""
                 aid = agent_id or "research"
                 if log == "Starting research sub-agent...":
                     _hl_research_buffers[aid] = {
                         "label": label or "research",
-                        "calls": [],
                     }
                 elif log == "Research complete.":
                     buf = _hl_research_buffers.pop(aid, None)
                     if buf is not None:
-                        f = get_console().file
-                        f.write(f"  \033[38;2;255;200;80m▸ {buf['label']}\033[0m\n")
-                        for call in buf["calls"]:
-                            f.write(f"    \033[2m{call}\033[0m\n")
+                        f = _terminal_display().get_console().file
+                        f.write(
+                            f"  \033[38;2;120;200;140m✓\033[0m \033[2m{buf['label']}\033[0m\n"
+                        )
                         f.flush()
                 elif log.startswith("tokens:") or log.startswith("tools:"):
-                    pass  # stats updates — only useful for the live display
+                    pass
                 elif aid in _hl_research_buffers:
-                    _hl_research_buffers[aid]["calls"].append(log)
+                    pass
                 else:
-                    # Orphan event (Start was missed) — fall back to raw print
-                    print_tool_log(tool, log, agent_id=agent_id, label=label)
+                    pass
             else:
-                print_tool_log(tool, log)
+                _terminal_display().print_tool_log(tool, log)
         elif event.event_type == "approval_required":
             # Auto-approve in headless mode, except scheduled HF jobs. Those
             # are rejected because their recurring cost needs manual approval.
@@ -1567,7 +1777,7 @@ async def headless_main(
                 Submission(
                     id=f"hl_approval_{_hl_sub_id[0]}",
                     operation=Operation(
-                        op_type=OpType.EXEC_APPROVAL,
+                        op_type=_op_type("EXEC_APPROVAL"),
                         data={"approvals": approvals},
                     ),
                 )
@@ -1575,7 +1785,7 @@ async def headless_main(
         elif event.event_type == "compacted":
             old_tokens = event.data.get("old_tokens", 0) if event.data else 0
             new_tokens = event.data.get("new_tokens", 0) if event.data else 0
-            print_compacted(old_tokens, new_tokens)
+            _terminal_display().print_compacted(old_tokens, new_tokens)
         elif event.event_type == "error":
             stream_buf.discard()
             error = (
@@ -1583,7 +1793,7 @@ async def headless_main(
                 if event.data
                 else "Unknown error"
             )
-            print_error(error)
+            _terminal_display().print_error(error)
             break
         elif event.event_type in ("turn_complete", "interrupted"):
             stream_buf.discard()
@@ -1600,7 +1810,7 @@ async def headless_main(
 
     # Shutdown
     shutdown_submission = Submission(
-        id="sub_shutdown", operation=Operation(op_type=OpType.SHUTDOWN)
+        id="sub_shutdown", operation=Operation(op_type=_op_type("SHUTDOWN"))
     )
     await submission_queue.put(shutdown_submission)
 
@@ -1649,6 +1859,15 @@ def cli():
         action="store_true",
         help="Use HF Space sandbox tools instead of local filesystem tools",
     )
+    parser.add_argument(
+        "--domain-pack",
+        choices=["aidd_binder", "none", "protein_design"],
+        default=None,
+        help=(
+            "Override the active domain pack. Use 'none' for local research-only "
+            "workflows without binder/protein tools."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -1663,10 +1882,17 @@ def cli():
                     max_iterations=max_iter,
                     stream=not args.no_stream,
                     sandbox_tools=args.sandbox_tools,
+                    domain_pack=args.domain_pack,
                 )
             )
         else:
-            asyncio.run(main(model=args.model, sandbox_tools=args.sandbox_tools))
+            asyncio.run(
+                main(
+                    model=args.model,
+                    sandbox_tools=args.sandbox_tools,
+                    domain_pack=args.domain_pack,
+                )
+            )
     except KeyboardInterrupt:
         print("\n\nGoodbye!")
 

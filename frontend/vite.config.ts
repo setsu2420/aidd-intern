@@ -26,5 +26,44 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined;
+          }
+
+          if (id.includes('@mui/') || id.includes('@emotion/')) {
+            return 'mui-vendor';
+          }
+
+          if (id.includes('@ai-sdk/') || id.includes('/ai/')) {
+            return 'ai-vendor';
+          }
+
+          if (
+            id.includes('react/') ||
+            id.includes('react-dom/') ||
+            id.includes('scheduler/')
+          ) {
+            return 'react-vendor';
+          }
+
+          if (
+            id.includes('react-markdown') ||
+            id.includes('react-syntax-highlighter') ||
+            id.includes('remark-') ||
+            id.includes('micromark') ||
+            id.includes('rehype-') ||
+            id.includes('unist-') ||
+            id.includes('mdast-')
+          ) {
+            return 'markdown-vendor';
+          }
+
+          return 'vendor';
+        },
+      },
+    },
   },
 })

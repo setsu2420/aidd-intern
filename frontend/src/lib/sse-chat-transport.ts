@@ -10,6 +10,7 @@ import { apiFetch } from '@/utils/api';
 import { logger } from '@/utils/logger';
 import type { AgentEvent } from '@/types/events';
 import { useAgentStore } from '@/store/agentStore';
+import { flushLastEventSeq, getLastEventSeq, recordLastEventSeq } from './last-event-store';
 
 // ---------------------------------------------------------------------------
 // Side-channel callback interface (non-chat events forwarded to the store)
@@ -50,10 +51,6 @@ function nextPartId(prefix: string): string {
   return `${prefix}-${Date.now()}-${++partIdCounter}`;
 }
 
-function lastEventKey(sessionId: string): string {
-  return `hf-agent-last-event:${sessionId}`;
-}
-
 /** Parse an SSE text stream into AgentEvent objects. */
 function createSSEParserStream(sessionId: string): TransformStream<string, AgentEvent> {
   let buffer = '';
@@ -69,9 +66,9 @@ function createSSEParserStream(sessionId: string): TransformStream<string, Agent
     try {
       const json = JSON.parse(data.trim()) as AgentEvent;
       const seq = json.seq ?? (eventId ? Number(eventId) : undefined);
-      if (Number.isFinite(seq)) {
+      if (typeof seq === 'number' && Number.isFinite(seq)) {
         json.seq = seq;
-        localStorage.setItem(lastEventKey(sessionId), String(seq));
+        recordLastEventSeq(sessionId, seq);
       }
       controller.enqueue(json);
     } catch {
@@ -345,7 +342,7 @@ export class SSEChatTransport implements ChatTransport<UIMessage> {
   }
 
   destroy(): void {
-    // Nothing to clean up — no persistent connections
+    flushLastEventSeq(this.sessionId);
   }
 
   // -- ChatTransport interface ---------------------------------------------
@@ -446,8 +443,8 @@ export class SSEChatTransport implements ChatTransport<UIMessage> {
       if (!info.is_processing) return null;
 
       // Session is mid-turn — subscribe to its event broadcast.
-      const lastSeq = localStorage.getItem(lastEventKey(this.sessionId));
-      const qs = lastSeq ? `?after=${encodeURIComponent(lastSeq)}` : '';
+      const lastSeq = getLastEventSeq(this.sessionId);
+      const qs = lastSeq != null ? `?after=${encodeURIComponent(String(lastSeq))}` : '';
       const response = await apiFetch(`/api/events/${this.sessionId}${qs}`, {
         headers: { 'Accept': 'text/event-stream' },
       });

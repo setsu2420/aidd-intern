@@ -1,0 +1,10 @@
+{
+  "testCases": [
+    { "id": "basic-arithmetic", "name": "Arithmetic", "prompt": "What is 2+2? Just the number." },
+    { "id": "greeting", "name": "Greeting", "prompt": "Hello. Reply briefly." },
+    { "id": "web-search", "name": "Web Search", "prompt": "Search for recent AlphaFold3 developments." },
+    { "id": "protein-knowledge", "name": "Protein Knowledge", "prompt": "Explain computational protein binder design." },
+    { "id": "task-planning", "name": "Planning", "prompt": "Plan a protein binder targeting PD-L1." },
+    { "id": "paper-search", "name": "Paper Search", "prompt": "Find protein design papers on Hugging Face." }
+  ]
+}
