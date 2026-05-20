@@ -11,9 +11,9 @@ loop.
 The stable seams are:
 
 - `agent/core/tools.py` for tool registration;
-- `agent/domain_packs/protein_design/tools.py` for generator dispatch;
-- `agent/domain_packs/protein_design/validation.py` for validator dispatch;
-- `agent/domain_packs/protein_design/ace.py` for campaign memory;
+- `agent/workflows/protein_design/tools.py` for generator dispatch;
+- `agent/workflows/protein_design/validation.py` for validator dispatch;
+- `agent/workflows/protein_design/ace.py` for campaign memory;
 - `evals/protein_design/runner.py` for benchmark orchestration.
 
 ## Near-Term Optimizations
@@ -109,20 +109,20 @@ Extend `evals/protein_design/runner.py` to produce:
 
 ## Medium-Term Optimizations
 
-### 1. Domain Prompt Loading
+### 1. Protein Workflow Prompt Loading
 
-The pack has `prompt.yaml`, but the global context manager still renders the
-main system prompt. A future improvement is to layer domain-pack prompt text
-into the system prompt when `Config.domain_pack == "protein_design"`.
+The protein-design workflow has `prompt.yaml`, but the global context manager
+still renders the main system prompt. A future improvement is to layer workflow
+prompt text into the system prompt when protein-design tools are relevant.
 
 Suggested rule:
 
 ```text
-base system prompt + selected domain pack prompt + rendered tool schemas
+base system prompt + protein workflow prompt + rendered tool schemas
 ```
 
 Keep the base prompt generic; keep protein-specific workflow constraints in
-the domain pack.
+the workflow prompt.
 
 ### 2. Container Runtime Profiles
 

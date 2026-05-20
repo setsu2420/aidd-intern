@@ -578,7 +578,7 @@ def _render_skill_card(
         "---",
         f"name: {json.dumps(skill_name)}",
         f"description: {json.dumps(description)}",
-        f"domain_pack: {json.dumps('aidd_binder')}",
+        f"workflow: {json.dumps('aidd_binder')}",
         f"source_manifest: {json.dumps(str(manifest_path))}",
         f"created_at: {json.dumps(str(manifest.get('created_at') or ''))}",
         f"target_name: {json.dumps(str(manifest.get('target_name') or ''))}",

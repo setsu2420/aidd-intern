@@ -14,7 +14,7 @@ The first implementation is intentionally lightweight:
 - a role registry in `agent/roles/`;
 - a structured `role_handoff` tool;
 - protein-design specialist roles in
-  `agent/domain_packs/protein_design/roles.py`;
+  `agent/workflows/protein_design/roles.py`;
 - artifact-first handoff rather than replaying full conversation history.
 
 ## Role Model

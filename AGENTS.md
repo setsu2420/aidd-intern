@@ -3,7 +3,7 @@
 ## Project Shape
 
 - `agent/`: reusable async agent runtime, CLI entrypoint, context management,
-  tool routing, session persistence/upload, model switching, domain packs, and
+  tool routing, session persistence/upload, model switching, workflows, and
   built-in tools.
 - `backend/`: FastAPI web backend. It owns hosted sessions, auth, quotas,
   dataset uploads, KPI scheduling, and the REST/SSE/WebSocket API used by the UI.
@@ -18,11 +18,11 @@
   (no LLM), `aidd-intern integration` (needs LLM), `aidd-intern eval`
   (benchmarks). Build with `npm run build`, link with `npm link`.
 - `fixtures/`: evaluation test prompts for the CLI harness.
-- `docs/`: architecture, context-management, multi-agent, and domain-pack
+- `docs/`: architecture, context-management, multi-agent, and workflow
   design notes.
 - `configs/`: shared CLI/frontend defaults. Keep
   `cli_agent_config.json` and `frontend_agent_config.json` aligned when the
-  shared model, MCP, or domain-pack defaults change.
+  shared model, MCP, or workflow defaults change.
 - `agent/main.py` owns the CLI/TUI entrypoint; `agent/utils/terminal_display.py`
   owns terminal rendering; `agent/core/agent_loop.py` owns the runtime loop and
   session startup.
@@ -75,19 +75,19 @@ Notes:
 - Local model prefixes are OpenAI-compatible through LiteLLM; start the local
   inference server first, then use prefixes such as `ollama/`, `vllm/`,
   `lm_studio/`, or `llamacpp/`.
-- The default domain pack is `aidd_binder`. Supported domain packs are
+- The default workflow is `aidd_binder`. Supported workflows are
   `aidd_binder`, `protein_design`, and `none`.
 - The default CLI tool runtime is local filesystem tools. Use `--sandbox-tools`
   when you want HF Space sandbox tools; that path requires `HF_TOKEN`.
 - The default CLI/web configs list Hugging Face MCP and local ProteinMCP stdio
   launchers, but cold start filters them: Hugging Face MCP connects only when
   an HF token is available, and ProteinMCP starts only for the `protein_design`
-  domain pack or when `AIDD_INTERN_ENABLE_PROTEINMCP=1`.
+  workflow or when `AIDD_INTERN_ENABLE_PROTEINMCP=1`.
 - Hugging Face MCP should use the bearer-token `https://hf.co/mcp` endpoint.
   Avoid defaulting to `https://huggingface.co/mcp?login`; unauthenticated OAuth
   login attempts can add startup latency and print 401 tracebacks into the TUI.
 - Use `scripts/setup-proteinmcp-local.sh all` for the heavy one-time
-  ProteinMCP setup before enabling the `protein_design` domain pack.
+  ProteinMCP setup before enabling the `protein_design` workflow.
 - The CLI startup path is intentionally split into a fast initialization pass
   and background preload work; keep cold-start work out of the prompt loop when
   possible.
@@ -119,10 +119,10 @@ npm run lint
 npm run build
 ```
 
-- For domain-pack changes, include focused tests such as:
+- For workflow changes, include focused tests such as:
 
 ```bash
-uv run pytest tests/unit/test_protein_design_domain_pack.py
+uv run pytest tests/unit/test_protein_design_workflow.py
 uv run pytest tests/unit
 ```
 
@@ -152,7 +152,7 @@ aidd-intern eval --judge     # With LLM-as-judge scoring
 ## Code Boundaries
 
 - Generic agent runtime behavior belongs in `agent/core/`.
-- Domain prompts/tools belong in `agent/domain_packs/<name>/`.
+- Domain prompts/tools belong in `agent/workflows/<name>/`.
 - CLI behavior belongs in `agent/main.py`; web session orchestration belongs in
   `backend/session_manager.py`.
 - Backend route changes generally belong under `backend/routes/`.

@@ -3,13 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from agent import config as config_module
 from agent.core import agent_loop
 from agent.core.tools import create_builtin_tools
-from agent.domain_packs.protein_design.ace import ace_playbook_handler
-from agent.domain_packs.protein_design.approval import ProteinDesignApprovalPolicy
-from agent.domain_packs.protein_design.telemetry import summarize_validation_metrics
-from agent.domain_packs.protein_design.tools import (
+from agent.workflows.protein_design.ace import ace_playbook_handler
+from agent.workflows.protein_design.approval import ProteinDesignApprovalPolicy
+from agent.workflows.protein_design.telemetry import summarize_validation_metrics
+from agent.workflows.protein_design.tools import (
     _gpu_plan,
     _parse_hardware_errors,
     _run_command,
@@ -25,7 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_protein_design_tools_are_registered_for_llm():
-    tools = create_builtin_tools(local_mode=True, domain_pack="protein_design")
+    tools = create_builtin_tools(local_mode=True)
     specs = {tool.name: tool for tool in tools}
 
     assert "run_pxdesign" in specs
@@ -33,31 +32,6 @@ def test_protein_design_tools_are_registered_for_llm():
     assert "run_bindcraft" in specs
     assert "protein_design_ace_playbook" in specs
     assert "target_pdb" in specs["run_pxdesign"].parameters["required"]
-
-
-def test_default_binder_pack_still_omits_protein_design_tools():
-    tools = create_builtin_tools(local_mode=True)
-    specs = {tool.name: tool for tool in tools}
-
-    assert "binder_design" in specs
-    assert "run_pxdesign" not in specs
-
-
-def test_protein_design_domain_pack_config_is_accepted(tmp_path):
-    config_path = tmp_path / "config.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "model_name": "moonshotai/Kimi-K2.6",
-                "domain_pack": "protein_design",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    config = config_module.load_config(str(config_path))
-
-    assert config.domain_pack == "protein_design"
 
 
 def test_protein_design_oom_parser_detects_cuda_oom():
@@ -149,7 +123,7 @@ async def test_run_bindcraft_uses_local_mcp_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("AIDD_INTERN_BINDCRAFT_MCP_DIR", str(mcp_root))
     monkeypatch.setenv("PROTEIN_DESIGN_GPU_FREE_MB", "12000,64000")
     monkeypatch.setattr(
-        "agent.domain_packs.protein_design.tools._run_command",
+        "agent.workflows.protein_design.tools._run_command",
         fake_run_command,
     )
 

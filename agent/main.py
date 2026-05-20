@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from agent.core.approval_policy import is_scheduled_operation
-from agent.domain_packs import DEFAULT_DOMAIN_PACK
 
 CLI_CONFIG_PATH = Path(__file__).parent.parent / "configs" / "cli_agent_config.json"
 logger = logging.getLogger(__name__)
@@ -156,7 +155,6 @@ def _create_tool_router(
     *,
     hf_token: str | None,
     local_mode: bool,
-    domain_pack: str,
 ) -> Any:
     router_cls = _get_tool_router_cls()
 
@@ -165,15 +163,13 @@ def _create_tool_router(
             mcp_servers,
             hf_token=hf_token,
             local_mode=local_mode,
-            domain_pack=domain_pack,
         )
     except TypeError as exc:
-        if "domain_pack" not in str(exc):
+        if "local_mode" not in str(exc):
             raise
         return router_cls(
             mcp_servers,
             hf_token=hf_token,
-            local_mode=local_mode,
         )
 
 
@@ -1317,7 +1313,6 @@ async def _handle_share_traces_command(arg: str, config, session) -> None:
 async def main(
     model: str | None = None,
     sandbox_tools: bool = False,
-    domain_pack: str | None = None,
 ):
     """Interactive chat with the agent"""
     _configure_litellm_runtime()
@@ -1338,8 +1333,6 @@ async def main(
     config = load_config_fn(CLI_CONFIG_PATH, include_user_defaults=True)
     if model:
         config.model_name = model
-    if domain_pack:
-        config.domain_pack = domain_pack
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
@@ -1387,7 +1380,6 @@ async def main(
         config.mcpServers,
         hf_token=hf_token,
         local_mode=local_mode,
-        domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
     )
 
     # Session holder for interrupt/model/status access
@@ -1583,7 +1575,6 @@ async def headless_main(
     max_iterations: int | None = None,
     stream: bool = True,
     sandbox_tools: bool = False,
-    domain_pack: str | None = None,
 ) -> None:
     """Run a single prompt headlessly and exit."""
     import logging
@@ -1602,8 +1593,6 @@ async def headless_main(
 
     if model:
         config.model_name = model
-    if domain_pack:
-        config.domain_pack = domain_pack
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
@@ -1636,10 +1625,6 @@ async def headless_main(
         config.max_iterations = max_iterations
 
     print(f"Model: {config.model_name}", file=sys.stderr)
-    print(
-        f"Domain pack: {getattr(config, 'domain_pack', DEFAULT_DOMAIN_PACK)}",
-        file=sys.stderr,
-    )
     print(f"Tool runtime: {_tool_runtime_label(local_mode)}", file=sys.stderr)
     print(f"Max iterations: {config.max_iterations}", file=sys.stderr)
     print(f"Prompt: {prompt}", file=sys.stderr)
@@ -1653,7 +1638,6 @@ async def headless_main(
         config.mcpServers,
         hf_token=hf_token,
         local_mode=local_mode,
-        domain_pack=getattr(config, "domain_pack", DEFAULT_DOMAIN_PACK),
     )
     session_holder: list = [None]
 
@@ -1859,15 +1843,6 @@ def cli():
         action="store_true",
         help="Use HF Space sandbox tools instead of local filesystem tools",
     )
-    parser.add_argument(
-        "--domain-pack",
-        choices=["aidd_binder", "none", "protein_design"],
-        default=None,
-        help=(
-            "Override the active domain pack. Use 'none' for local research-only "
-            "workflows without binder/protein tools."
-        ),
-    )
     args = parser.parse_args()
 
     try:
@@ -1882,7 +1857,6 @@ def cli():
                     max_iterations=max_iter,
                     stream=not args.no_stream,
                     sandbox_tools=args.sandbox_tools,
-                    domain_pack=args.domain_pack,
                 )
             )
         else:
@@ -1890,7 +1864,6 @@ def cli():
                 main(
                     model=args.model,
                     sandbox_tools=args.sandbox_tools,
-                    domain_pack=args.domain_pack,
                 )
             )
     except KeyboardInterrupt:

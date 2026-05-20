@@ -1,4 +1,4 @@
-"""Tool registration for the AIDD Binder domain pack."""
+"""Tool registration for the AIDD Binder workflow."""
 
 from __future__ import annotations
 

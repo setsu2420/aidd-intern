@@ -182,7 +182,6 @@ class SessionManager:
         tool_router = ToolRouter(
             self.config.mcpServers,
             hf_token=hf_token,
-            domain_pack=self.config.domain_pack,
         )
         # Deep-copy config so each session's model switches independently —
         # tab A picking GLM doesn't flip tab B off Claude.

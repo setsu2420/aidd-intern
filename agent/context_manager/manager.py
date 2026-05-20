@@ -15,8 +15,6 @@ from jinja2 import Template
 from litellm import Message, acompletion
 
 from agent.core.prompt_caching import with_prompt_caching
-from agent.domain_packs import DEFAULT_DOMAIN_PACK
-
 logger = logging.getLogger(__name__)
 
 _HF_WHOAMI_URL = "https://huggingface.co/api/whoami-v2"
@@ -236,19 +234,16 @@ class ContextManager:
         prompt_file_suffix: str = "system_prompt_v3.yaml",
         hf_token: str | None = None,
         local_mode: bool = False,
-        domain_pack: str = DEFAULT_DOMAIN_PACK,
     ):
         self.prompt_file_suffix = prompt_file_suffix
         self.tool_specs = tool_specs or []
         self.hf_token = hf_token
         self.local_mode = local_mode
-        self.domain_pack = domain_pack
         self.system_prompt = self._load_system_prompt(
             self.tool_specs,
             prompt_file_suffix=self.prompt_file_suffix,
             hf_token=hf_token,
             local_mode=local_mode,
-            domain_pack=domain_pack,
         )
         # The model's real input-token ceiling (from litellm.get_model_info or
         # conservative local defaults). Context policy is window-aware so 65k
@@ -295,7 +290,6 @@ class ContextManager:
         tool_specs: list[dict[str, Any]] | None = None,
         hf_token: str | None = None,
         local_mode: bool | None = None,
-        domain_pack: str | None = None,
     ) -> Message:
         """Re-render the system prompt and return it as a system message."""
         if tool_specs is not None:
@@ -304,8 +298,6 @@ class ContextManager:
             self.hf_token = hf_token
         if local_mode is not None:
             self.local_mode = local_mode
-        if domain_pack is not None:
-            self.domain_pack = domain_pack
         self.system_prompt = self._load_system_prompt(
             self.tool_specs,
             prompt_file_suffix=getattr(
@@ -313,7 +305,6 @@ class ContextManager:
             ),
             hf_token=getattr(self, "hf_token", None),
             local_mode=getattr(self, "local_mode", False),
-            domain_pack=getattr(self, "domain_pack", DEFAULT_DOMAIN_PACK),
         )
         return Message(role="system", content=self.system_prompt)
 
@@ -323,7 +314,6 @@ class ContextManager:
         prompt_file_suffix: str = "system_prompt_v3.yaml",
         hf_token: str | None = None,
         local_mode: bool = False,
-        domain_pack: str = DEFAULT_DOMAIN_PACK,
     ):
         """Load and render the system prompt from YAML file with Jinja2"""
         prompt_file = Path(__file__).parent.parent / "prompts" / f"{prompt_file_suffix}"
@@ -364,18 +354,6 @@ class ContextManager:
                 f"The sandbox_create tool is NOT available. Run code directly with bash."
             )
             static_prompt += local_context
-
-        if domain_pack == "none":
-            research_context = (
-                "\n\n# Research-only mode\n\n"
-                "The active domain pack is `none`. Focus on research tasks: "
-                "literature search, official docs, GitHub examples, dataset and "
-                "model inspection, and web search with cited links. Do not "
-                "invent binder/protein generation workflows when the related "
-                "domain tools are unavailable. For local no-GPU use, favor "
-                "research, synthesis, and link-backed recommendations."
-            )
-            static_prompt += research_context
 
         return (
             f"{static_prompt}\n\n"

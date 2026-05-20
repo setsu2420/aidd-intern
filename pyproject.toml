@@ -74,7 +74,7 @@ configs = ["*.json"]
 # package README. Without these, headless_main hangs forever — submission_loop
 # crashes with FileNotFoundError but headless_main doesn't check agent_task.done()
 # and just keeps awaiting the "ready" event_queue item that will never come.
-agent = ["README.md", "prompts/*.yaml", "domain_packs/*/*.yaml"]
+agent = ["README.md", "prompts/*.yaml", "workflows/*/*.yaml"]
 
 [tool.uv]
 package = true

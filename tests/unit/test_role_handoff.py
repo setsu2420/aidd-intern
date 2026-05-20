@@ -60,7 +60,7 @@ async def test_role_handoff_tool_lists_and_creates_packages():
 
 
 def test_protein_design_roles_are_registered_by_domain_import():
-    import agent.domain_packs.protein_design  # noqa: F401
+    import agent.workflows.protein_design  # noqa: F401
 
     role = get_role("structural_biologist")
 

@@ -4,9 +4,9 @@ Last reviewed: 2026-05-19
 
 ## Purpose
 
-The default `aidd_binder` domain pack is the narrow first product surface for
-AIDD-Intern: de novo binder design for AIDD targets, currently focused on
-protein binder campaigns. It follows three design constraints:
+The AIDD binder workflow is the narrow first product surface for AIDD-Intern:
+de novo binder design for AIDD targets, currently focused on protein binder
+campaigns. It follows three design constraints:
 
 - keep the generic agent runtime reusable;
 - expose mature biology and design engines through declarative tools;
@@ -33,7 +33,7 @@ The pack expects the agent to run a campaign in this order:
 4. Create a project manifest with
    `binder_design(operation="create_project")`; the manifest stores the
    campaign plan next to the generated output folders.
-5. Dispatch generation through ProteinMCP or the optional `protein_design` pack:
+5. Dispatch generation through ProteinMCP or the built-in protein-design tools:
    PXDesign for broad exploration, BoltzGen for constrained sites, and
    BindCraft for iterative refinement.
 6. Validate shortlists with an orthogonal predictor such as Chai-1, Protenix,
@@ -101,16 +101,16 @@ membrane context, species cross-reactivity, or forbidden epitopes. The final
 report should explicitly state which risks were resolved by computation and
 which remain experimental risks.
 
-## Relationship To `protein_design`
+## Relationship To Protein Design Tools
 
-Use `aidd_binder` as the default high-level campaign layer. It is lightweight
-and works even when heavy GPU tools are unavailable.
+Use `binder_design` as the high-level campaign layer. It is lightweight and
+works even when heavy GPU tools are unavailable.
 
-Use `protein_design` when you need direct local tool specs for PXDesign,
+Use the protein-design tools when you need direct local specs for PXDesign,
 BoltzGen, BindCraft, validation dispatch, GPU preflight, and ACE playbook
-memory. Both packs should keep large model weights, PyRosetta, CUDA frameworks,
-and long-running scientific jobs behind subprocess, container, MCP, sandbox, or
-HF Jobs boundaries.
+memory. Large model weights, PyRosetta, CUDA frameworks, and long-running
+scientific jobs should stay behind subprocess, container, MCP, sandbox, or HF
+Jobs boundaries.
 
 ## Skill Promotion
 
@@ -132,5 +132,5 @@ Focused checks:
 
 ```bash
 uv run pytest tests/unit/test_binder_design_tool.py
-uv run pytest tests/unit/test_protein_design_domain_pack.py
+uv run pytest tests/unit/test_protein_design_workflow.py
 ```

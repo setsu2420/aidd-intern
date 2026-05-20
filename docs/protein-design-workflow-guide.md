@@ -1,16 +1,16 @@
-# Protein Design Domain Pack Guide
+# Protein Design Workflow Guide
 
 Last reviewed: 2026-05-16
 
 ## Purpose
 
-The `protein_design` domain pack extends the generic AIDD-Intern runtime with
-protein binder design workflows. It keeps the existing Python architecture:
+The protein-design workflow extends the generic AIDD-Intern runtime with protein
+binder design tools. It keeps the existing Python architecture:
 
 - the agent loop, session, approval, telemetry, and tool router stay in
   `agent/core/`;
-- domain-specific logic lives under
-  `agent/domain_packs/protein_design/`;
+- protein-design logic currently lives under the legacy compatibility namespace
+  `agent/workflows/protein_design/`;
 - benchmark scaffolding lives under `evals/protein_design/`;
 - external heavy compute remains behind explicit CLI/container boundaries.
 
@@ -24,25 +24,14 @@ target-specific binder campaigns.
 
 ## Runtime Integration
 
-Enable the pack by setting:
-
-```json
-{
-  "domain_pack": "protein_design"
-}
-```
-
 The runtime path is:
 
 ```text
-Config.domain_pack
-  -> agent.domain_packs.create_domain_tools()
-  -> agent.domain_packs.protein_design.tools.create_protein_design_tools()
-  -> ToolRouter registers protein-design tools
+ToolRouter registers built-in protein-design tools
   -> agent loop executes tools through the normal approval and event pipeline
 ```
 
-The pack currently contributes these tools:
+The workflow currently contributes these tools:
 
 - `protein_design_ace_playbook`: maintains structured ACE context for long
   binder design campaigns.
@@ -50,19 +39,17 @@ The pack currently contributes these tools:
 - `run_boltzgen`: dispatches BoltzGen constraint-conditioned generation.
 - `run_bindcraft`: dispatches BindCraft iterative optimization.
 
-The default `aidd_binder` pack is the high-level campaign layer for AIDD binder
-work. It plans target-specific campaigns, writes project manifests, ranks
-generator outputs, flags validation gaps, and keeps fold-diverse
-representatives. Use the `protein_design` pack when you need direct generator
-and validation dispatch tools. Use `domain_pack="none"` for a generic runtime
-with no domain-specific tools.
+`binder_design` is the high-level campaign layer for AIDD binder work. It plans
+target-specific campaigns, writes project manifests, ranks generator outputs,
+flags validation gaps, and keeps fold-diverse representatives. Use the
+protein-design tools when you need direct generator and validation dispatch.
 
 For the default campaign workflow, see `docs/aidd-binder-workflow-guide.md`.
 
 ## File Map
 
 ```text
-agent/domain_packs/protein_design/
+agent/workflows/protein_design/
 ├── __init__.py
 ├── ace.py          # ACE playbook: delta updates, counters, grow-and-refine
 ├── approval.py     # Protein-design compute approval thresholds
@@ -240,7 +227,7 @@ Run these before committing changes:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest tests/unit/test_protein_design_domain_pack.py
+uv run pytest tests/unit/test_protein_design_workflow.py
 ```
 
 For broader regression coverage:

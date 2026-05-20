@@ -17,7 +17,6 @@ from fastmcp.exceptions import ToolError
 from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent.config import MCPServerConfig
-from agent.domain_packs import DEFAULT_DOMAIN_PACK, create_domain_tools
 
 # NOTE: Private HF repo tool disabled - replaced by hf_repo_files and hf_repo_git
 # from agent.tools.private_hf_repo_tools import (
@@ -76,6 +75,117 @@ _OPENAPI_SEARCH_TOOL_SPEC = {
         "required": [],
     },
 }
+_PROTEIN_DESIGN_TOOL_SPECS = [
+    {
+        "name": "run_pxdesign",
+        "description": (
+            "Generate protein binders using PXdesign DiT backbone diffusion "
+            "and ProteinMPNN sequence design."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_pdb": {
+                    "type": "string",
+                    "description": "Path to target PDB file.",
+                },
+                "interface_residues": {
+                    "type": "string",
+                    "description": "Comma-separated target interface residue indices.",
+                },
+                "num_samples": {"type": "integer", "default": 100},
+                "tool_runtime": {
+                    "type": "string",
+                    "enum": ["local", "sandbox"],
+                    "default": "local",
+                },
+            },
+            "required": ["target_pdb", "interface_residues"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_pxdesign_tool",
+    },
+    {
+        "name": "run_boltzgen",
+        "description": "Generate binders under topological constraints using BoltzGen.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_pdb": {"type": "string"},
+                "constraints_json": {
+                    "type": "string",
+                    "description": "JSON serialized geometric constraints.",
+                },
+                "num_samples": {"type": "integer", "default": 100},
+                "tool_runtime": {
+                    "type": "string",
+                    "enum": ["local", "sandbox"],
+                    "default": "local",
+                },
+            },
+            "required": ["target_pdb", "constraints_json"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_boltzgen_tool",
+    },
+    {
+        "name": "run_bindcraft",
+        "description": "Run multi-round automated binder optimization via BindCraft.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_pdb": {"type": "string"},
+                "binder_length": {
+                    "type": "integer",
+                    "description": "Target binder length in amino acids.",
+                },
+                "iterations": {"type": "integer", "default": 50},
+                "output_dir": {
+                    "type": "string",
+                    "description": "Directory for BindCraft outputs.",
+                },
+                "binder_name": {
+                    "type": "string",
+                    "description": "Prefix for generated binder designs.",
+                },
+                "target_chains": {
+                    "type": "string",
+                    "default": "A",
+                    "description": "Target chain IDs for interface design.",
+                },
+                "hotspot_residues": {
+                    "type": "string",
+                    "description": "Comma-separated target hotspot residue numbers.",
+                },
+                "num_designs": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Number of final accepted designs to request.",
+                },
+                "max_trajectories": {
+                    "type": "integer",
+                    "description": "Optional cap on attempted BindCraft trajectories.",
+                },
+                "device": {
+                    "type": "integer",
+                    "description": "GPU index to use. Defaults to the GPU with most free memory.",
+                },
+                "timeout_s": {
+                    "type": "integer",
+                    "description": "Optional command timeout in seconds.",
+                },
+                "tool_runtime": {
+                    "type": "string",
+                    "enum": ["local", "sandbox"],
+                    "default": "local",
+                },
+            },
+            "required": ["target_pdb", "binder_length"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_bindcraft_tool",
+    },
+]
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -242,7 +352,6 @@ def _mcp_server_enabled_for_startup(
     name: str,
     *,
     hf_token: str | None,
-    domain_pack: str,
 ) -> bool:
     if name == HF_MCP_SERVER_NAME:
         # The Hugging Face MCP endpoint requires auth. Without a token, FastMCP
@@ -251,10 +360,9 @@ def _mcp_server_enabled_for_startup(
         return bool(hf_token)
     if name.startswith(PROTEIN_MCP_SERVER_PREFIX):
         # ProteinMCP launchers clone/check local repos and start Python stdio
-        # servers. Keep that cost out of the default aidd_binder startup path.
-        return domain_pack == "protein_design" or _env_bool(
-            "AIDD_INTERN_ENABLE_PROTEINMCP"
-        )
+        # servers. Keep that cost out of the default startup path unless the
+        # user explicitly enables them.
+        return _env_bool("AIDD_INTERN_ENABLE_PROTEINMCP")
     return True
 
 
@@ -262,15 +370,12 @@ def filter_startup_mcp_servers(
     mcp_servers: dict[str, MCPServerConfig],
     *,
     hf_token: str | None,
-    domain_pack: str,
 ) -> dict[str, MCPServerConfig]:
     """Return MCP servers that should be connected during cold start."""
     return {
         name: server
         for name, server in mcp_servers.items()
-        if _mcp_server_enabled_for_startup(
-            name, hf_token=hf_token, domain_pack=domain_pack
-        )
+        if _mcp_server_enabled_for_startup(name, hf_token=hf_token)
     }
 
 
@@ -376,19 +481,17 @@ class ToolRouter:
         mcp_servers: dict[str, MCPServerConfig],
         hf_token: str | None = None,
         local_mode: bool = False,
-        domain_pack: str = DEFAULT_DOMAIN_PACK,
     ):
         self.tools: dict[str, ToolSpec] = {}
         self.mcp_servers: dict[str, dict[str, Any]] = {}
 
-        for tool in create_builtin_tools(
-            local_mode=local_mode, domain_pack=domain_pack
-        ):
+        for tool in create_builtin_tools(local_mode=local_mode):
             self.register_tool(tool)
 
         self.mcp_client: Client | None = None
         active_mcp_servers = filter_startup_mcp_servers(
-            mcp_servers, hf_token=hf_token, domain_pack=domain_pack
+            mcp_servers,
+            hf_token=hf_token,
         )
         if active_mcp_servers:
             mcp_servers_payload = {}
@@ -534,9 +637,7 @@ class ToolRouter:
 # ============================================================================
 
 
-def create_builtin_tools(
-    local_mode: bool = False, domain_pack: str = DEFAULT_DOMAIN_PACK
-) -> list[ToolSpec]:
+def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
     """Create built-in tool specifications"""
     # in order of importance
     tools = [
@@ -609,8 +710,26 @@ def create_builtin_tools(
             "GITHUB_READ_FILE_TOOL_SPEC",
             "github_read_file_handler",
         ),
+        _tool_spec_from_module(
+            "agent.tools.binder_design_tool",
+            "BINDER_DESIGN_TOOL_SPEC",
+            "binder_design_handler",
+        ),
+        _tool_spec_from_module(
+            "agent.workflows.protein_design.ace",
+            "ACE_PLAYBOOK_TOOL_SPEC",
+            "ace_playbook_handler",
+        ),
     ]
-    tools.extend(create_domain_tools(domain_pack, ToolSpec))
+    tools.extend(
+        ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            parameters=spec["parameters"],
+            handler=_lazy_handler(spec["module"], spec["handler"]),
+        )
+        for spec in _PROTEIN_DESIGN_TOOL_SPECS
+    )
 
     # Sandbox or local tools (highest priority)
     if local_mode:
