@@ -37,6 +37,7 @@ Hugging Face Jobs.
 - [AIDD Preparation Stage](#aidd-preparation-stage)
 - [Model Configuration And Switching](#model-configuration-and-switching)
 - [API Keys And Search](#api-keys-and-search)
+- [Tool Configuration](#tool-configuration)
 - [CLI Usage](#cli-usage)
 - [Web App](#web-app)
 - [Tools And MCP](#tools-and-mcp)
@@ -392,6 +393,26 @@ Run the live Google Search test only when real credentials are available:
 PYTHONDONTWRITEBYTECODE=1 AIDD_INTERN_LIVE_WEB_SEARCH_TESTS=1 \
   uv run pytest -p no:cacheprovider tests/integration/test_web_search_live.py -s
 ```
+
+## Tool Configuration
+
+The tool surface is configured from the checked-in defaults plus a small set of
+environment variables:
+
+- CLI tool config: [configs/cli_agent_config.json](configs/cli_agent_config.json)
+- Web tool config: [configs/frontend_agent_config.json](configs/frontend_agent_config.json)
+- Override the CLI config path with `AIDD_INTERN_CLI_CONFIG=/path/to/cli_agent_config.json`
+- Real Google Search in `web_search` requires both `GOOGLE_SEARCH_API_KEY` and
+  `GOOGLE_SEARCH_ENGINE_ID` (or the aliases `GOOGLE_API_KEY` and
+  `GOOGLE_CSE_ID`)
+- Set `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` to fall back to the local HTML
+  search backend when Google returns an error
+- Override the fallback search backend URL with `CLAWD_WEB_SEARCH_BASE_URL`
+- `HF_TOKEN` enables Hugging Face MCP startup
+- `AIDD_INTERN_ENABLE_PROTEINMCP=1` opts into local ProteinMCP launchers for
+  the heavier generator tools
+- `binder_design` and `aidd_prepare` are built-in binder workflow tools and do
+  not need separate MCP setup
 
 ## CLI Usage
 
