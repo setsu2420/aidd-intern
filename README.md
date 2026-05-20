@@ -42,7 +42,6 @@ Hugging Face Jobs.
 - [Project Layout](#project-layout)
 - [Development And Tests](#development-and-tests)
 - [Session Traces](#session-traces)
-- [GitHub Workflow](#github-workflow)
 - [Citation](#citation)
 
 ## What It Does
@@ -472,15 +471,6 @@ Override the trace repo template:
   "personal_trace_repo_template": "{hf_user}/my-custom-traces"
 }
 ```
-
-## GitHub Workflow
-
-- Do not commit `.env`, tokens, weights, checkpoints, databases, or generated
-  structure batches.
-- Open code changes as GitHub PRs before merging.
-- For multiline PR descriptions, prefer `gh pr edit <number> --body-file
-  <file>` or `gh pr create --body-file <file>` to preserve Markdown and shell
-  syntax.
 
 ## Citation
 

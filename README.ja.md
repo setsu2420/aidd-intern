@@ -281,13 +281,6 @@ CLI session は Claude Code JSONL 互換形式で保存し、Hugging Face privat
 {your-hf-username}/aidd-intern-sessions
 ```
 
-## GitHub ワークフロー
-
-- `.env`、token、重み、checkpoint、database、生成構造をコミットしないでください。
-- コード変更は GitHub PR でレビューしてから merge します。
-- 複数行 PR 本文は `gh pr create --body-file <file>` または
-  `gh pr edit <number> --body-file <file>` を推奨します。
-
 ## Citation
 
 ```bibtex

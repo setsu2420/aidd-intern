@@ -134,11 +134,3 @@ Focused checks:
 uv run pytest tests/unit/test_binder_design_tool.py
 uv run pytest tests/unit/test_protein_design_domain_pack.py
 ```
-
-Before a PR:
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
-```

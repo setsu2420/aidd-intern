@@ -641,13 +641,6 @@ CLI 内命令：
 }
 ```
 
-## GitHub 协作
-
-- 不要提交 `.env`、token、权重、checkpoint、数据库或生成的大型结构批次。
-- 代码改动优先通过 GitHub PR 合并，不直接推送部署分支。
-- 多行 PR 描述建议使用 `gh pr edit <number> --body-file <file>`，避免 shell
-  quoting 破坏 Markdown、环境变量或反引号。
-
 ## Cite AIDD-Intern
 
 If you use `aidd-intern` in your work, please cite it by using the following
