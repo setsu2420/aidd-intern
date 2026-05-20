@@ -3,6 +3,9 @@ Tool system for the agent
 Provides ToolSpec and ToolRouter for managing both built-in and MCP tools
 """
 
+import ast
+import importlib
+import importlib.util
 import logging
 import os
 import warnings
@@ -15,52 +18,6 @@ from mcp.types import EmbeddedResource, ImageContent, TextContent
 
 from agent.config import MCPServerConfig
 from agent.domain_packs import DEFAULT_DOMAIN_PACK, create_domain_tools
-from agent.tools.aidd_bio_tool import AIDD_BIO_TOOL_SPEC, aidd_bio_handler
-from agent.tools.dataset_tools import (
-    HF_INSPECT_DATASET_TOOL_SPEC,
-    hf_inspect_dataset_handler,
-)
-from agent.tools.docs_tools import (
-    EXPLORE_HF_DOCS_TOOL_SPEC,
-    HF_DOCS_FETCH_TOOL_SPEC,
-    explore_hf_docs_handler,
-    hf_docs_fetch_handler,
-)
-from agent.tools.github_find_examples import (
-    GITHUB_FIND_EXAMPLES_TOOL_SPEC,
-    github_find_examples_handler,
-)
-from agent.tools.github_list_repos import (
-    GITHUB_LIST_REPOS_TOOL_SPEC,
-    github_list_repos_handler,
-)
-from agent.tools.github_read_file import (
-    GITHUB_READ_FILE_TOOL_SPEC,
-    github_read_file_handler,
-)
-from agent.tools.hf_repo_files_tool import (
-    HF_REPO_FILES_TOOL_SPEC,
-    hf_repo_files_handler,
-)
-from agent.tools.hf_repo_git_tool import (
-    HF_REPO_GIT_TOOL_SPEC,
-    hf_repo_git_handler,
-)
-from agent.tools.jobs_tool import HF_JOBS_TOOL_SPEC, hf_jobs_handler
-from agent.tools.literature_lookup_tool import (
-    LITERATURE_LOOKUP_TOOL_SPEC,
-    literature_lookup_handler,
-)
-from agent.tools.notify_tool import NOTIFY_TOOL_SPEC, notify_handler
-from agent.tools.papers_tool import HF_PAPERS_TOOL_SPEC, hf_papers_handler
-from agent.tools.plan_tool import PLAN_TOOL_SPEC, plan_tool_handler
-from agent.tools.research_tool import RESEARCH_TOOL_SPEC, research_handler
-from agent.tools.role_handoff_tool import (
-    ROLE_HANDOFF_TOOL_SPEC,
-    role_handoff_handler,
-)
-from agent.tools.sandbox_tool import get_sandbox_tools
-from agent.tools.web_search_tool import WEB_SEARCH_TOOL_SPEC, web_search_handler
 
 # NOTE: Private HF repo tool disabled - replaced by hf_repo_files and hf_repo_git
 # from agent.tools.private_hf_repo_tools import (
@@ -78,6 +35,47 @@ logger = logging.getLogger(__name__)
 NOT_ALLOWED_TOOL_NAMES = ["hf_jobs", "hf_doc_search", "hf_doc_fetch", "hf_whoami"]
 HF_MCP_SERVER_NAME = "hf-mcp-server"
 PROTEIN_MCP_SERVER_PREFIX = "proteinmcp-"
+_UNRESOLVED = object()
+
+_OPENAPI_SEARCH_TOOL_SPEC = {
+    "name": "find_hf_api",
+    "description": (
+        "Find HuggingFace Hub REST API endpoints to make HTTP requests. Returns curl examples with authentication. "
+        "USE THIS TOOL when you need to call the HF Hub API directly - for operations like: "
+        "uploading/downloading files, managing repos, listing models/datasets, getting user info, "
+        "managing webhooks, collections, discussions, or any Hub interaction not covered by other tools. "
+        "**Use cases:** (1) 'Stream Space logs' -> query='space logs', "
+        "(2) 'Get Space metrics/Zero-GPU usage' -> query='space metrics', "
+        "(3) 'List organization members' -> query='organization members', "
+        "(4) 'Generate repo access token' -> query='jwt token', "
+        "(5) 'Check repo security scan' -> query='security scan'. "
+        "**Search modes:** Use 'query' for keyword search, 'tag' to browse a category, or both. "
+        "If query finds no results, falls back to showing all endpoints in the tag. "
+        "**Output:** Full endpoint details with method, path, parameters, curl command, and response schema."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Keyword search across endpoint summaries, descriptions, and operation IDs. "
+                    "Examples: 'upload file', 'create repository', 'list user models', 'delete branch', "
+                    "'webhook', 'collection', 'discussion comments'. Supports stemming (upload/uploading both work)."
+                ),
+            },
+            "tag": {
+                "type": "string",
+                "description": (
+                    "Optional API category tag. Use alone to browse all endpoints in a category, "
+                    "or combine with 'query' to search within a category. Examples: models, "
+                    "datasets, spaces, collections, webhooks, organizations."
+                ),
+            },
+        },
+        "required": [],
+    },
+}
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -85,6 +83,159 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _module_path(module_name: str) -> str | None:
+    spec = importlib.util.find_spec(module_name)
+    return spec.origin if spec and spec.origin else None
+
+
+def _resolve_static_name(name: str, constants: dict[str, Any]) -> Any:
+    if name in constants:
+        return constants[name]
+    if name.endswith("_OPERATIONS"):
+        return []
+    return _UNRESOLVED
+
+
+def _literal_from_ast(node: ast.AST, constants: dict[str, Any]) -> Any:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            resolved = _literal_from_ast(value, constants)
+            if resolved is _UNRESOLVED:
+                return _UNRESOLVED
+            parts.append(str(resolved))
+        return "".join(parts)
+    if isinstance(node, ast.FormattedValue):
+        return _literal_from_ast(node.value, constants)
+    if isinstance(node, ast.Dict):
+        result = {}
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return _UNRESOLVED
+            key = _literal_from_ast(key_node, constants)
+            value = _literal_from_ast(value_node, constants)
+            if key is _UNRESOLVED or value is _UNRESOLVED:
+                return _UNRESOLVED
+            result[key] = value
+        return result
+    if isinstance(node, ast.List):
+        values = [_literal_from_ast(item, constants) for item in node.elts]
+        if any(value is _UNRESOLVED for value in values):
+            return _UNRESOLVED
+        return values
+    if isinstance(node, ast.Tuple):
+        values = [_literal_from_ast(item, constants) for item in node.elts]
+        if any(value is _UNRESOLVED for value in values):
+            return _UNRESOLVED
+        return tuple(values)
+    if isinstance(node, ast.Set):
+        values = [_literal_from_ast(item, constants) for item in node.elts]
+        if any(value is _UNRESOLVED for value in values):
+            return _UNRESOLVED
+        return set(values)
+    if isinstance(node, ast.Name):
+        return _resolve_static_name(node.id, constants)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _literal_from_ast(node.left, constants)
+        right = _literal_from_ast(node.right, constants)
+        if left is _UNRESOLVED or right is _UNRESOLVED:
+            return _UNRESOLVED
+        return left + right
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id == "list" and len(node.args) == 1 and not node.keywords:
+            value = _literal_from_ast(node.args[0], constants)
+            if value is _UNRESOLVED:
+                return _UNRESOLVED
+            if isinstance(value, dict):
+                return list(value.keys())
+            return list(value)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        if node.func.attr == "keys" and not node.args and not node.keywords:
+            value = _literal_from_ast(node.func.value, constants)
+            if isinstance(value, dict):
+                return list(value.keys())
+    return _UNRESOLVED
+
+
+def _dict_with_static_keys(node: ast.AST) -> dict[str, None] | None:
+    if not isinstance(node, ast.Dict):
+        return None
+    keys: dict[str, None] = {}
+    for key_node in node.keys:
+        if key_node is None:
+            return None
+        try:
+            key = ast.literal_eval(key_node)
+        except Exception:
+            return None
+        if not isinstance(key, str):
+            return None
+        keys[key] = None
+    return keys
+
+
+def _static_tool_spec_from_source(module_name: str, spec_attr: str) -> dict[str, Any]:
+    path = _module_path(module_name)
+    if not path:
+        raise ValueError(f"Could not locate module {module_name}")
+
+    with open(path, encoding="utf-8") as source_file:
+        tree = ast.parse(source_file.read(), filename=path)
+
+    constants: dict[str, Any] = {}
+    wanted_node: ast.AST | None = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        value = _literal_from_ast(node.value, constants)
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if target.id == spec_attr:
+                wanted_node = node.value
+            if target.id.isupper() and value is not _UNRESOLVED:
+                constants[target.id] = value
+            elif target.id.isupper():
+                keyed_dict = _dict_with_static_keys(node.value)
+                if keyed_dict is not None:
+                    constants[target.id] = keyed_dict
+
+    if wanted_node is None:
+        raise ValueError(f"{spec_attr} not found in {module_name}")
+
+    spec = _literal_from_ast(wanted_node, constants)
+    if spec is _UNRESOLVED:
+        raise ValueError(f"{spec_attr} in {module_name} is not statically readable")
+    if not isinstance(spec, dict):
+        raise TypeError(f"{spec_attr} in {module_name} is not a dict")
+    return spec
+
+
+def _handler_params_from_source(
+    module_name: str, handler_attr: str
+) -> tuple[set[str], bool]:
+    path = _module_path(module_name)
+    if not path:
+        return set(), False
+    try:
+        with open(path, encoding="utf-8") as source_file:
+            tree = ast.parse(source_file.read(), filename=path)
+    except Exception:
+        return set(), False
+
+    for node in tree.body:
+        if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            continue
+        if node.name != handler_attr:
+            continue
+        args = node.args
+        names = {arg.arg for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+        return names, args.kwarg is not None
+    return set(), False
 
 
 def _mcp_server_enabled_for_startup(
@@ -181,6 +332,39 @@ class ToolSpec:
     handler: Optional[Callable[[dict[str, Any]], Awaitable[tuple[str, bool]]]] = None
 
 
+def _lazy_handler(module_name: str, attr_name: str) -> Callable[..., Awaitable]:
+    async def _handler(*args: Any, **kwargs: Any) -> tuple[str, bool]:
+        module = importlib.import_module(module_name)
+        handler = getattr(module, attr_name)
+        return await handler(*args, **kwargs)
+
+    params, accepts_kwargs = _handler_params_from_source(module_name, attr_name)
+    _handler._tool_param_names = params  # type: ignore[attr-defined]
+    _handler._tool_accepts_kwargs = accepts_kwargs  # type: ignore[attr-defined]
+    return _handler
+
+
+def _tool_spec_from_module(
+    module_name: str,
+    spec_attr: str,
+    handler_attr: str,
+) -> ToolSpec:
+    try:
+        spec = _static_tool_spec_from_source(module_name, spec_attr)
+    except Exception as exc:
+        logger.debug(
+            "Falling back to importing %s for %s: %s", module_name, spec_attr, exc
+        )
+        module = importlib.import_module(module_name)
+        spec = getattr(module, spec_attr)
+    return ToolSpec(
+        name=spec["name"],
+        description=spec["description"],
+        parameters=spec["parameters"],
+        handler=_lazy_handler(module_name, handler_attr),
+    )
+
+
 class ToolRouter:
     """
     Routes tool calls to appropriate handlers.
@@ -245,24 +429,18 @@ class ToolRouter:
 
     async def register_openapi_tool(self) -> None:
         """Register the OpenAPI search tool (requires async initialization)"""
-        from agent.tools.docs_tools import (
-            _get_api_search_tool_spec,
-            search_openapi_handler,
-        )
-
-        try:
-            openapi_spec = await _get_api_search_tool_spec()
-            self.register_tool(
-                ToolSpec(
-                    name=openapi_spec["name"],
-                    description=openapi_spec["description"],
-                    parameters=openapi_spec["parameters"],
-                    handler=search_openapi_handler,
-                )
+        openapi_spec = _OPENAPI_SEARCH_TOOL_SPEC
+        self.register_tool(
+            ToolSpec(
+                name=openapi_spec["name"],
+                description=openapi_spec["description"],
+                parameters=openapi_spec["parameters"],
+                handler=_lazy_handler(
+                    "agent.tools.docs_tools", "search_openapi_handler"
+                ),
             )
-            logger.info(f"Loaded OpenAPI search tool: {openapi_spec['name']}")
-        except Exception as e:
-            logger.warning("Failed to load OpenAPI search tool: %s", e)
+        )
+        logger.info(f"Loaded OpenAPI search tool: {openapi_spec['name']}")
 
     def get_tool_specs_for_llm(self) -> list[dict[str, Any]]:
         """Get tool specifications in OpenAI format"""
@@ -321,13 +499,16 @@ class ToolRouter:
         # Check if this is a built-in tool with a handler
         tool = self.tools.get(tool_name)
         if tool and tool.handler:
-            import inspect
-
             # Check if handler accepts session argument
-            sig = inspect.signature(tool.handler)
-            if "session" in sig.parameters:
+            params = getattr(tool.handler, "_tool_param_names", None)
+            accepts_kwargs = getattr(tool.handler, "_tool_accepts_kwargs", False)
+            if params is None:
+                import inspect
+
+                params = set(inspect.signature(tool.handler).parameters)
+            if "session" in params or accepts_kwargs:
                 # Check if handler also accepts tool_call_id parameter
-                if "tool_call_id" in sig.parameters:
+                if "tool_call_id" in params or accepts_kwargs:
                     return await tool.handler(
                         arguments, session=session, tool_call_id=tool_call_id
                     )
@@ -359,113 +540,74 @@ def create_builtin_tools(
     """Create built-in tool specifications"""
     # in order of importance
     tools = [
-        # Research sub-agent (delegates to read-only tools in independent context)
-        ToolSpec(
-            name=RESEARCH_TOOL_SPEC["name"],
-            description=RESEARCH_TOOL_SPEC["description"],
-            parameters=RESEARCH_TOOL_SPEC["parameters"],
-            handler=research_handler,
+        _tool_spec_from_module(
+            "agent.tools.research_tool", "RESEARCH_TOOL_SPEC", "research_handler"
         ),
-        # Documentation search tools
-        ToolSpec(
-            name=EXPLORE_HF_DOCS_TOOL_SPEC["name"],
-            description=EXPLORE_HF_DOCS_TOOL_SPEC["description"],
-            parameters=EXPLORE_HF_DOCS_TOOL_SPEC["parameters"],
-            handler=explore_hf_docs_handler,
+        _tool_spec_from_module(
+            "agent.tools.docs_tools",
+            "EXPLORE_HF_DOCS_TOOL_SPEC",
+            "explore_hf_docs_handler",
         ),
-        ToolSpec(
-            name=HF_DOCS_FETCH_TOOL_SPEC["name"],
-            description=HF_DOCS_FETCH_TOOL_SPEC["description"],
-            parameters=HF_DOCS_FETCH_TOOL_SPEC["parameters"],
-            handler=hf_docs_fetch_handler,
+        _tool_spec_from_module(
+            "agent.tools.docs_tools", "HF_DOCS_FETCH_TOOL_SPEC", "hf_docs_fetch_handler"
         ),
-        # Paper discovery and reading
-        ToolSpec(
-            name=LITERATURE_LOOKUP_TOOL_SPEC["name"],
-            description=LITERATURE_LOOKUP_TOOL_SPEC["description"],
-            parameters=LITERATURE_LOOKUP_TOOL_SPEC["parameters"],
-            handler=literature_lookup_handler,
+        _tool_spec_from_module(
+            "agent.tools.literature_lookup_tool",
+            "LITERATURE_LOOKUP_TOOL_SPEC",
+            "literature_lookup_handler",
         ),
-        ToolSpec(
-            name=HF_PAPERS_TOOL_SPEC["name"],
-            description=HF_PAPERS_TOOL_SPEC["description"],
-            parameters=HF_PAPERS_TOOL_SPEC["parameters"],
-            handler=hf_papers_handler,
+        _tool_spec_from_module(
+            "agent.tools.papers_tool", "HF_PAPERS_TOOL_SPEC", "hf_papers_handler"
         ),
-        ToolSpec(
-            name=WEB_SEARCH_TOOL_SPEC["name"],
-            description=WEB_SEARCH_TOOL_SPEC["description"],
-            parameters=WEB_SEARCH_TOOL_SPEC["parameters"],
-            handler=web_search_handler,
+        _tool_spec_from_module(
+            "agent.tools.web_search_tool", "WEB_SEARCH_TOOL_SPEC", "web_search_handler"
         ),
-        ToolSpec(
-            name=AIDD_BIO_TOOL_SPEC["name"],
-            description=AIDD_BIO_TOOL_SPEC["description"],
-            parameters=AIDD_BIO_TOOL_SPEC["parameters"],
-            handler=aidd_bio_handler,
+        _tool_spec_from_module(
+            "agent.tools.aidd_bio_tool", "AIDD_BIO_TOOL_SPEC", "aidd_bio_handler"
         ),
-        # Dataset inspection tool (unified)
-        ToolSpec(
-            name=HF_INSPECT_DATASET_TOOL_SPEC["name"],
-            description=HF_INSPECT_DATASET_TOOL_SPEC["description"],
-            parameters=HF_INSPECT_DATASET_TOOL_SPEC["parameters"],
-            handler=hf_inspect_dataset_handler,
+        _tool_spec_from_module(
+            "agent.tools.dataset_tools",
+            "HF_INSPECT_DATASET_TOOL_SPEC",
+            "hf_inspect_dataset_handler",
         ),
-        # Planning and job management tools
-        ToolSpec(
-            name=PLAN_TOOL_SPEC["name"],
-            description=PLAN_TOOL_SPEC["description"],
-            parameters=PLAN_TOOL_SPEC["parameters"],
-            handler=plan_tool_handler,
+        _tool_spec_from_module(
+            "agent.tools.plan_tool", "PLAN_TOOL_SPEC", "plan_tool_handler"
         ),
-        ToolSpec(
-            name=ROLE_HANDOFF_TOOL_SPEC["name"],
-            description=ROLE_HANDOFF_TOOL_SPEC["description"],
-            parameters=ROLE_HANDOFF_TOOL_SPEC["parameters"],
-            handler=role_handoff_handler,
+        _tool_spec_from_module(
+            "agent.tools.role_handoff_tool",
+            "ROLE_HANDOFF_TOOL_SPEC",
+            "role_handoff_handler",
         ),
-        ToolSpec(
-            name=NOTIFY_TOOL_SPEC["name"],
-            description=NOTIFY_TOOL_SPEC["description"],
-            parameters=NOTIFY_TOOL_SPEC["parameters"],
-            handler=notify_handler,
+        _tool_spec_from_module(
+            "agent.tools.notify_tool", "NOTIFY_TOOL_SPEC", "notify_handler"
         ),
-        ToolSpec(
-            name=HF_JOBS_TOOL_SPEC["name"],
-            description=HF_JOBS_TOOL_SPEC["description"],
-            parameters=HF_JOBS_TOOL_SPEC["parameters"],
-            handler=hf_jobs_handler,
+        _tool_spec_from_module(
+            "agent.tools.jobs_tool", "HF_JOBS_TOOL_SPEC", "hf_jobs_handler"
         ),
-        # HF Repo management tools
-        ToolSpec(
-            name=HF_REPO_FILES_TOOL_SPEC["name"],
-            description=HF_REPO_FILES_TOOL_SPEC["description"],
-            parameters=HF_REPO_FILES_TOOL_SPEC["parameters"],
-            handler=hf_repo_files_handler,
+        _tool_spec_from_module(
+            "agent.tools.hf_repo_files_tool",
+            "HF_REPO_FILES_TOOL_SPEC",
+            "hf_repo_files_handler",
         ),
-        ToolSpec(
-            name=HF_REPO_GIT_TOOL_SPEC["name"],
-            description=HF_REPO_GIT_TOOL_SPEC["description"],
-            parameters=HF_REPO_GIT_TOOL_SPEC["parameters"],
-            handler=hf_repo_git_handler,
+        _tool_spec_from_module(
+            "agent.tools.hf_repo_git_tool",
+            "HF_REPO_GIT_TOOL_SPEC",
+            "hf_repo_git_handler",
         ),
-        ToolSpec(
-            name=GITHUB_FIND_EXAMPLES_TOOL_SPEC["name"],
-            description=GITHUB_FIND_EXAMPLES_TOOL_SPEC["description"],
-            parameters=GITHUB_FIND_EXAMPLES_TOOL_SPEC["parameters"],
-            handler=github_find_examples_handler,
+        _tool_spec_from_module(
+            "agent.tools.github_find_examples",
+            "GITHUB_FIND_EXAMPLES_TOOL_SPEC",
+            "github_find_examples_handler",
         ),
-        ToolSpec(
-            name=GITHUB_LIST_REPOS_TOOL_SPEC["name"],
-            description=GITHUB_LIST_REPOS_TOOL_SPEC["description"],
-            parameters=GITHUB_LIST_REPOS_TOOL_SPEC["parameters"],
-            handler=github_list_repos_handler,
+        _tool_spec_from_module(
+            "agent.tools.github_list_repos",
+            "GITHUB_LIST_REPOS_TOOL_SPEC",
+            "github_list_repos_handler",
         ),
-        ToolSpec(
-            name=GITHUB_READ_FILE_TOOL_SPEC["name"],
-            description=GITHUB_READ_FILE_TOOL_SPEC["description"],
-            parameters=GITHUB_READ_FILE_TOOL_SPEC["parameters"],
-            handler=github_read_file_handler,
+        _tool_spec_from_module(
+            "agent.tools.github_read_file",
+            "GITHUB_READ_FILE_TOOL_SPEC",
+            "github_read_file_handler",
         ),
     ]
     tools.extend(create_domain_tools(domain_pack, ToolSpec))
@@ -476,6 +618,8 @@ def create_builtin_tools(
 
         tools = get_local_tools() + tools
     else:
+        from agent.tools.sandbox_tool import get_sandbox_tools
+
         tools = get_sandbox_tools() + tools
 
     tool_names = ", ".join([t.name for t in tools])

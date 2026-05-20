@@ -3,7 +3,7 @@ import pytest
 from agent.core import model_switcher
 from agent.core.local_models import is_local_model_id
 from agent.core.openai_compatible_models import is_openai_compatible_model_id
-from agent.core.session import _get_max_tokens_safe
+from agent.core.session import _get_max_tokens_safe, _model_info_candidates
 
 
 def test_local_model_helper_accepts_supported_prefixes():
@@ -41,6 +41,20 @@ def test_model_switcher_rejects_empty_or_whitespace_local_ids():
     assert not model_switcher.is_valid_model_id("openrouter/openai/gpt 5.2")
 
 
+def test_model_switcher_resolves_catalog_alias(monkeypatch):
+    class Catalog:
+        def resolve(self, selector):
+            assert selector == "flash"
+            return "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+
+    monkeypatch.setattr(model_switcher, "load_model_catalog", lambda _config: Catalog())
+
+    assert (
+        model_switcher.resolve_selector("flash", object())
+        == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+    )
+
+
 def test_openai_compat_prefix_is_not_supported():
     assert not model_switcher.is_valid_model_id("openai-compat/custom-model")
 
@@ -66,10 +80,106 @@ def test_unknown_local_model_context_defaults_to_65k(monkeypatch):
     assert _get_max_tokens_safe("vllm/local-small") == 65_536
 
 
+def test_unknown_remote_openai_compatible_context_uses_hosted_default(monkeypatch):
+    def missing_model_info(_model):
+        raise Exception("unknown model")
+
+    monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setattr("litellm.get_model_info", missing_model_info)
+
+    assert _get_max_tokens_safe("openrouter/vendor/new-long-context-model") == 200_000
+
+
+def test_siliconflow_deepseek_v4_flash_uses_provider_model_window(monkeypatch):
+    def missing_model_info(_model):
+        raise Exception("unknown model")
+
+    monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("SILICONFLOW_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setattr("litellm.get_model_info", missing_model_info)
+
+    assert (
+        _get_max_tokens_safe("siliconflow/deepseek-ai/DeepSeek-V4-Flash") == 1_000_000
+    )
+
+
+def test_openai_compatible_context_window_env_override(monkeypatch):
+    def missing_model_info(_model):
+        raise Exception("unknown model")
+
+    monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("SILICONFLOW_MODEL_MAX_TOKENS", "262144")
+    monkeypatch.setattr("litellm.get_model_info", missing_model_info)
+
+    assert _get_max_tokens_safe("siliconflow/deepseek-ai/DeepSeek-V4-Flash") == 262_144
+
+
+def test_openai_compatible_litellm_lookup_strips_app_prefix(monkeypatch):
+    seen = []
+
+    def fake_model_info(model):
+        seen.append(model)
+        if model == "openai/gpt-5.2":
+            return {"max_input_tokens": 272_000}
+        raise Exception("unknown model")
+
+    monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setattr("litellm.get_model_info", fake_model_info)
+
+    assert _get_max_tokens_safe("openrouter/openai/gpt-5.2") == 272_000
+    assert seen == [
+        "openrouter/openai/gpt-5.2",
+        "openai/gpt-5.2",
+    ]
+
+
+def test_model_info_candidates_strip_remote_app_prefix_and_tags():
+    assert _model_info_candidates("siliconflow/deepseek-ai/DeepSeek-V4-Flash") == [
+        "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+        "deepseek-ai/DeepSeek-V4-Flash",
+    ]
+    assert _model_info_candidates("openrouter/openai/gpt-5.2") == [
+        "openrouter/openai/gpt-5.2",
+        "openai/gpt-5.2",
+    ]
+
+
 def test_context_window_env_override(monkeypatch):
+    monkeypatch.delenv("AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS", raising=False)
     monkeypatch.setenv("AIDD_INTERN_MODEL_MAX_TOKENS", "32768")
 
     assert _get_max_tokens_safe("vllm/local-small") == 32_768
+
+
+def test_local_context_window_env_override(monkeypatch):
+    def missing_model_info(_model):
+        raise Exception("unknown model")
+
+    monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS", "131072")
+    monkeypatch.setattr("litellm.get_model_info", missing_model_info)
+
+    assert _get_max_tokens_safe("vllm/local-small") == 131_072
+
+
+def test_legacy_context_window_env_no_longer_caps_remote_models(
+    monkeypatch,
+):
+    monkeypatch.setenv("AIDD_INTERN_MODEL_MAX_TOKENS", "32768")
+    monkeypatch.setenv("SILICONFLOW_MODEL_MAX_TOKENS", "262144")
+
+    assert _get_max_tokens_safe("siliconflow/deepseek-ai/DeepSeek-V4-Flash") == 262_144
+
+
+def test_force_context_window_env_override_has_highest_precedence(
+    monkeypatch,
+):
+    monkeypatch.setenv("AIDD_INTERN_MODEL_MAX_TOKENS", "131072")
+    monkeypatch.setenv("AIDD_INTERN_FORCE_MODEL_MAX_TOKENS", "32768")
+    monkeypatch.setenv("SILICONFLOW_MODEL_MAX_TOKENS", "262144")
+
+    assert _get_max_tokens_safe("siliconflow/deepseek-ai/DeepSeek-V4-Flash") == 32_768
 
 
 def test_openai_compatible_models_skip_hf_router_catalog_output():

@@ -44,6 +44,43 @@ def test_available_models_include_configured_local_vllm(monkeypatch):
     assert models[0]["tier"] == "local"
 
 
+def test_available_models_come_from_shared_catalog(monkeypatch, tmp_path):
+    models_path = tmp_path / "models.json"
+    models_path.write_text(
+        """
+        {
+          "default": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+          "models": [
+            {
+              "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+              "label": "DeepSeek Flash",
+              "provider": "siliconflow",
+              "tier": "external",
+              "aliases": ["flash"]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        agent.session_manager.config,
+        "models_config",
+        str(models_path),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        agent.session_manager.config,
+        "model_name",
+        "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+    )
+
+    models = agent._available_models()
+
+    assert models[0]["id"] == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+    assert models[0]["aliases"] == ["flash"]
+
+
 @pytest.mark.asyncio
 async def test_default_premium_session_falls_back_to_free_model(monkeypatch):
     monkeypatch.setattr(

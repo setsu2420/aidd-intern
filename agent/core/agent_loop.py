@@ -40,12 +40,6 @@ from agent.core.session import (
     _get_max_tokens_safe,
 )
 from agent.core.tools import ToolRouter
-from agent.tools.jobs_tool import CPU_FLAVORS
-from agent.tools.sandbox_tool import (
-    DEFAULT_CPU_SANDBOX_HARDWARE,
-    start_cpu_sandbox_preload,
-    teardown_session_sandbox,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +50,20 @@ _MALFORMED_TOOL_SUFFIX = "' had malformed JSON arguments"
 _NO_TOOL_INCOMPLETE_PLAN_RETRY_LIMIT = 2
 _LOCAL_LLM_PREFLIGHT_TIMEOUT_SECONDS = 1.0
 _SILICONFLOW_FALLBACK_MODEL = "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
+DEFAULT_CPU_SANDBOX_HARDWARE = "cpu-basic"
+CPU_FLAVORS = {"cpu-basic", "cpu-upgrade"}
+
+
+def start_cpu_sandbox_preload(session: Session) -> None:
+    from agent.tools.sandbox_tool import start_cpu_sandbox_preload as _start
+
+    _start(session)
+
+
+async def teardown_session_sandbox(session: Session) -> None:
+    from agent.tools.sandbox_tool import teardown_session_sandbox as _teardown
+
+    await _teardown(session)
 
 
 class LocalLLMConnectionError(ConnectionError):

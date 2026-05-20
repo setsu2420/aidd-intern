@@ -19,19 +19,30 @@ adapts policy by model window.
 
 Context size is resolved in this order:
 
-1. `AIDD_INTERN_MODEL_MAX_TOKENS`, when explicitly set.
-2. `litellm.get_model_info(model)["max_input_tokens"]`, when available.
-3. Conservative local/OpenAI-compatible default: `65_536`.
-4. Hosted-model fallback: `200_000`.
-5. Provider overflow errors during runtime. If the provider reports a smaller
+1. `AIDD_INTERN_FORCE_MODEL_MAX_TOKENS`, when explicitly set.
+2. Provider/model-specific OpenAI-compatible settings, such as
+   `SILICONFLOW_MODEL_MAX_TOKENS`, `OPENROUTER_MODEL_MAX_TOKENS`, or a built-in
+   known provider model window.
+3. `litellm.get_model_info(model)["max_input_tokens"]`, when available.
+4. `AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS`, legacy
+   `AIDD_INTERN_MODEL_MAX_TOKENS`, then conservative local default `65_536`,
+   for local OpenAI-compatible model ids.
+5. Hosted-model fallback: `200_000`.
+6. Provider overflow errors during runtime. If the provider reports a smaller
    window such as `maximum context length is 65536`, the session immediately
    shrinks its local budget to that value.
 
 For local 65K models, set:
 
 ```bash
-export AIDD_INTERN_MODEL_MAX_TOKENS=65536
+export AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS=65536
 ```
+
+Use `AIDD_INTERN_FORCE_MODEL_MAX_TOKENS` only when you deliberately want to
+force the same window for every model in the process. The older
+`AIDD_INTERN_MODEL_MAX_TOKENS` name is treated as a local-model compatibility
+override so a stale shell export such as `AIDD_INTERN_MODEL_MAX_TOKENS=65536`
+does not cap remote models that support larger context windows.
 
 ## Window-Specific Policy
 
@@ -86,4 +97,3 @@ For large hosted models:
 - `agent/context_manager/manager.py`: compaction policy and summarization.
 - `agent/core/agent_loop.py`: per-call output budgeting and overflow recovery.
 - `agent/domain_packs/protein_design/ace.py`: structured campaign memory.
-

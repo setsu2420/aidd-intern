@@ -9,16 +9,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import litellm
 from litellm import Message
 
-from agent.config import Config
 from agent.context_manager.manager import ContextManager
 from agent.domain_packs import DEFAULT_DOMAIN_PACK
 from agent.messaging.gateway import NotificationGateway
 from agent.messaging.models import NotificationRequest
+
+if TYPE_CHECKING:
+    from agent.config import Config
 
 litellm.drop_params = True
 litellm.suppress_debug_info = True
@@ -28,37 +30,63 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_TOKENS = 200_000
 _DEFAULT_LOCAL_MAX_TOKENS = 65_536
+_MODEL_MAX_TOKENS_ENV = "AIDD_INTERN_MODEL_MAX_TOKENS"
+_FORCE_MODEL_MAX_TOKENS_ENV = "AIDD_INTERN_FORCE_MODEL_MAX_TOKENS"
+_LOCAL_MODEL_MAX_TOKENS_ENV = "AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS"
 _TURN_COMPLETE_NOTIFICATION_CHARS = 39000
 
 DEFAULT_SESSION_LOG_DIR = Path("session_logs")
+
+
+def _parse_positive_int(value: str) -> int | None:
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _get_max_tokens_safe(model_name: str) -> int:
     """Return the max input-context tokens for a model.
 
     Primary source: ``litellm.get_model_info(model)['max_input_tokens']`` —
-    LiteLLM maintains an upstream catalog that knows Claude Opus 4.6 is
-    1M, GPT-5 is 272k, Sonnet 4.5 is 200k, and so on. Strips any HF routing
-    suffix / huggingface/ prefix so tagged ids ('moonshotai/Kimi-K2.6:cheapest')
-    look up the bare model. Falls back to a conservative 200k default for
-    models not in the catalog (typically HF-router-only models).
+    LiteLLM maintains an upstream catalog for many hosted models. For custom
+    OpenAI-compatible providers, we strip the app routing prefix and then use
+    provider-level context defaults or environment overrides when LiteLLM has
+    no catalog entry. Local OpenAI-compatible servers remain conservative by
+    default because they often reject requests at much smaller windows.
     """
     from litellm import get_model_info
 
-    override = os.environ.get("AIDD_INTERN_MODEL_MAX_TOKENS")
-    if override:
-        try:
-            value = int(override)
-        except ValueError:
-            logger.warning("Ignoring invalid AIDD_INTERN_MODEL_MAX_TOKENS=%r", override)
-        else:
-            if value > 0:
-                return value
+    forced_override = _env_positive_int(_FORCE_MODEL_MAX_TOKENS_ENV)
+    if forced_override is not None:
+        return forced_override
 
-    candidates = [model_name]
-    stripped = model_name.removeprefix("huggingface/").split(":", 1)[0]
-    if stripped != model_name:
-        candidates.append(stripped)
+    compatible_window = None
+    is_local = False
+    try:
+        from agent.core.local_models import is_local_model_id
+        from agent.core.openai_compatible_models import (
+            openai_compatible_context_window,
+        )
+
+        compatible_window = openai_compatible_context_window(model_name)
+        is_local = is_local_model_id(model_name)
+    except Exception:
+        pass
+
+    if compatible_window is not None:
+        return compatible_window
+
+    if is_local:
+        local_override = _env_positive_int(_LOCAL_MODEL_MAX_TOKENS_ENV)
+        if local_override is not None:
+            return local_override
+        legacy_local_override = _env_positive_int(_MODEL_MAX_TOKENS_ENV)
+        if legacy_local_override is not None:
+            return legacy_local_override
+
+    candidates = _model_info_candidates(model_name)
     for candidate in candidates:
         try:
             info = get_model_info(candidate)
@@ -67,25 +95,61 @@ def _get_max_tokens_safe(model_name: str) -> int:
                 return max_input
         except Exception:
             continue
-    try:
-        from agent.core.local_models import is_local_model_id
-        from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
-        if is_local_model_id(model_name) or is_openai_compatible_model_id(model_name):
-            logger.info(
-                "No litellm.get_model_info entry for %s, falling back to local/compatible %d",
-                model_name,
-                _DEFAULT_LOCAL_MAX_TOKENS,
-            )
-            return _DEFAULT_LOCAL_MAX_TOKENS
-    except Exception:
-        pass
+    if is_local:
+        logger.info(
+            "No litellm.get_model_info entry for %s, falling back to local %d",
+            model_name,
+            _DEFAULT_LOCAL_MAX_TOKENS,
+        )
+        return _DEFAULT_LOCAL_MAX_TOKENS
+
     logger.info(
         "No litellm.get_model_info entry for %s, falling back to %d",
         model_name,
         _DEFAULT_MAX_TOKENS,
     )
     return _DEFAULT_MAX_TOKENS
+
+
+def _model_info_candidates(model_name: str) -> list[str]:
+    """Return LiteLLM model-info lookup candidates in preference order."""
+    from agent.core.openai_compatible_models import (
+        openai_compatible_model_name,
+        openai_compatible_model_provider,
+    )
+
+    candidates: list[str] = []
+
+    def add(candidate: str | None) -> None:
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    add(model_name)
+    stripped = model_name.removeprefix("huggingface/").split(":", 1)[0]
+    add(stripped)
+
+    provider = openai_compatible_model_provider(model_name)
+    provider_model = openai_compatible_model_name(model_name)
+    if provider is not None and provider_model is not None:
+        add(provider_model)
+        add(provider_model.split(":", 1)[0])
+        provider_prefix = str(provider.get("litellm_provider_prefix") or "").strip()
+        if provider_prefix:
+            add(f"{provider_prefix}{provider_model}")
+            add(f"{provider_prefix}{provider_model.split(':', 1)[0]}")
+
+    return candidates
+
+
+def _env_positive_int(env_name: str) -> int | None:
+    raw = os.environ.get(env_name)
+    if not raw:
+        return None
+    value = _parse_positive_int(raw)
+    if value is None:
+        logger.warning("Ignoring invalid %s=%r", env_name, raw)
+    return value
 
 
 class OpType(Enum):
@@ -115,7 +179,7 @@ class Session:
     def __init__(
         self,
         event_queue: asyncio.Queue,
-        config: Config,
+        config: "Config",
         tool_router=None,
         context_manager: ContextManager | None = None,
         hf_token: str | None = None,

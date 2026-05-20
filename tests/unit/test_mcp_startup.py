@@ -1,3 +1,6 @@
+import json
+import subprocess
+import sys
 from types import SimpleNamespace
 
 from agent.core import tools as tools_module
@@ -79,3 +82,40 @@ def test_tool_router_forwards_hf_token_as_bearer_header(monkeypatch):
 
     config = seen["payload"]["mcpServers"]["hf-mcp-server"]
     assert config["headers"]["Authorization"] == "Bearer hf-token"
+
+
+def test_builtin_tool_registration_keeps_heavy_tool_modules_lazy():
+    script = """
+import json
+import sys
+
+from agent.core.tools import create_builtin_tools
+
+steps = []
+steps.append("step 1: import create_builtin_tools")
+tools = create_builtin_tools(local_mode=True)
+steps.append(f"step 2: registered {len(tools)} local-mode tools")
+loaded = sorted(
+    name for name in (
+        "agent.tools.docs_tools",
+        "agent.tools.github_read_file",
+        "whoosh",
+        "nbconvert",
+    )
+    if name in sys.modules
+)
+steps.append(f"step 3: heavy modules loaded: {loaded}")
+print(json.dumps({"steps": steps, "loaded": loaded}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+
+    assert payload["steps"][0] == "step 1: import create_builtin_tools"
+    assert payload["steps"][1].startswith("step 2: registered ")
+    assert payload["steps"][2] == "step 3: heavy modules loaded: []"
+    assert payload["loaded"] == []

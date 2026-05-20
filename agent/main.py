@@ -74,6 +74,13 @@ def _get_submission_loop():
     loop = globals().get("submission_loop")
     if loop is not None:
         return loop
+    return None
+
+
+def _load_submission_loop():
+    loop = globals().get("submission_loop")
+    if loop is not None:
+        return loop
 
     from agent.core.agent_loop import submission_loop as loop
 
@@ -1098,15 +1105,33 @@ async def _handle_slash_command(
     if command == "/model":
         from agent.core import model_switcher
         from agent.core.hf_tokens import resolve_hf_token
+        from agent.core.model_catalog import load_model_catalog, set_default_model
 
         console = td.get_console()
-        if not arg:
+        if not arg or arg.lower() in {"list", "ls"}:
             model_switcher.print_model_listing(config, console)
             return None
-        if not model_switcher.is_valid_model_id(arg):
-            model_switcher.print_invalid_id(arg, console)
+        if arg.lower() == "status":
+            catalog = load_model_catalog(config)
+            console.print(f"[bold]Current model:[/bold] {config.model_name}")
+            console.print(f"[bold]Default model:[/bold] {catalog.default or '(none)'}")
+            console.print(f"[dim]Model file: {catalog.path}[/dim]")
             return None
-        normalized = arg.removeprefix("huggingface/")
+
+        save_default = False
+        selector = arg
+        for prefix in ("--global ", "--save ", "--default "):
+            if selector.startswith(prefix):
+                save_default = True
+                selector = selector[len(prefix) :].strip()
+                break
+        if selector in {"--global", "--save", "--default"}:
+            console.print("[bold red]Missing model id after --global.[/bold red]")
+            return None
+        normalized = model_switcher.resolve_selector(selector, config)
+        if not model_switcher.is_valid_model_id(normalized):
+            model_switcher.print_invalid_id(selector, console)
+            return None
         session = session_holder[0] if session_holder else None
         await model_switcher.probe_and_switch_model(
             normalized,
@@ -1115,6 +1140,10 @@ async def _handle_slash_command(
             console,
             resolve_hf_token(),
         )
+        if config.model_name == normalized and save_default:
+            path = set_default_model(normalized, config)
+            console.print(f"[green]Default model saved:[/green] {normalized}")
+            console.print(f"[dim]{path}[/dim]")
         return None
 
     if command == "/yolo":
@@ -1302,7 +1331,6 @@ async def main(
     prompt_session = _get_prompt_session_factory()()
 
     load_config_fn = _get_load_config()
-    submission_loop_fn = _get_submission_loop()
     resolve_hf_token_fn = _get_resolve_hf_token()
     notification_gateway_cls = _get_notification_gateway_cls()
     banner_fn = _get_print_banner()
@@ -1335,6 +1363,7 @@ async def main(
         hf_user=hf_user,
         tool_runtime=_tool_runtime_label(local_mode),
     )
+    submission_loop_fn = _load_submission_loop()
 
     # Pre-warm the HF router catalog in the background so /model switches
     # don't block on a network fetch.
@@ -1565,7 +1594,6 @@ async def headless_main(
     from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
     load_config_fn = _get_load_config()
-    submission_loop_fn = _get_submission_loop()
     resolve_hf_token_fn = _get_resolve_hf_token()
     notification_gateway_cls = _get_notification_gateway_cls()
 
@@ -1620,6 +1648,7 @@ async def headless_main(
     submission_queue: asyncio.Queue = asyncio.Queue()
     event_queue: asyncio.Queue = asyncio.Queue()
 
+    submission_loop_fn = _load_submission_loop()
     tool_router = _create_tool_router(
         config.mcpServers,
         hf_token=hf_token,

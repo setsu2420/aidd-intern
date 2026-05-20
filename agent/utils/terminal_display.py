@@ -224,12 +224,6 @@ def print_banner(
             f"{_I}[muted]Tool runtime:[/muted] {tool_runtime or 'local filesystem'}"
         )
         _console.print(f"{_I}[muted]Tools:[/muted] loading...")
-        _console.print()
-        _console.print(
-            f"{_I}[tool.name]/help[/tool.name] [muted]for commands[/muted] · "
-            f"[tool.name]/model[/tool.name] [muted]to switch[/muted] · "
-            f"[tool.name]/quit[/tool.name] [muted]to exit[/muted]"
-        )
         return
 
     from agent.utils.particle_logo import run_particle_logo
@@ -252,8 +246,6 @@ def print_banner(
         (f"{_I}  Model: {model_label}", dim_gold),
         (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", dim_gold),
         (f"{_I}  Tools: loading...", dim_gold),
-        ("", ""),
-        (f"{_I}/help for commands · /model to switch · /quit to exit", gold),
     ]
 
     run_boot_sequence(_console, boot_lines)

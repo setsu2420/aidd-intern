@@ -1,6 +1,7 @@
 """Regression tests for interactive CLI rendering and research model routing."""
 
 import asyncio
+import json
 import sys
 from io import StringIO
 from types import SimpleNamespace
@@ -100,6 +101,30 @@ def test_context_status_formats_live_usage():
     )
 
 
+def test_banner_defers_command_hint_until_ready(monkeypatch):
+    output = StringIO()
+    console = Console(
+        file=output,
+        color_system=None,
+        theme=terminal_display._THEME,
+        width=120,
+    )
+    monkeypatch.setattr(terminal_display, "_console", console)
+    monkeypatch.delenv("AIDD_INTERN_BOOT_ANIMATION", raising=False)
+
+    terminal_display.print_banner(
+        model="siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+        hf_user=None,
+        tool_runtime="local filesystem",
+    )
+    terminal_display.print_init_done(tool_count=23)
+
+    rendered = output.getvalue()
+    assert rendered.count("/help for commands") == 1
+    assert "Tools: loading..." in rendered
+    assert "Tools: 23 loaded" in rendered
+
+
 @pytest.mark.asyncio
 async def test_get_user_input_attaches_context_toolbar(monkeypatch):
     class FakeContext:
@@ -190,6 +215,57 @@ def test_cli_forwards_sandbox_flag_to_interactive_main(monkeypatch):
     main_mod.cli()
 
     assert seen == {"model": None, "sandbox_tools": True, "domain_pack": None}
+
+
+@pytest.mark.asyncio
+async def test_model_command_global_saves_catalog_default(monkeypatch, tmp_path):
+    models_path = tmp_path / "models.json"
+    models_path.write_text(
+        json.dumps(
+            {
+                "default": "openrouter/openai/gpt-5.2",
+                "models": [
+                    {
+                        "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
+                        "label": "DeepSeek Flash",
+                        "aliases": ["flash"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class Config:
+        model_name = "openrouter/openai/gpt-5.2"
+        models_config = str(models_path)
+        reasoning_effort = None
+
+    class Session:
+        model_effective_effort = {}
+
+        def update_model(self, model_id):
+            Config.model_name = model_id
+
+    async def fake_probe(model_id, config, session, console, hf_token):
+        session.update_model(model_id)
+
+    from agent.core import model_switcher
+
+    monkeypatch.setattr(model_switcher, "probe_and_switch_model", fake_probe)
+    monkeypatch.setattr("agent.core.hf_tokens.resolve_hf_token", lambda: None)
+
+    result = await main_mod._handle_slash_command(
+        "/model --global flash",
+        Config,
+        [Session()],
+        asyncio.Queue(),
+        [0],
+    )
+
+    assert result is None
+    payload = json.loads(models_path.read_text(encoding="utf-8"))
+    assert payload["default"] == "siliconflow/deepseek-ai/DeepSeek-V4-Flash"
 
 
 def test_cli_forwards_sandbox_flag_to_headless_main(monkeypatch):
