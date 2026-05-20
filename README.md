@@ -103,6 +103,20 @@ has an SSH key with access to the repository. Run the `uv` commands from inside
 `aidd-intern`, because `uv sync` and `uv tool install -e .` read this project's
 `pyproject.toml`.
 
+If a server fails during `git clone` with `GnuTLS recv error (-110)` or another
+GitHub HTTPS transport error, retry with Git HTTP/1.1:
+
+```bash
+git -c http.version=HTTP/1.1 clone --depth 1 \
+  https://github.com/setsu2420/aidd-intern.git
+```
+
+When you need one command that can also fall back to a GitHub source archive:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
+```
+
 Before the first real LLM call, edit `.env` and set at least one API key that
 matches the model you plan to use. For example, set `OPENROUTER_API_KEY` for
 `openrouter/openai/gpt-5.2`, `OPENAI_API_KEY` for `openai/gpt-5.5`,

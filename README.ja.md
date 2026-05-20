@@ -74,6 +74,20 @@ cp .env.example .env
 `uv tool install -e .` は `aidd-intern` ディレクトリ内で実行してください。
 どちらもその場所の `pyproject.toml` を読みます。
 
+`git clone` が `GnuTLS recv error (-110)` などの GitHub HTTPS transport error
+で失敗する場合は、Git HTTP/1.1 を強制して再試行してください:
+
+```bash
+git -c http.version=HTTP/1.1 clone --depth 1 \
+  https://github.com/setsu2420/aidd-intern.git
+```
+
+GitHub source archive fallback 付きの一括 bootstrap が必要な場合:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
+```
+
 起動:
 
 ```bash

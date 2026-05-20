@@ -18,6 +18,7 @@ README_FILES = [
 ]
 ENV_EXAMPLE = PROJECT_ROOT / ".env.example"
 UPDATE_SCRIPT = PROJECT_ROOT / "scripts" / "update-local.sh"
+BOOTSTRAP_SCRIPT = PROJECT_ROOT / "scripts" / "bootstrap-source.sh"
 DOCTOR_MODULE = PROJECT_ROOT / "agent" / "core" / "doctor.py"
 AIDD_PREPARE_MODULE = PROJECT_ROOT / "agent" / "tools" / "aidd_prepare_tool.py"
 
@@ -50,6 +51,10 @@ def test_readme_quick_start_uses_public_https_clone_url():
 
         print("STEP 5: Checking the README explains why uv runs after cd")
         assert "pyproject.toml" in text
+
+        print("STEP 6: Checking GitHub HTTPS clone fallback is documented")
+        assert "http.version=HTTP/1.1 clone --depth 1" in text
+        assert "scripts/bootstrap-source.sh" in text
 
 
 def test_public_repository_links_are_aligned():
@@ -277,6 +282,44 @@ def test_update_script_help_runs_without_side_effects():
 
     print("STEP 4: Checking help does not emit errors")
     assert result.stderr == ""
+
+
+def test_bootstrap_script_handles_flaky_github_https_clone_paths():
+    print("STEP 1: Reading scripts/bootstrap-source.sh")
+    text = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+
+    print("STEP 2: Checking Git clone forces HTTP/1.1 and uses a shallow clone")
+    assert "git -c http.version=HTTP/1.1 clone --depth 1" in text
+
+    print("STEP 3: Checking archive fallback and install steps are present")
+    assert "AIDD_INTERN_BOOTSTRAP_ARCHIVE_URL" in text
+    assert "curl -fL" in text
+    assert "tar -xzf" in text
+    assert "uv sync --extra dev" in text
+    assert "uv tool install -e ." in text
+    assert "cp .env.example .env" in text
+
+    print("STEP 4: Running bootstrap help command without side effects")
+    result = subprocess.run(
+        ["bash", str(BOOTSTRAP_SCRIPT), "--help"],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Usage: scripts/bootstrap-source.sh" in result.stdout
+    assert result.stderr == ""
+
+
+def test_proteinmcp_setup_uses_http11_for_github_git_operations():
+    print("STEP 1: Reading scripts/setup-proteinmcp-local.sh")
+    text = (PROJECT_ROOT / "scripts" / "setup-proteinmcp-local.sh").read_text(
+        encoding="utf-8"
+    )
+
+    print("STEP 2: Checking pull and clone use Git HTTP/1.1")
+    assert "git -c http.version=HTTP/1.1 -C" in text
+    assert "git -c http.version=HTTP/1.1 clone --depth 1" in text
 
 
 def test_package_json_exposes_npm_local_update_scripts():

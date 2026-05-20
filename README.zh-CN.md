@@ -86,6 +86,20 @@ cp .env.example .env
 且账号有仓库权限时才可用。`uv sync` 和 `uv tool install -e .` 必须在
 `aidd-intern` 目录内运行，因为它们会读取该目录下的 `pyproject.toml`。
 
+如果服务器在 `git clone` 阶段报 `GnuTLS recv error (-110)` 或其他 GitHub HTTPS
+传输错误，先强制 Git 使用 HTTP/1.1 重试：
+
+```bash
+git -c http.version=HTTP/1.1 clone --depth 1 \
+  https://github.com/setsu2420/aidd-intern.git
+```
+
+如果需要一个能自动退回到 GitHub 源码压缩包的一键安装入口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
+```
+
 安装后可以从任意目录运行：
 
 ```bash

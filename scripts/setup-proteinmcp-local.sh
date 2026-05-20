@@ -29,10 +29,10 @@ clone_or_update() {
   local repo_dir="$2"
 
   if [[ -d "$repo_dir/.git" ]]; then
-    git -C "$repo_dir" pull --ff-only
+    git -c http.version=HTTP/1.1 -C "$repo_dir" pull --ff-only
   else
     mkdir -p "$(dirname "$repo_dir")"
-    git clone --depth 1 "$repo_url" "$repo_dir"
+    git -c http.version=HTTP/1.1 clone --depth 1 "$repo_url" "$repo_dir"
   fi
 }
 
