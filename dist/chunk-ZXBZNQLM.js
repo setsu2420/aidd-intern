@@ -4,7 +4,7 @@ import {
 } from "./chunk-NHH2YBMB.js";
 import {
   NPM_GITHUB_INSTALL_SPEC
-} from "./chunk-JAK5VU7G.js";
+} from "./chunk-Y2QTMBPQ.js";
 
 // src/utils/version-check.ts
 var DISABLE_UPDATE_CHECK_ENV = "AIDD_INTERN_DISABLE_UPDATE_CHECK";
@@ -89,4 +89,4 @@ export {
   fetchNpmLatestVersion,
   getNpmUpdateNotice
 };
-//# sourceMappingURL=chunk-73AXGPJP.js.map
+//# sourceMappingURL=chunk-ZXBZNQLM.js.map

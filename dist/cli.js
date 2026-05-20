@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
   getNpmUpdateNotice
-} from "./chunk-73AXGPJP.js";
+} from "./chunk-ZXBZNQLM.js";
 import {
   PACKAGE_DESCRIPTION,
   PACKAGE_NAME,
@@ -10,7 +10,7 @@ import {
 import {
   loadEnv
 } from "./chunk-QJPD4XSK.js";
-import "./chunk-JAK5VU7G.js";
+import "./chunk-Y2QTMBPQ.js";
 import {
   setLogLevel,
   source_default
@@ -3364,7 +3364,7 @@ function createProgram() {
   program2.command("update").description("Update the globally installed npm package or this source checkout").option("--check", "Check the globally installed npm package for available updates").option("--dry-run", "Print update commands without executing them").option("--checkout", "Update this source checkout with scripts/update-local.sh").option("--with-frontend", "When used with --checkout, also refresh frontend dependencies").action(async (opts) => {
     const env = resolveEnv(program2.opts());
     await runCommand(env, async () => {
-      const { runUpdate } = await import("./update-T3FD2P5D.js");
+      const { runUpdate } = await import("./update-SQBH3BLJ.js");
       return runUpdate({
         check: opts.check ?? false,
         dryRun: opts.dryRun ?? false,

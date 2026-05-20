@@ -1,14 +1,14 @@
 import {
   compareVersions,
   fetchNpmLatestVersion
-} from "./chunk-73AXGPJP.js";
+} from "./chunk-ZXBZNQLM.js";
 import {
   PACKAGE_NAME,
   PACKAGE_VERSION
 } from "./chunk-NHH2YBMB.js";
 import {
   githubNpmInstallCommand
-} from "./chunk-JAK5VU7G.js";
+} from "./chunk-Y2QTMBPQ.js";
 import "./chunk-7D4SUZUM.js";
 
 // src/commands/update.ts
@@ -71,7 +71,7 @@ function npmGlobalSteps(options) {
   }
   return [
     {
-      title: "Installing the npm package from GitHub",
+      title: "Installing the npm package from GitHub tarball",
       command: githubNpmInstallCommand()
     },
     {
@@ -130,4 +130,4 @@ function runStep(step, options = {}) {
 export {
   runUpdate
 };
-//# sourceMappingURL=update-T3FD2P5D.js.map
+//# sourceMappingURL=update-SQBH3BLJ.js.map

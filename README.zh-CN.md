@@ -65,20 +65,21 @@ PXDesign、Chai-1、Protenix 等重型科学工具直接导入 FastAPI 或 CLI
 
 ### 依赖
 
-- Node.js 22+、npm 和 Git，用于安装 Node package 和开发前端
+- Node.js 22+ 和 npm，用于安装 Node package；Git 仅在源码 checkout 或前端开发时需要
 - Python 3.11+、`uv` 和 Git，仅在使用源码 checkout 或开发 backend 时需要
 - Conda/Mamba 和 GPU，仅在安装 PXDesign、BindCraft 等本地科学工具时需要
 
 ### 安装 Node package
 
 ```bash
-npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
+npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
 ```
 
 这条路径用于安装 Node CLI harness，支持 smoke、integration、eval、update 和
 配置辅助命令。当前包名还没有发布到公开 npm registry，所以
-`npm install -g aidd-intern@latest` 会返回 404。npm 可以直接从 GitHub 仓库安装，
-并使用仓库里已提交的预构建 `dist/` package 文件。
+`npm install -g aidd-intern@latest` 会返回 404。npm 会直接安装 GitHub archive
+tarball，并使用仓库里已提交的预构建 `dist/` package 文件；该路径不依赖本机
+Git 或 GitHub SSH key。
 
 ### 可选：从源码安装完整 Python 智能体运行时
 
@@ -147,7 +148,7 @@ aidd-intern --model openrouter/openai/gpt-5.2 \
 如果用户是通过 GitHub 全局安装的 Node package，更新命令是：
 
 ```bash
-npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
+npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
 ```
 
 Node CLI 也提供会逐步打印命令的更新入口：

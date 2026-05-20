@@ -11,8 +11,8 @@ PUBLIC_REPO_URL = "https://github.com/setsu2420/aidd-intern"
 PUBLIC_CLONE_URL = f"{PUBLIC_REPO_URL}.git"
 PUBLIC_NPM_REPO_URL = f"git+{PUBLIC_CLONE_URL}"
 NPM_GITHUB_INSTALL_SPEC = (
-    "git+https://github.com/setsu2420/aidd-intern.git"
-    "#codex/aidd-prep-update-20260520"
+    "https://github.com/setsu2420/aidd-intern/archive/refs/heads/"
+    "codex/aidd-prep-update-20260520.tar.gz"
 )
 LEGACY_REPO_URL = "https://github.com/huggingface/aidd-intern"
 LEGACY_SSH_CLONE_URL = "git@github.com:huggingface/aidd-intern.git"

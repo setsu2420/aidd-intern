@@ -9,7 +9,7 @@ import {
   GITHUB_REPOSITORY_URL,
   NPM_GITHUB_INSTALL_SPEC,
   githubNpmInstallCommand
-} from "../chunk-JAK5VU7G.js";
+} from "../chunk-Y2QTMBPQ.js";
 import {
   printSuiteSummary,
   summarize

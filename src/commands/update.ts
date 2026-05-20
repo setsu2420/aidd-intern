@@ -79,7 +79,7 @@ function npmGlobalSteps(options: UpdateOptions): Step[] {
 
   return [
     {
-      title: 'Installing the npm package from GitHub',
+      title: 'Installing the npm package from GitHub tarball',
       command: githubNpmInstallCommand(),
     },
     {

@@ -79,7 +79,8 @@ Hugging Face Jobs.
 
 ### Requirements
 
-- Node.js 22+, npm, and Git for the Node package and frontend
+- Node.js 22+ and npm for the Node package; Git is only needed for source
+  checkouts or frontend development
 - Python 3.11+, `uv`, and Git only when working from a source checkout or on the backend
 - Conda/Mamba and GPU only for local PXDesign, BindCraft, or similar scientific
   tools
@@ -87,14 +88,15 @@ Hugging Face Jobs.
 ### Install The Node Package
 
 ```bash
-npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
+npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
 ```
 
 Use this path when you want the Node CLI harness for smoke, integration, eval,
 update, and configuration helpers. The package name has not been published to
 the public npm registry yet, so `npm install -g aidd-intern@latest` returns
-404. npm can install directly from the GitHub repository using the committed
-prebuilt `dist/` package files.
+404. npm installs the GitHub archive tarball directly using the committed
+prebuilt `dist/` package files, so this path does not depend on local Git or
+GitHub SSH keys.
 
 ### Optional: Full Python Agent Runtime From Source
 
@@ -164,7 +166,7 @@ servers.
 For users who installed the Node package globally from GitHub, update with:
 
 ```bash
-npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
+npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
 ```
 
 The Node CLI also exposes this as a step-printing command:

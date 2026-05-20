@@ -3,7 +3,7 @@ export { C as CheckResult, a as CheckStatus, L as Logger, c as createLogger, p a
 
 declare const GITHUB_REPOSITORY_URL = "https://github.com/setsu2420/aidd-intern.git";
 declare const GITHUB_INSTALL_REF = "codex/aidd-prep-update-20260520";
-declare const NPM_GITHUB_INSTALL_SPEC = "git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520";
+declare const NPM_GITHUB_INSTALL_SPEC = "https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz";
 declare function githubNpmInstallCommand(): string[];
 
 export { GITHUB_INSTALL_REF, GITHUB_REPOSITORY_URL, NPM_GITHUB_INSTALL_SPEC, githubNpmInstallCommand };

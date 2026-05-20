@@ -11,8 +11,8 @@ describe('npm update helpers', () => {
     });
     reportStep('npm update dry run', 'observed stdout', stdout);
 
-    expect(stdout).toContain('STEP 1: Installing the npm package from GitHub');
-    expect(stdout).toContain(`$ npm install -g "${NPM_GITHUB_INSTALL_SPEC}"`);
+    expect(stdout).toContain('STEP 1: Installing the npm package from GitHub tarball');
+    expect(stdout).toContain(`$ npm install -g ${NPM_GITHUB_INSTALL_SPEC}`);
     expect(stdout).not.toContain('aidd-intern@latest');
     expect(stdout).toContain('Dry run only. No update commands were executed.');
   });
