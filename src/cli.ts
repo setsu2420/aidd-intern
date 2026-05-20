@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { PACKAGE_DESCRIPTION, PACKAGE_NAME, PACKAGE_VERSION } from './manifest.js';
 import { loadEnv, type CommandEnv } from './utils/env.js';
 import { setLogLevel } from './utils/logger.js';
+import { getNpmUpdateNotice } from './utils/version-check.js';
 
 type CliOptions = {
   url?: string;
@@ -153,6 +154,7 @@ function resolveEnv(opts: CliOptions): CommandEnv {
 async function runCommand(env: CommandEnv, action: () => Promise<boolean>): Promise<void> {
   if (shouldShowBanner(env)) {
     printBanner();
+    await maybePrintUpdateNotice();
   }
 
   try {
@@ -175,6 +177,21 @@ function printBanner(): void {
   console.log(chalk.bold.cyan('  ║') + chalk.dim('   Smoke • Integration • Eval     ') + chalk.bold.cyan('║'));
   console.log(chalk.bold.cyan('  ╚═══════════════════════════════════════╝'));
   console.log('');
+}
+
+async function maybePrintUpdateNotice(): Promise<void> {
+  if (process.argv.includes('update')) {
+    return;
+  }
+  try {
+    const notice = await getNpmUpdateNotice();
+    if (notice) {
+      console.log(chalk.yellow(notice));
+      console.log('');
+    }
+  } catch {
+    // Version checks should never block normal CLI usage.
+  }
 }
 
 function isMainModule(): boolean {

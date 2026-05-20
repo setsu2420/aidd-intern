@@ -187,6 +187,14 @@ branch has diverged from the remote branch. Set `AIDD_INTERN_UPDATE_REMOTE` or
 `AIDD_INTERN_UPDATE_BRANCH` only when you intentionally update from a different
 remote or branch.
 
+Existing users keep their local configuration when updating. The update path
+does not overwrite `.env`, user-level config under `~/.config/aidd-intern/`, or
+local secrets; it only pulls the Git branch, syncs dependencies, and reinstalls
+the editable CLI. Interactive Python startup and `aidd-intern --doctor` run a
+read-only GitHub version check and print the update command when the local
+checkout is behind. Set `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` to suppress this
+notice.
+
 ## Local Diagnostics
 
 Run the doctor after installation, after editing `.env`, or after updating:
@@ -197,8 +205,8 @@ aidd-intern --doctor
 
 The diagnostic is read-only. It prints each step, checks Python, `git`, `uv`,
 optional `npm`, config loading, the selected model's expected API key, Google
-Search credentials, the update helper, optional frontend dependencies, and the
-ProteinMCP opt-in flag.
+Search credentials, the GitHub version status, the update helper, optional
+frontend dependencies, and the ProteinMCP opt-in flag.
 
 This follows the same practical setup pattern used by Hermes Agent: install,
 configure one provider, run a doctor-style check, then verify a simple chat
@@ -411,6 +419,8 @@ environment variables:
 - `HF_TOKEN` enables Hugging Face MCP startup
 - `AIDD_INTERN_ENABLE_PROTEINMCP=1` opts into local ProteinMCP launchers for
   the heavier generator tools
+- `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` suppresses read-only version checks in
+  interactive startup and `aidd-intern --doctor`
 - `binder_design` and `aidd_prepare` are built-in binder workflow tools and do
   not need separate MCP setup
 

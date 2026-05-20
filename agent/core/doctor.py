@@ -42,8 +42,8 @@ def run_doctor(*, output: TextIO | None = None) -> int:
     """Run diagnostics and return a shell exit code.
 
     The doctor is intentionally read-only. It checks local files, commands,
-    environment variables, and config parseability, but it does not install,
-    fetch, start servers, or call remote APIs.
+    environment variables, config parseability, and the remote Git revision, but
+    it does not install, fetch, start servers, or call mutating APIs.
     """
     stream = output or sys.stdout
     checks: list[DoctorCheck] = []
@@ -64,13 +64,16 @@ def run_doctor(*, output: TextIO | None = None) -> int:
     _print_step(stream, 5, "Checking Google Search configuration")
     checks.append(_check_google_search())
 
-    _print_step(stream, 6, "Checking local update helper")
+    _print_step(stream, 6, "Checking AIDD-Intern version")
+    checks.append(_check_version())
+
+    _print_step(stream, 7, "Checking local update helper")
     checks.append(_check_update_helper())
 
-    _print_step(stream, 7, "Checking optional frontend dependencies")
+    _print_step(stream, 8, "Checking optional frontend dependencies")
     checks.append(_check_frontend_dependencies())
 
-    _print_step(stream, 8, "Checking optional ProteinMCP setting")
+    _print_step(stream, 9, "Checking optional ProteinMCP setting")
     checks.append(_check_proteinmcp_setting())
 
     print("\nDoctor summary:", file=stream)
@@ -281,6 +284,33 @@ def _check_update_helper() -> DoctorCheck:
             "Run chmod +x scripts/update-local.sh.",
         )
     return DoctorCheck("ok", "update", "scripts/update-local.sh is executable")
+
+
+def _check_version() -> DoctorCheck:
+    from agent.core.version_check import check_for_update, format_update_notice
+
+    result = check_for_update(PROJECT_ROOT)
+    if result.status == "current":
+        return DoctorCheck(
+            "ok",
+            "version",
+            f"local checkout is current with {result.source}",
+        )
+    if result.status == "disabled":
+        return DoctorCheck("ok", "version", result.detail)
+    if result.status == "outdated":
+        return DoctorCheck(
+            "warn",
+            "version",
+            result.detail,
+            format_update_notice(result),
+        )
+    return DoctorCheck(
+        "warn",
+        "version",
+        result.detail,
+        "Run scripts/update-local.sh from a source checkout when you want to update.",
+    )
 
 
 def _check_frontend_dependencies() -> DoctorCheck:

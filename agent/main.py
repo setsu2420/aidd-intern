@@ -311,6 +311,23 @@ def _create_rich_console():
     return _terminal_display().get_console()
 
 
+def _maybe_print_update_notice() -> None:
+    if not sys.stdout.isatty():
+        return
+    try:
+        from agent.core.version_check import check_for_update, format_update_notice
+
+        notice = format_update_notice(check_for_update(CLI_CONFIG_PATH.parents[1]))
+    except Exception:
+        return
+    if not notice:
+        return
+    console = _create_rich_console()
+    console.print()
+    console.print(f"[yellow]{notice}[/yellow]")
+    console.print()
+
+
 def _clear_terminal() -> None:
     command = ["cmd", "/c", "cls"] if os.name == "nt" else ["clear"]
     try:
@@ -1356,6 +1373,7 @@ async def main(
         hf_user=hf_user,
         tool_runtime=_tool_runtime_label(local_mode),
     )
+    _maybe_print_update_notice()
     submission_loop_fn = _load_submission_loop()
 
     # Pre-warm the HF router catalog in the background so /model switches

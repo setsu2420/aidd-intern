@@ -345,6 +345,8 @@ MCP は cold start を軽くするため遅延接続します。
 - Hugging Face MCP は `https://hf.co/mcp` を使い、`HF_TOKEN` がない場合はスキップ。
 - ProteinMCP は `AIDD_INTERN_ENABLE_PROTEINMCP=1` の場合のみ接続。
 - OpenAPI/catalog のリモート取得は起動時ではなくツール呼び出し時に行います。
+- `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` で起動時と `aidd-intern --doctor`
+  の read-only version check を抑制します。
 
 Binder と protein-design の機能は通常の内蔵ツールです。`binder_design`、
 `run_pxdesign`、`run_boltzgen`、`run_bindcraft`、

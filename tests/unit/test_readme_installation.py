@@ -217,6 +217,7 @@ def test_env_example_has_real_configuration_keys_without_token_values():
         "LOCAL_LLM_BASE_URL",
         "LOCAL_LLM_API_KEY",
         "AIDD_INTERN_ENABLE_PROTEINMCP",
+        "AIDD_INTERN_DISABLE_UPDATE_CHECK",
     ]
 
     for key in required_keys:
@@ -301,6 +302,7 @@ def test_doctor_module_documents_each_diagnostic_step():
         "Loading AIDD-Intern config",
         "Checking selected LLM provider",
         "Checking Google Search configuration",
+        "Checking AIDD-Intern version",
         "Checking local update helper",
         "Checking optional frontend dependencies",
         "Checking optional ProteinMCP setting",

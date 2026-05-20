@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { PACKAGE_NAME } from '../manifest.js';
+import { PACKAGE_NAME, PACKAGE_VERSION } from '../manifest.js';
+import { compareVersions, fetchNpmLatestVersion } from '../utils/version-check.js';
 
 export type UpdateOptions = {
   dryRun?: boolean;
@@ -16,6 +17,10 @@ type Step = {
 };
 
 export async function runUpdate(options: UpdateOptions = {}): Promise<boolean> {
+  if (options.check && !options.checkout) {
+    return runNpmVersionCheck();
+  }
+
   const steps = options.checkout ? checkoutSteps(options) : npmGlobalSteps(options);
 
   for (const [index, step] of steps.entries()) {
@@ -33,6 +38,30 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<boolean> {
     console.log('Dry run only. No update commands were executed.');
   }
   return true;
+}
+
+async function runNpmVersionCheck(): Promise<boolean> {
+  console.log(`Current ${PACKAGE_NAME} version: v${PACKAGE_VERSION}`);
+  try {
+    const latest = await fetchNpmLatestVersion(PACKAGE_NAME);
+    console.log(`Latest published npm version: v${latest}`);
+    if (compareVersions(PACKAGE_VERSION, latest) < 0) {
+      console.log(`Update available. Run: aidd-intern update`);
+    } else {
+      console.log('Already up to date.');
+    }
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('HTTP 404') || message.includes('Not Found')) {
+      console.log(`Package ${PACKAGE_NAME} is not published in the npm registry yet.`);
+      console.log('For source checkouts, run: scripts/update-local.sh');
+      return true;
+    }
+    console.error(`Could not check the npm registry: ${message}`);
+    console.error('For source checkouts, run: scripts/update-local.sh');
+    return false;
+  }
 }
 
 function npmGlobalSteps(options: UpdateOptions): Step[] {

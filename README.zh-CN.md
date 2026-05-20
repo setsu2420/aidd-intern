@@ -462,6 +462,8 @@ AIDD_INTERN_CLI_CONFIG=/path/to/cli_agent_config.json
 - `proteinmcp-bindcraft`: 本地 stdio launcher。
 - `proteinmcp-boltzgen`: 本地 stdio launcher。
 - `proteinmcp-pxdesign`: 本地 stdio launcher。
+- `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` 会关闭启动时和
+  `aidd-intern --doctor` 的只读版本检查。
 
 ProteinMCP 的冷启动规则：
 

@@ -319,6 +319,7 @@ def test_cli_doctor_runs_real_diagnostic_without_starting_chat():
 
     print("STEP 3: Checking doctor output includes diagnostic steps")
     assert "STEP 1: Checking Python runtime" in result.stdout
+    assert "STEP 6: Checking AIDD-Intern version" in result.stdout
     assert "Doctor summary:" in result.stdout
     assert "Result:" in result.stdout
 
