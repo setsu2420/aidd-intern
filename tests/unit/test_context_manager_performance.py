@@ -34,4 +34,3 @@ def test_estimate_usage_uses_current_items_without_mutating_running_usage():
         assert cm.estimate_usage("openai/gpt-5.5") == 12_345
 
     assert cm.running_context_usage == 7
-

@@ -383,4 +383,3 @@ def test_binder_design_is_registered_for_llm():
         in specs["binder_design"].parameters["properties"]["operation"]["enum"]
     )
     assert "skill_name" in specs["binder_design"].parameters["properties"]
-
