@@ -9,7 +9,6 @@ import {
 import {
   githubNpmInstallCommand
 } from "./chunk-Y2QTMBPQ.js";
-import "./chunk-7D4SUZUM.js";
 
 // src/commands/update.ts
 import { existsSync } from "fs";
@@ -130,4 +129,4 @@ function runStep(step, options = {}) {
 export {
   runUpdate
 };
-//# sourceMappingURL=update-SQBH3BLJ.js.map
+//# sourceMappingURL=update-YRJOAWHF.js.map

@@ -3,7 +3,7 @@ import {
   DEFAULT_BACKEND_URL,
   DEFAULT_JUDGE_MODEL,
   loadEnv
-} from "../chunk-QJPD4XSK.js";
+} from "../chunk-REGUV7MI.js";
 import {
   GITHUB_INSTALL_REF,
   GITHUB_REPOSITORY_URL,
@@ -18,7 +18,6 @@ import {
   createLogger,
   setLogLevel
 } from "../chunk-4WEICLE4.js";
-import "../chunk-7D4SUZUM.js";
 export {
   DEFAULT_BACKEND_URL,
   DEFAULT_JUDGE_MODEL,

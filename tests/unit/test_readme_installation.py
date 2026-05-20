@@ -347,11 +347,11 @@ def test_package_json_exposes_npm_local_update_scripts():
     assert scripts["prepack"] == "npm run build"
     assert "prepare" not in scripts
 
-    print("STEP 3: Checking git installs do not need nested runtime dependencies")
-    assert "dependencies" not in package_json
+    print("STEP 3: Checking git installs use a minimal runtime dependency set")
+    assert package_json["dependencies"] == {"commander": "^13.1.0"}
 
     cli_bundle = (PROJECT_ROOT / "dist" / "cli.js").read_text(encoding="utf-8")
-    for package_name in ["commander", "chalk", "dotenv", "zod"]:
+    for package_name in ["chalk", "dotenv", "zod"]:
         assert f'from "{package_name}"' not in cli_bundle
 
 

@@ -16,5 +16,5 @@ export default defineConfig({
   splitting: true,
   sourcemap: true,
   target: 'node22',
-  noExternal: ['chalk', 'commander', 'dotenv', 'zod'],
+  noExternal: ['chalk', 'zod'],
 });

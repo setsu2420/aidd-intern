@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { DEFAULT_BACKEND_URL, DEFAULT_JUDGE_MODEL, loadEnv } from '../../src/utils/env.js';
 import { reportStep } from './test-output.js';
 
@@ -20,8 +23,10 @@ const trackedKeys = [
 const originalEnv = new Map<string, string | undefined>(
   trackedKeys.map((key) => [key, process.env[key]]),
 );
+const originalCwd = process.cwd();
 
 afterEach(() => {
+  process.chdir(originalCwd);
   for (const key of trackedKeys) {
     const original = originalEnv.get(key);
     if (original === undefined) {
@@ -67,5 +72,37 @@ describe('loadEnv', () => {
     expect(env.backendUrl).toBe(DEFAULT_BACKEND_URL);
     expect(env.hfToken).toBe('hf-legacy-token');
     expect(env.judgeModel).toBe(DEFAULT_JUDGE_MODEL);
+  });
+
+  it('loads missing values from .env without overriding shell variables', () => {
+    reportStep('loadEnv dotenv file', 'create an isolated .env file');
+    for (const key of trackedKeys) {
+      delete process.env[key];
+    }
+    process.env['AIDD_INTERN_BACKEND_URL'] = 'http://shell-value:7860/';
+
+    const workspace = mkdtempSync(join(tmpdir(), 'aidd-env-'));
+    try {
+      writeFileSync(
+        join(workspace, '.env'),
+        [
+          'AIDD_INTERN_BACKEND_URL=http://file-value:7860',
+          'AIDD_INTERN_HF_TOKEN="hf-from-file"',
+          'AIDD_INTERN_TEST_MODEL=openai/from-env-file',
+          'export AIDD_INTERN_JUDGE_API_KEY=judge-from-file',
+        ].join('\n'),
+      );
+      process.chdir(workspace);
+
+      const env = loadEnv();
+      reportStep('loadEnv dotenv file', 'observed resolved env', env);
+
+      expect(env.backendUrl).toBe('http://shell-value:7860');
+      expect(env.hfToken).toBe('hf-from-file');
+      expect(env.testModel).toBe('openai/from-env-file');
+      expect(env.judgeApiKey).toBe('judge-from-file');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
