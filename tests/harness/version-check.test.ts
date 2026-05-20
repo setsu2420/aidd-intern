@@ -4,6 +4,7 @@ import {
   compareVersions,
   getNpmUpdateNotice,
 } from '../../src/utils/version-check.js';
+import { NPM_GITHUB_INSTALL_SPEC } from '../../src/utils/install-source.js';
 import { reportStep } from './test-output.js';
 
 describe('version checks', () => {
@@ -33,6 +34,8 @@ describe('version checks', () => {
     reportStep('npm update notice', 'observed notice', notice);
     expect(notice).toContain('local v1.0.0 is behind npm v1.2.0');
     expect(notice).toContain('aidd-intern update');
+    expect(notice).toContain(`npm install -g ${NPM_GITHUB_INSTALL_SPEC}`);
+    expect(notice).not.toContain('aidd-intern@latest');
   });
 
   it('honors the disable-update-check environment variable', async () => {

@@ -79,7 +79,7 @@ Hugging Face Jobs.
 
 ### Requirements
 
-- Node.js 22+ and npm for the published Node package and frontend
+- Node.js 22+, npm, and Git for the Node package and frontend
 - Python 3.11+, `uv`, and Git only when working from a source checkout or on the backend
 - Conda/Mamba and GPU only for local PXDesign, BindCraft, or similar scientific
   tools
@@ -87,11 +87,14 @@ Hugging Face Jobs.
 ### Install The Node Package
 
 ```bash
-npm install -g aidd-intern@latest
+npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
 ```
 
-Use this path when you want the published Node CLI harness for smoke,
-integration, eval, update, and configuration helpers.
+Use this path when you want the Node CLI harness for smoke, integration, eval,
+update, and configuration helpers. The package name has not been published to
+the public npm registry yet, so `npm install -g aidd-intern@latest` returns
+404. npm can install directly from the GitHub repository and the package builds
+itself during installation.
 
 ### Optional: Full Python Agent Runtime From Source
 
@@ -158,11 +161,10 @@ servers.
 
 ## Local Updates
 
-For users who installed the published npm package globally, npm's documented
-global update path is:
+For users who installed the Node package globally from GitHub, update with:
 
 ```bash
-npm install -g aidd-intern@latest
+npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
 ```
 
 The Node CLI also exposes this as a step-printing command:
@@ -173,10 +175,11 @@ aidd-intern update --check
 aidd-intern update --dry-run
 ```
 
-`aidd-intern update` updates the npm harness package only. It does not edit a
-source checkout and it does not refresh the Python `uv tool install -e .`
-runtime. If you cloned the repository for the Python agent runtime, use the
-`npm run update:local` source-checkout path below instead.
+`aidd-intern update` updates the globally installed Node harness package only.
+It does not edit a source checkout and it does not refresh the Python
+`uv tool install -e .` runtime. If you cloned the repository for the Python
+agent runtime, use the `npm run update:local` source-checkout path below
+instead.
 
 For an existing source checkout, update from GitHub and refresh the local Python
 CLI from the repository root:

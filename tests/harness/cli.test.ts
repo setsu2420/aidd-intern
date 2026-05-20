@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createProgram } from '../../src/cli.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from '../../src/manifest.js';
@@ -31,5 +35,20 @@ describe('CLI program', () => {
       '--fixtures',
       '--limit',
     ]);
+  });
+
+  it('runs when invoked through an npm-style .bin symlink', () => {
+    reportStep('CLI symlink', 'build package before simulating npm bin invocation');
+    execFileSync('npm', ['run', 'build'], { encoding: 'utf8' });
+
+    const binDir = mkdtempSync(join(tmpdir(), 'aidd-intern-bin-'));
+    const binPath = join(binDir, 'aidd-intern');
+    symlinkSync(join(process.cwd(), 'dist', 'cli.js'), binPath);
+
+    reportStep('CLI symlink', 'invoke symlinked CLI with --version');
+    const stdout = execFileSync(binPath, ['--version'], { encoding: 'utf8' });
+    reportStep('CLI symlink', 'observed stdout', stdout.trim());
+
+    expect(stdout.trim()).toBe(PACKAGE_VERSION);
   });
 });

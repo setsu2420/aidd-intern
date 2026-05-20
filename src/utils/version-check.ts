@@ -1,4 +1,5 @@
 import { PACKAGE_NAME, PACKAGE_VERSION } from '../manifest.js';
+import { NPM_GITHUB_INSTALL_SPEC } from './install-source.js';
 
 export const DISABLE_UPDATE_CHECK_ENV = 'AIDD_INTERN_DISABLE_UPDATE_CHECK';
 const DEFAULT_TIMEOUT_MS = 2_000;
@@ -75,7 +76,7 @@ export async function getNpmUpdateNotice(
 
   return [
     `${packageName} update available: local v${currentVersion} is behind npm v${latestVersion}.`,
-    `Run \`aidd-intern update\` or \`npm install -g ${packageName}@latest\` to update.`,
+    `Run \`aidd-intern update\` or \`npm install -g ${NPM_GITHUB_INSTALL_SPEC}\` to update.`,
   ].join('\n');
 }
 

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { PACKAGE_NAME, PACKAGE_VERSION } from '../manifest.js';
 import { compareVersions, fetchNpmLatestVersion } from '../utils/version-check.js';
+import { githubNpmInstallCommand } from '../utils/install-source.js';
 
 export type UpdateOptions = {
   dryRun?: boolean;
@@ -55,10 +56,12 @@ async function runNpmVersionCheck(): Promise<boolean> {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes('HTTP 404') || message.includes('Not Found')) {
       console.log(`Package ${PACKAGE_NAME} is not published in the npm registry yet.`);
+      console.log(`Install from GitHub instead: ${githubNpmInstallCommand().map(shellToken).join(' ')}`);
       console.log('For source checkouts, run: scripts/update-local.sh');
       return true;
     }
     console.error(`Could not check the npm registry: ${message}`);
+    console.error(`Install from GitHub instead: ${githubNpmInstallCommand().map(shellToken).join(' ')}`);
     console.error('For source checkouts, run: scripts/update-local.sh');
     return false;
   }
@@ -76,8 +79,8 @@ function npmGlobalSteps(options: UpdateOptions): Step[] {
 
   return [
     {
-      title: 'Installing the latest published npm package globally',
-      command: ['npm', 'install', '-g', `${PACKAGE_NAME}@latest`],
+      title: 'Installing the npm package from GitHub',
+      command: githubNpmInstallCommand(),
     },
     {
       title: 'Verifying the globally installed npm package',

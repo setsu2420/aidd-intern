@@ -54,7 +54,8 @@
     "update:local": "bash scripts/update-local.sh",
     "update:local:frontend": "bash scripts/update-local.sh --with-frontend",
     "update:npm:dry-run": "node src/cli.ts update --dry-run",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "commander": "^13.1.0",

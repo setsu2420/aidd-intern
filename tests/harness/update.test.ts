@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
+import { NPM_GITHUB_INSTALL_SPEC } from '../../src/utils/install-source.js';
 import { reportStep } from './test-output.js';
 
 describe('npm update helpers', () => {
@@ -10,8 +11,9 @@ describe('npm update helpers', () => {
     });
     reportStep('npm update dry run', 'observed stdout', stdout);
 
-    expect(stdout).toContain('STEP 1: Installing the latest published npm package globally');
-    expect(stdout).toContain('$ npm install -g aidd-intern@latest');
+    expect(stdout).toContain('STEP 1: Installing the npm package from GitHub');
+    expect(stdout).toContain(`$ npm install -g "${NPM_GITHUB_INSTALL_SPEC}"`);
+    expect(stdout).not.toContain('aidd-intern@latest');
     expect(stdout).toContain('Dry run only. No update commands were executed.');
   });
 

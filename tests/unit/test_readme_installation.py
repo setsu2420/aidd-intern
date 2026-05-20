@@ -9,6 +9,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_REPO_URL = "https://github.com/setsu2420/aidd-intern"
 PUBLIC_CLONE_URL = f"{PUBLIC_REPO_URL}.git"
+NPM_GITHUB_INSTALL_SPEC = (
+    "git+https://github.com/setsu2420/aidd-intern.git"
+    "#codex/aidd-prep-update-20260520"
+)
 LEGACY_REPO_URL = "https://github.com/huggingface/aidd-intern"
 LEGACY_SSH_CLONE_URL = "git@github.com:huggingface/aidd-intern.git"
 README_FILES = [
@@ -43,8 +47,11 @@ def test_readme_quick_start_uses_public_https_clone_url():
         print(f"STEP 2: clone lines = {clone_lines}")
         assert clone_lines == [f"git clone {PUBLIC_CLONE_URL}"]
 
-        print("STEP 3: Checking install commands stay in the project directory")
+        print("STEP 3: Checking source install commands stay in the project directory")
         assert install_sequence in text
+
+        print("STEP 3b: Checking npm install uses the GitHub package source")
+        assert f"npm install -g {NPM_GITHUB_INSTALL_SPEC}" in text
 
         print("STEP 4: Checking the old SSH-only clone command is absent")
         assert LEGACY_SSH_CLONE_URL not in text
@@ -92,7 +99,9 @@ def test_english_readme_documents_local_update_and_env_setup():
     print("STEP 3: Checking local updates use the non-destructive script")
     assert "## Local Updates" in text
     assert "scripts/update-local.sh" in text
+    assert f"npm install -g {NPM_GITHUB_INSTALL_SPEC}" in text
     assert "npm install -g aidd-intern@latest" in text
+    assert "returns\n404" in text
     assert "aidd-intern update --dry-run" in text
     assert "npm run update:local" in text
     assert "git pull --ff-only origin <current-branch>" in text
@@ -189,6 +198,7 @@ def test_localized_readmes_document_env_template_update_and_doctor():
         print("STEP 3: Checking local update workflow is documented")
         assert update_heading in text
         assert "scripts/update-local.sh" in text
+        assert f"npm install -g {NPM_GITHUB_INSTALL_SPEC}" in text
         assert "npm install -g aidd-intern@latest" in text
         assert "aidd-intern update --dry-run" in text
         assert "npm run update:local" in text
@@ -333,6 +343,7 @@ def test_package_json_exposes_npm_local_update_scripts():
         "bash scripts/update-local.sh --with-frontend"
     )
     assert scripts["update:npm:dry-run"] == "node src/cli.ts update --dry-run"
+    assert scripts["prepare"] == "npm run build"
 
 
 def test_doctor_module_documents_each_diagnostic_step():

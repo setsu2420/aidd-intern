@@ -65,13 +65,22 @@ PXDesign、Chai-1、Protenix 等重型科学工具直接导入 FastAPI 或 CLI
 
 ### 依赖
 
-- Python 3.11+
-- `uv`
-- Git
-- Node.js 22+，仅在开发前端或 npm harness 时需要
+- Node.js 22+、npm 和 Git，用于安装 Node package 和开发前端
+- Python 3.11+、`uv` 和 Git，仅在使用源码 checkout 或开发 backend 时需要
 - Conda/Mamba 和 GPU，仅在安装 PXDesign、BindCraft 等本地科学工具时需要
 
-### 安装 Python 运行时
+### 安装 Node package
+
+```bash
+npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
+```
+
+这条路径用于安装 Node CLI harness，支持 smoke、integration、eval、update 和
+配置辅助命令。当前包名还没有发布到公开 npm registry，所以
+`npm install -g aidd-intern@latest` 会返回 404。npm 可以直接从 GitHub 仓库安装，
+安装过程中会自动构建 package。
+
+### 可选：从源码安装完整 Python 智能体运行时
 
 ```bash
 git clone https://github.com/setsu2420/aidd-intern.git
@@ -135,10 +144,10 @@ aidd-intern --model openrouter/openai/gpt-5.2 \
 
 ## 本地更新
 
-如果用户是通过 npm 全局安装的发布包，npm 官方推荐的全局更新路径是：
+如果用户是通过 GitHub 全局安装的 Node package，更新命令是：
 
 ```bash
-npm install -g aidd-intern@latest
+npm install -g git+https://github.com/setsu2420/aidd-intern.git#codex/aidd-prep-update-20260520
 ```
 
 Node CLI 也提供会逐步打印命令的更新入口：
@@ -149,9 +158,10 @@ aidd-intern update --check
 aidd-intern update --dry-run
 ```
 
-`aidd-intern update` 只更新 npm harness package，不会修改源码 checkout，也不会刷新
-Python `uv tool install -e .` 运行时。如果你的 `aidd-intern` 命令当前指向
-Python CLI，请使用下面的 `npm run update:local` 源码 checkout 更新路径。
+`aidd-intern update` 只更新全局安装的 Node harness package，不会修改源码
+checkout，也不会刷新 Python `uv tool install -e .` 运行时。如果你的
+`aidd-intern` 命令当前指向 Python CLI，请使用下面的 `npm run update:local`
+源码 checkout 更新路径。
 
 已有源码 checkout 时，在仓库根目录运行：
 
