@@ -1212,6 +1212,15 @@ async def _handle_slash_command(
             td.print_context_status(session, include_turns=True, include_items=True)
         return None
 
+    if command == "/usage":
+        session = session_holder[0] if session_holder else None
+        td.print_usage_status(session)
+        return None
+
+    if command == "/plan":
+        td.print_plan()
+        return None
+
     if command == "/share-traces":
         session = session_holder[0] if session_holder else None
         await _handle_share_traces_command(arg, config, session)

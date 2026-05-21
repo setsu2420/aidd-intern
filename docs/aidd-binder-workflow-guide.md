@@ -1,170 +1,214 @@
 # AIDD Binder Workflow Guide
 
-Last reviewed: 2026-05-20
+Last reviewed: 2026-05-21
+Version: 4.0.0 (Hermes-Style Autonomous Orchestration)
 
 ## Purpose
 
-The AIDD binder workflow is the narrow first product surface for AIDD-Intern:
-de novo binder design for AIDD targets, currently focused on protein binder
-campaigns. It follows three design constraints:
+The AIDD binder workflow is the narrow first product surface for AIDD-Intern: *de novo* binder design for AIDD targets, currently focused on protein binder campaigns. It follows three core design constraints:
 
-- keep the generic agent runtime reusable;
-- expose mature biology and design engines through declarative tools;
-- make every final binder recommendation traceable to requirements, evidence,
-  filters, and residual risks.
+- Keep the generic agent runtime reusable;
+- Expose mature biology and design engines through declarative tools and Model Context Protocol (MCP);
+- Make every final binder recommendation traceable to requirements, evidence, filters, and residual risks.
 
-The generic runtime remains a durable tool-using harness with persistent session
-traces, MCP integration, and clear planning loops. The AIDD-specific layer
-should remain opinionated about binder design rather than becoming a general
-science-writing agent.
+The generic runtime remains a durable tool-using harness with persistent session traces, MCP integration, and clear planning loops. By adopting **NousResearch Hermes Agent** design philosophy, the AIDD-specific layer **avoids any rigid, hard-coded rules or decision matrices**. Instead, the Agent operates with complete runtime self-reflection, dynamically determining optimal workflows and selecting generative/validation models based on prior runs, exported skill memories, and empirical evidence.
+
+---
 
 ## Default Campaign Loop
 
-The pack expects the agent to run a campaign in this order:
+The AIDD campaign runs in an adaptive, closed-loop pipeline where the Agent possesses full workflow self-governance:
 
-1. Intake the target, biological assembly, chain(s), desired epitope or hotspot,
-   no-go regions, binder length, assay, and developability constraints.
-2. Use `aidd_bio`, web search, papers, RCSB, UniProt, AlphaFold DB, and
-   Foldseek to collect target biology, known structures, homologs, PTMs,
-   glycans, membrane context, and existing binders.
-3. Call `binder_design(operation="plan_campaign")` to convert the user request
-   into difficulty, tool strategy, risk register, acceptance criteria, and open
-   questions.
-4. Create a project manifest with
-   `binder_design(operation="create_project")`; the manifest stores the
-   campaign plan next to the generated output folders.
-5. Dispatch generation through ProteinMCP or the built-in protein-design tools:
-   PXDesign for broad exploration, BoltzGen for constrained sites, and
-   BindCraft for iterative refinement.
-6. Validate shortlists with an orthogonal predictor such as Chai-1, Protenix,
-   or another AlphaFold-style complex predictor.
-7. Rank with `binder_design(operation="rank_candidates")`; candidates are
-   tagged as `advance`, `hold_for_orthogonal_validation`, or `reject`.
-8. Cluster by fold or interface geometry and keep diverse representatives for
-   manual structural review and wet-lab handoff.
-9. When a workflow becomes stable across campaigns, export it as a reusable
-   skill card with `binder_design(operation="export_skill")` so the next run
-   can start from a file-backed recipe rather than raw transcript memory.
+```mermaid
+graph TD
+    A[Intake Target & Requirements] --> B[AIDD Preparation Stage]
+    B --> C[Retrieve Historical Skills & Experience]
+    C --> D[Adaptive Plan Campaign: Dynamically Orchestrate DAG]
+    D --> E[Workflow Dispatch: Generator Execution]
+    E --> F[Self-Reflective Orthogonal Validation]
+    F --> G[Rank, Filter & Triage Candidates]
+    G --> H[Fold Clustering & Diversity Triage]
+    H --> I[Skill Promotion: Export Stable Skill Card]
+```
 
-## AIDD Preparation Stage
+1. **Intake**: Gather target PDB, chain(s), biological assembly, epitope/hotspots, no-go regions, binder length, assay, and developability constraints.
+2. **Research & Prep**: Retrieve structures, homology maps, PTM notes, and PDB metadata using `aidd_bio` and targeted search.
+3. **Experience Matching**: Scan previous session logs and the local `skills/` repository to retrieve optimal modeling configurations for similar target families or folding topologies.
+4. **Adaptive Plan**: Call `binder_design(operation="plan_campaign")` to dynamically design a task execution plan, establishing appropriate risk registers and routing conditions tailored to the target's complex boundaries.
+5. **Flexible Execution**: Automatically configure and dispatch generation tasks across available structural engines: **RFdiffusion3 (RFD3)**, **PXDesign**, **BoltzGen**, or **BindCraft**.
+6. **Self-Reflective Validation**: Query independent complex predictors (e.g., **Chai-1**, **Protenix**, or **AlphaFold3**) to calculate interface parameters and check for reward-hacking biases.
+7. **Rank & Triage**: Call `binder_design(operation="rank_candidates")` to run multi-objective scoring and dynamically determine which structures pass to wet-lab, which are held for further orthogonal cross-checks, and which are rejected.
+8. **Diversification**: Cluster binders via Foldseek or TM-align to maintain high-diversity representatives.
+9. **Skill Promotion**: Call `binder_design(operation="export_skill")` to lock down successful configurations as durable Markdown skill cards under `skills/`, promoting workspace intelligence over time.
 
-Before binder generation, downloaded users should be able to complete four
-local preparation tasks without installing GPU protein-design stacks:
+---
 
-1. Literature research. Use `literature_lookup` for official paper metadata,
-   `web_search` for current official pages, and record links, DOIs, PMIDs,
-   preprint IDs, PDB IDs, and known binder/epitope claims.
-2. PDB download. Use `aidd_prepare(operation="download_pdb")` or `aidd_bio` to
-   fetch the selected RCSB structure from
-   `https://files.rcsb.org/download/<PDB_ID>.pdb`.
-3. Structure cropping. Use `aidd_prepare(operation="crop_structure")` to keep
-   the target chain/domain and residue range that downstream generators should
-   see.
-4. Hotspot residue determination. Use
-   `aidd_prepare(operation="identify_hotspots")` to rank target residues by
-   non-hydrogen target/partner atom contacts, then cross-check the candidates
-   against the literature or mutagenesis evidence.
+## 1. Binder Design 核心模型配置规范 (Model Configurations)
 
-The Python CLI exposes the complete preparation pass:
+To support autonomous setup and model execution, the standard configuration parameters and compute specifications for our primary generative models are structured as follows:
+
+### 1.1 RFdiffusion3 (RFD3) 全原子扩散生成器
+*   **Overview**: An advanced all-atom diffusion model that operates with atom-level precision rather than residue-level simplifications. It allows defining specific atomic interactions (e.g., precise hydrogen bonding to a particular target oxygen atom) and features 10x faster inference speed compared to RFdiffusion2.
+*   **Compute Requirements**: NVIDIA A100/H100 (>= 24GB VRAM) for heavy atom-graph transformer calculations.
+*   **Configuration Template (`rfd3_config.json`)**:
+    ```json
+    {
+      "model": "RFdiffusion3-AllAtom",
+      "inference": {
+        "num_designs": 100,
+        "speedup_factor": 10.0,
+        "all_atom_mode": true
+      },
+      "conditioning": {
+        "target_pdb": "runs/pd-l1-prep/pd_l1_cropped.pdb",
+        "target_chains": ["A"],
+        "hotspots": [
+          {"residue": "Y56", "chain": "A", "atom": "OH", "constraint_type": "hydrogen_bond"},
+          {"residue": "M115", "chain": "A", "atom": "SD", "constraint_type": "hydrophobic_contact"}
+        ]
+      },
+      "scaffold": {
+        "binder_length_range": [70, 130],
+        "solvent_accessibility_bias": 0.4
+      }
+    }
+    ```
+
+### 1.2 PXDesign 骨架与序列高通量生成器
+*   **Overview**: Highly efficient backbone searching and high-throughput sequence prediction for mapping diverse starting binders.
+*   **Compute Requirements**: Standard NVIDIA T4 / RTX 4090.
+*   **Configuration Template (`pxdesign_config.json`)**:
+    ```json
+    {
+      "model": "PXDesign-V2",
+      "generation": {
+        "backbones_to_generate": 1000,
+        "sequences_per_backbone": 5,
+        "temperature": 0.2
+      },
+      "scaffold_type": "helical_bundle",
+      "interface": {
+        "target_chain": "A",
+        "anchor_residues": [56, 115]
+      }
+    }
+    ```
+
+### 1.3 BoltzGen 靶点约束引导生成器
+*   **Overview**: Constraint-conditioned binder generation guided by pocket microenvironments or custom geometries.
+*   **Configuration Template (`boltzgen_config.json`)**:
+    ```json
+    {
+      "model": "BoltzGen-1.0",
+      "conditioning_strength": 0.85,
+      "requirements": {
+        "target_structure": "runs/pd-l1-prep/pd_l1_cropped.pdb",
+        "target_epitope_residues": [19, 56, 68, 115]
+      }
+    }
+    ```
+
+### 1.4 BindCraft 柔性全自动反向折叠器
+*   **Overview**: Utilizes AlphaFold2 gradients to co-evolve target backbones and binder sequences simultaneously, ideal for highly flexible target loops or complex binding vectors.
+*   **Compute Requirements**: NVIDIA >= 40GB VRAM (A100 Recommended).
+*   **Configuration Template (`bindcraft_config.json`)**:
+    ```json
+    {
+      "model": "BindCraft-AF2-Multimer",
+      "cycles": {
+        "num_hallucination_cycles": 5,
+        "mpnn_design_runs": 10,
+        "af2_repredicts": 3
+      },
+      "target": {
+        "pdb_path": "runs/pd-l1-prep/pd_l1_cropped.pdb",
+        "flexible_backbone": true
+      },
+      "seq_design": {
+        "tool": "ProteinMPNN",
+        "fixed_interface_residues_cutoff_angstrom": 4.0
+      }
+    }
+    ```
+
+---
+
+## 2. 自主经验学习与弹性模型编排 (Autonomous Experience-Driven Model Selection)
+
+Unlike rigid traditional frameworks that rely on hard-coded decision tables or fixed scoring arithmetic, **AIDD-Intern follows a dynamically orchestrated design philosophy**. The Agent operates with runtime freedom to analyze target traits, lookup historical benchmarks, and compile the most appropriate generator DAG.
+
+```mermaid
+graph TD
+    A[Analyze Target Traits: PTMs, Glycans, Membrane] --> B{Historical Skill Lookup}
+    B -- Match Found --> C[Load Reusable Skill Configurations]
+    B -- No Match --> D[Synthesize Empirical Strategy]
+    C --> E[Assemble Adaptive Workflow DAG]
+    D --> E
+    E --> F[Execute Generators & Cross-Validate]
+```
+
+### 2.1 零写死规则决策机制 (Zero Hard-Coded Decisions)
+During the campaign intake and planning stages:
+1. **Target Complexity Analysis**: The Agent analyzes biological barriers such as steric glycan shielding, membrane proximity, species variable residues, and fold complexity.
+2. **Prior Runs & Skill Lookup**: The Agent queries local `skills/*.md` files and workspace logs. For example, if a past campaign against a membrane-bound protein successfully used a specific **RFdiffusion3 + ProteinMPNN** sequence combination and achieved high in-vitro hit rates, the Agent will prioritize that combination over standard backprop hallucination.
+3. **Adaptive Workflow Composition (Dynamic DAG)**:
+   - Instead of applying static mapping rules, the Agent dynamically coordinates the execution flow:
+     - For standard, high-throughput campaigns, it may opt for an agile **PXDesign + BoltzGen** search pipeline.
+     - For targets requiring flexible hinge conformation, it autonomously delegates task steps to **BindCraft**.
+     - When precise, atom-level hydrogen bonds are requested, it dynamically routes the process to **RFdiffusion3 (All-Atom) + ProteinMPNN + AlphaFold3**, bypassing standard design paths.
+
+This paradigm ensures the system remains completely flexible, evolving its orchestration heuristics continuously as new structural design paradigms emerge.
+
+---
+
+## 3. 正交验证与自适应过滤决策流程 (Orthogonal Validation & Self-Reflective Triage)
+
+To protect the campaign against single-model over-fitting (reward hacking), candidate designs must pass through independent validation gates.
+
+### 3.1 互锁交叉验证 (Interlocking Validation Gates)
+Designs generated by RFD3, BindCraft, or PXDesign are dynamically routed to independent complex structure predictors: **Chai-1**, **Protenix**, or **AlphaFold3 (AF3)**.
+
+### 3.2 自适应过滤阈值 (Self-Calibrating Triage Gates)
+Rather than locking threshold parameters, the Agent is encouraged to autonomously calibrate gate parameters based on the observed distribution of folding confidences across the design batch:
+
+| Metric | Physical Metric | Baseline standard Gate | Adaptive Strict Gate | Self-Reflection Adjustment |
+| :--- | :--- | :--- | :--- | :--- |
+| **pLDDT** | Self-folding confidence | $\ge 80$ | $\ge 85$ | Auto-raise if global designs fold highly stably |
+| **ipTM** | Interface predicted TM | $\ge 0.75$ | $\ge 0.80$ | Auto-raise if binding interface forms easily |
+| **iPAE** | Interface alignment error | $\le 8$ Å | $\le 5$ Å | Tighten dynamically to ensure rigid interface locking |
+| **Clashes** | Atomic steric overlap | $= 0$ | $= 0$ | Absolute physical filter |
+| **RMSD** | Displacement vs scaffold | $\le 3.0$ Å | $\le 2.5$ Å | Dynamic window adjustment based on flexible regions |
+
+### 3.3 Dynamic Decision Routing
+Based on candidate triage, the Agent executes the following routing logic:
+- **`advance`**: Passes all strict thresholds and independent orthogonal validations. The candidate is immediately queued for wet-lab synthesis.
+- **`hold_for_orthogonal_validation`**: Has strong generator-specific scores but lacks independent folding confirmation. The Agent automatically schedules background validation tasks using Chai-1 or Protenix.
+- **`reject`**: Fails baseline criteria and is discarded to preserve budget.
+
+---
+
+## 4. 历史记忆与技能卡片编排 (History-Driven Workflow & Skill Cards)
+
+The ultimate evolution of the Hermes-style design loop is **Skill Promotion**. Once a complex target-binder pipeline achieves highly validated outputs, the Agent promotes the session log into a structured skill card:
 
 ```bash
-aidd-intern --prepare-aidd \
-  --target-name "PD-L1" \
-  --pdb-id 4ZQK \
-  --target-chains A \
-  --partner-chains B \
-  --residue-ranges A:19-134 \
-  --prep-project-dir runs/pd-l1-prep
+aidd-intern --export-skill \
+  --project-dir runs/pd-l1-campaign \
+  --skill-name "pd1_binder_campaign"
 ```
 
-This writes `aidd_preparation_manifest.json`, literature metadata, the raw PDB,
-the cropped PDB, `analysis/hotspots.json`, and a Markdown summary. The hotspot
-method is a deterministic contact heuristic for preparation and should not be
-described as experimental binding-energy validation.
+This lockable Markdown card (`skills/pd1_binder_campaign.md`) preserves:
+1. Target biological baseline and cropped structural inputs;
+2. Autonomously formulated model combinations and dynamic DAG pathways;
+3. Verified triage gate filters and resolved risk strategies.
 
-## Binder Tool Surface
+For future runs on homologous targets, the Agent bypasses de-novo trial-and-error, loading this promoted card as an empirical blueprint. This enables high-efficiency, zero-shot, reproducible binder design campaigns.
 
-`binder_design` supports:
+---
 
-- `plan_campaign`: returns campaign difficulty, recommended tool sequence,
-  risk register, acceptance criteria, and missing intake questions.
-- `create_project`: writes `binder_project.json` with target metadata,
-  requirements, workflow stages, and the campaign plan.
-- `inspect_outputs`: scans generator output directories and reports available
-  metric files and normalized metric keys.
-- `rank_candidates`: reads compatible CSV metrics, applies filters, computes a
-  combined rank score, attaches validation tier and next actions, and returns
-  top candidates plus one representative per `fold_cluster`.
-- `export_skill`: writes a reusable Markdown skill card under
-  `project_dir/skills/` using the manifest as the source of truth. This is the
-  Binder-side analogue of Hermes-style skill promotion and Claude Code project
-  memory.
+## Verification & QA
 
-The CSV parser accepts common names from BindCraft/PXDesign/BoltzGen-style
-outputs, including `plddt`, `iptm`, `ipae`, `pae`, `interface_score`,
-`clashes`, `rmsd`, `sequence`, `structure_path`, `validation_source`, and
-`fold_cluster`. It also understands interface and developability metrics such
-as contacts, hydrogen bonds, buried SASA, hydrophobic SASA, and aggregation
-score when present.
-
-## Acceptance Criteria
-
-Default filters are intentionally conservative for early triage:
-
-```json
-{
-  "plddt": 80,
-  "iptm": 0.75,
-  "ipae": 8,
-  "clashes": 0,
-  "rmsd": 3
-}
-```
-
-Strict planning raises these to `plddt >= 85`, `iptm >= 0.8`, `ipae <= 5`,
-`clashes <= 0`, and `rmsd <= 2.5`. These are not wet-lab success guarantees;
-they are gates for deciding what deserves additional compute and human review.
-
-## Risk Rules
-
-The default risk register always flags:
-
-- single-model reward hacking;
-- false-positive interface confidence.
-
-It adds campaign-specific risks when requirements mention glycosylation, PTMs,
-membrane context, species cross-reactivity, or forbidden epitopes. The final
-report should explicitly state which risks were resolved by computation and
-which remain experimental risks.
-
-## Relationship To Protein Design Tools
-
-Use `binder_design` as the high-level campaign layer. It is lightweight and
-works even when heavy GPU tools are unavailable.
-
-Use the protein-design tools when you need direct local specs for PXDesign,
-BoltzGen, BindCraft, validation dispatch, GPU preflight, and ACE playbook
-memory. Large model weights, PyRosetta, CUDA frameworks, and long-running
-scientific jobs should stay behind subprocess, container, MCP, sandbox, or HF
-Jobs boundaries.
-
-## Skill Promotion
-
-The skill export is intentionally file-backed. A generated skill card should be
-small, readable, and evidence-based:
-
-- keep the manifest as the source of truth;
-- record the stable intake questions, tool strategy, filters, and failure modes;
-- prune dead steps when a later campaign proves they no longer help;
-- promote only workflows that repeat, because that is what makes them useful.
-
-This matches the pattern used by Hermes-style agents and OpenClaw-style
-workspace memory: keep durable lessons in Markdown files, then load them again
-when a later run repeats the same shape of work.
-
-## Verification
-
-Focused checks:
+To verify that the binder design tool and its dynamic campaign planner operate correctly and conform to runtime schemas, execute:
 
 ```bash
 uv run pytest tests/unit/test_binder_design_tool.py

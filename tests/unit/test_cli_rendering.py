@@ -551,3 +551,167 @@ async def test_initial_sandbox_preload_waits_before_prompt():
     )
 
     assert waited is True
+
+
+def test_print_usage_status(monkeypatch):
+    from types import SimpleNamespace
+    from agent.utils.terminal_display import print_usage_status
+
+    output = StringIO()
+    console = Console(
+        file=output,
+        color_system=None,
+        theme=terminal_display._THEME,
+        width=120,
+    )
+    monkeypatch.setattr(terminal_display, "_console", console)
+
+    # 1. No active session (None)
+    print_usage_status(None)
+    assert "No active session or context manager available" in output.getvalue()
+
+    # 2. Session with no llm calls
+    output.seek(0)
+    output.truncate(0)
+
+    class FakeContext:
+        def __init__(self):
+            self.items = []
+            self.model_max_tokens = 65536
+            self.compaction_threshold = 58982
+
+        def estimate_usage(self, model_name: str) -> int:
+            return 100
+
+    session = SimpleNamespace(
+        context_manager=FakeContext(),
+        config=SimpleNamespace(model_name="openai/gpt-5.5"),
+        turn_count=1,
+        logged_events=[],
+    )
+    print_usage_status(session)
+    rendered = output.getvalue()
+    assert "Session Token & Cost Usage Report" in rendered
+    assert "No LLM calls recorded in this session yet" in rendered
+
+    # 3. Session with llm calls
+    output.seek(0)
+    output.truncate(0)
+
+    llm_event = {
+        "event_type": "llm_call",
+        "data": {
+            "model": "openai/gpt-5.5",
+            "kind": "main",
+            "latency_ms": 1200,
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "total_tokens": 1200,
+            "cache_read_tokens": 500,
+            "cache_creation_tokens": 200,
+            "cost_usd": 0.015,
+        },
+    }
+    session.logged_events = [llm_event]
+
+    print_usage_status(session)
+    rendered = output.getvalue()
+    assert "Session Token & Cost Usage Report" in rendered
+    assert "Total Estimated Cost: $0.01500" in rendered
+    assert "openai/gpt-5.5" in rendered
+    assert "main" in rendered
+    assert "1,200ms" in rendered
+
+
+def test_print_plan_no_active_plan(monkeypatch):
+    from agent.utils.terminal_display import print_plan
+
+    output = StringIO()
+    console = Console(
+        file=output,
+        color_system=None,
+        theme=terminal_display._THEME,
+        width=120,
+    )
+    monkeypatch.setattr(terminal_display, "_console", console)
+
+    # Mock get_current_plan to return None
+    monkeypatch.setattr("agent.tools.plan_tool.get_current_plan", lambda: None)
+
+    print_plan()
+    assert "No active plan. Use plan_tool to create a plan" in output.getvalue()
+
+
+def test_print_plan_active_plan(monkeypatch):
+    from agent.utils.terminal_display import print_plan
+
+    output = StringIO()
+    console = Console(
+        file=output,
+        color_system=None,
+        theme=terminal_display._THEME,
+        width=120,
+    )
+    monkeypatch.setattr(terminal_display, "_console", console)
+
+    fake_plan = [
+        {"id": "1", "content": "Research & Literature stage", "status": "completed"},
+        {"id": "2", "content": "Strategy & Preflight stage", "status": "in_progress"},
+        {"id": "3", "content": "Execution & Run stage", "status": "pending"},
+    ]
+    monkeypatch.setattr("agent.tools.plan_tool.get_current_plan", lambda: fake_plan)
+
+    print_plan()
+    rendered = output.getvalue()
+    assert "Current Active Plan:" in rendered
+    assert "Research & Literature stage" in rendered
+    assert "Strategy & Preflight stage" in rendered
+    assert "Execution & Run stage" in rendered
+    assert "1/3 done" in rendered
+
+
+@pytest.mark.asyncio
+async def test_slash_command_usage_and_plan(monkeypatch):
+    printed_usage = False
+    printed_plan = False
+
+    def fake_print_usage(session):
+        nonlocal printed_usage
+        printed_usage = True
+
+    def fake_print_plan():
+        nonlocal printed_plan
+        printed_plan = True
+
+    monkeypatch.setattr(terminal_display, "print_usage_status", fake_print_usage)
+    monkeypatch.setattr(terminal_display, "print_plan", fake_print_plan)
+
+    class Config:
+        model_name = "openrouter/openai/gpt-5.2"
+
+    class Session:
+        pass
+
+    session = Session()
+
+    # Test /usage
+    res_usage = await main_mod._handle_slash_command(
+        "/usage",
+        Config,
+        [session],
+        asyncio.Queue(),
+        [0],
+    )
+    assert res_usage is None
+    assert printed_usage is True
+
+    # Test /plan
+    res_plan = await main_mod._handle_slash_command(
+        "/plan",
+        Config,
+        [session],
+        asyncio.Queue(),
+        [0],
+    )
+    assert res_plan is None
+    assert printed_plan is True

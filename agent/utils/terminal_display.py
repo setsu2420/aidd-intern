@@ -204,6 +204,132 @@ def print_context_status(
         _console.print(f"{_I}[{style}]{escape(text)}[/{style}]")
 
 
+def print_usage_status(session: Any) -> None:
+    """Print complete token and cost usage report (Hermes Agent style)."""
+    status = _context_status(session)
+    if status is None:
+        _console.print(
+            f"{_I}[bold red]No active session or context manager available.[/bold red]"
+        )
+        return
+
+    used_tokens = int(status["used_tokens"])
+    max_tokens = int(status["max_tokens"])
+    threshold = int(status["threshold"])
+    percent = float(status["percent"])
+
+    # Gather all llm_call events from session.logged_events
+    llm_calls = []
+    if getattr(session, "logged_events", None):
+        llm_calls = [
+            e for e in session.logged_events if e.get("event_type") == "llm_call"
+        ]
+
+    total_prompt = sum(
+        int((e.get("data") or {}).get("prompt_tokens") or 0) for e in llm_calls
+    )
+    total_completion = sum(
+        int((e.get("data") or {}).get("completion_tokens") or 0) for e in llm_calls
+    )
+    total_overall = sum(
+        int((e.get("data") or {}).get("total_tokens") or 0) for e in llm_calls
+    )
+    total_cache_read = sum(
+        int((e.get("data") or {}).get("cache_read_tokens") or 0) for e in llm_calls
+    )
+    total_cache_creation = sum(
+        int((e.get("data") or {}).get("cache_creation_tokens") or 0) for e in llm_calls
+    )
+    total_cost = sum(
+        float((e.get("data") or {}).get("cost_usd") or 0.0) for e in llm_calls
+    )
+
+    # Print general usage header
+    _console.print()
+    _console.print(
+        f"{_I}[bold rgb(255,200,80)]=== Session Token & Cost Usage Report ===[/bold rgb(255,200,80)]"
+    )
+
+    # Render Context Footprint Status
+    text = (
+        f"Context Window: {_context_bar(percent)} {_format_token_count(used_tokens)} / "
+        f"{_format_token_count(max_tokens)} ({percent:.1f}%)"
+    )
+    if threshold and threshold != max_tokens:
+        text += f" | compact @ {_format_token_count(threshold)}"
+    style = _context_status_style(percent)
+    _console.print(f"{_I}[{style}]{escape(text)}[/{style}]")
+    _console.print(
+        f"{_I}[muted]Active context items: {status['items']} | turns: {status['turns']}[/muted]"
+    )
+    _console.print()
+
+    # Render Session Aggregated Spend
+    _console.print(f"{_I}[bold]Cumulative Session Metrics:[/bold]")
+    _console.print(
+        f"{_I}  • [bold cyan]Total Estimated Cost:[/bold cyan] [green]${total_cost:.5f}[/green]"
+    )
+    _console.print(f"{_I}  • [bold cyan]Total LLM Calls:[/bold cyan] {len(llm_calls)}")
+    _console.print(
+        f"{_I}  • [bold cyan]Total Tokens Transferred:[/bold cyan] {total_overall:,} tokens"
+    )
+    _console.print(f"{_I}    - [muted]Prompt input tokens:[/muted] {total_prompt:,}")
+    _console.print(
+        f"{_I}    - [muted]Completion output tokens:[/muted] {total_completion:,}"
+    )
+    _console.print(f"{_I}  • [bold cyan]Prompt Caching Efficiency:[/bold cyan]")
+    _console.print(
+        f"{_I}    - [green]Cache hit (read) tokens:[/green] {total_cache_read:,}"
+    )
+    _console.print(
+        f"{_I}    - [yellow]Cache miss (written) tokens:[/yellow] {total_cache_creation:,}"
+    )
+
+    if not llm_calls:
+        _console.print()
+        _console.print(f"{_I}[dim]No LLM calls recorded in this session yet.[/dim]")
+        _console.print()
+        return
+
+    # Render Rich Table of all LLM calls
+    from rich.table import Table
+
+    table = Table(
+        title="LLM Call Trace History",
+        title_justify="left",
+        expand=False,
+        show_header=True,
+        header_style="bold magenta",
+        border_style="dim",
+    )
+    table.add_column("#", justify="right")
+    table.add_column("Model", style="cyan")
+    table.add_column("Kind", style="blue")
+    table.add_column("Latency", justify="right", style="green")
+    table.add_column("Prompt Tokens", justify="right")
+    table.add_column("Completion Tokens", justify="right")
+    table.add_column("Cache Hit", justify="right", style="dim green")
+    table.add_column("Cost", justify="right", style="bold green")
+
+    for idx, e in enumerate(llm_calls, 1):
+        data = e.get("data") or {}
+        model = data.get("model", "unknown")
+        kind = data.get("kind", "main")
+        latency = f"{data.get('latency_ms', 0):,}ms"
+        prompt_tk = f"{data.get('prompt_tokens', 0):,}"
+        completion_tk = f"{data.get('completion_tokens', 0):,}"
+        cache_hit = f"{data.get('cache_read_tokens', 0):,}"
+        cost = f"${data.get('cost_usd', 0.0):.5f}"
+
+        table.add_row(
+            str(idx), model, kind, latency, prompt_tk, completion_tk, cache_hit, cost
+        )
+
+    _console.print()
+    _console.print(table)
+    _console.print()
+
+
 # ── Banner ─────────────────────────────────────────────────────────────
 
 
@@ -538,6 +664,8 @@ HELP_ROWS: tuple[tuple[str, str, str], ...] = (
     ),
     ("/yolo", "", "Toggle auto-approve mode"),
     ("/status", "", "Current model & turn count"),
+    ("/usage", "", "Show detailed token consumption and costs"),
+    ("/plan", "", "Show the current execution stages and plan"),
     (
         "/share-traces",
         "[public|private]",
@@ -625,7 +753,14 @@ def format_plan_display() -> str:
 def print_plan() -> None:
     plan_str = format_plan_display()
     if plan_str:
+        _console.print(
+            "[bold rgb(255,200,80)]Current Active Plan:[/bold rgb(255,200,80)]"
+        )
         _console.print(plan_str)
+    else:
+        _console.print(
+            "[dim]No active plan. Use plan_tool to create a plan (Research -> Strategy -> Execution -> Validation).[/dim]"
+        )
 
 
 # ── Formatting for plan_tool output (used by plan_tool handler) ────────
