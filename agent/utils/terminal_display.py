@@ -214,11 +214,9 @@ def print_banner(
 ) -> None:
     """Print particle logo then CRT boot sequence with system info."""
     model_label = model or "unknown"
-    user_label = hf_user or "not logged in"
     if not _boot_animation_enabled():
         _console.print()
         _console.print(f"{_I}[tool.name]aidd-intern[/tool.name] runtime starting...")
-        _console.print(f"{_I}[muted]User:[/muted] {user_label}")
         _console.print(f"{_I}[muted]Model:[/muted] {model_label}")
         _console.print(
             f"{_I}[muted]Tool runtime:[/muted] {tool_runtime or 'local filesystem'}"
@@ -242,7 +240,6 @@ def print_banner(
 
     boot_lines = [
         (f"{_I}aidd-intern runtime starting...", gold),
-        (f"{_I}  User: {user_label}", dim_gold),
         (f"{_I}  Model: {model_label}", dim_gold),
         (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", dim_gold),
         (f"{_I}  Tools: loading...", dim_gold),
