@@ -9,15 +9,7 @@
 
 # AIDD-Intern
 
-AIDD-Intern 是一个面向 AI drug discovery 的异步智能体运行时。它把 LLM
-模型调用、上下文管理、工具路由、MCP、会话追踪、Web UI 和 AIDD
-领域工具分开实现，让同一个项目既能做无 GPU 的资料调研，也能在具备外部
-计算资源时调度 binder/protein design 工作流。
-
-本项目不会在本地进程中加载 LLM 权重，也不会把 BindCraft、BoltzGen、
-PXDesign、Chai-1、Protenix 等重型科学工具直接导入 FastAPI 或 CLI
-进程。没有本地 GPU 时，推荐使用远程 LLM API 做调研任务；需要生成或验证蛋白 binder 时，再通过 MCP、子进程、容器、集群
-或 Hugging Face Jobs 接入对应工具。
+AIDD-Intern 是一个面向 AI drug discovery 的AI Agent。
 
 ## 目录
 
@@ -37,27 +29,19 @@ PXDesign、Chai-1、Protenix 等重型科学工具直接导入 FastAPI 或 CLI
 
 ## 核心功能
 
-- **带来源链接的调研**：内置 `research` 子智能体、`web_search`、
-  `literature_lookup`、`hf_papers`、GitHub/HF 文档工具和 `aidd_bio`。
-  调研输出要求给出论文、官方文档、代码仓库、数据集/模型卡或网页链接。
-- **真正的 Google Search**：配置 `GOOGLE_SEARCH_API_KEY` 和
-  `GOOGLE_SEARCH_ENGINE_ID` 后，`web_search` 使用 Google Custom Search
-  JSON API，并支持 `recent_days` 和 `sort_by_date` 优先查找近期资料。
-- **AIDD binder 工作流**：内置 `binder_design`，用于规划 binder campaign、创建项目 manifest、检查
-  generator 输出、排序候选 binder、标记验证缺口并导出可复用 skill card。
-- **AIDD 准备阶段**：内置 `aidd_prepare`，用于创建准备项目、收集文献元数据、
-  下载 RCSB PDB、剪裁目标结构，并基于目标链/伴侣链接触排序热点残基候选。
-- **Protein design 扩展**：PXDesign、BoltzGen、BindCraft 生成工具，以及
-  Chai-1、Protenix、Foldseek 验证边界会作为普通内置工具注册；重型本地 MCP
-  launcher 仍需要显式安装和环境变量启用。
+- **调研资料**：  调研输出要求给出论文、官方文档、代码仓库、数据集/模型卡或网页链接
+
+- **AIDD工作流**：规划 Binder Design、创建项目 manifest、检查generator 输出、排序候选 binder、标记验证缺口并导出可复用 skill card。
+
+- **AIDD 准备阶段**：创建准备项目、收集文献元数据、下载 PDB、剪裁目标结构，并基于目标链/伴侣链接触排序热点残基候选。
+
 - **MCP 集成**：默认配置 Hugging Face MCP 和本地 ProteinMCP stdio
   launcher。冷启动会跳过当前不可用的 MCP，避免无 token 或无 GPU 时阻塞。
-- **上下文窗口自适应**：运行时会根据接入模型、provider 信息和显式环境变量
-  调整压缩策略。未知本地模型默认采用保守的 65,536 token 策略，远程
-  OpenAI-compatible 模型不会被固定到本地 65k 策略。
+- **上下文窗口自适应**：运行时会根据接入模型、provider 信息和显式环境变量调整压缩策略。
+  
 - **本地 CLI 和 Web UI**：Python CLI 用于真实交互式/无头智能体运行；
-  FastAPI + React Web UI 用于浏览器会话；Node.js CLI 用于 smoke、
-  integration 和 eval 测试。
+  FastAPI + React Web UI 用于浏览器会话
+  
 - **会话追踪**：会话可保存为 Claude Code JSONL 兼容格式，并上传到用户自己的
   Hugging Face 私有 dataset，便于复盘工具调用和模型回答。
 
