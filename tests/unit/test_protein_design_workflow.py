@@ -30,8 +30,10 @@ def test_protein_design_tools_are_registered_for_llm():
     assert "run_pxdesign" in specs
     assert "run_boltzgen" in specs
     assert "run_bindcraft" in specs
+    assert "run_rfd3" in specs
     assert "protein_design_ace_playbook" in specs
     assert "target_pdb" in specs["run_pxdesign"].parameters["required"]
+    assert "target_pdb" in specs["run_rfd3"].parameters["required"]
 
 
 def test_protein_design_oom_parser_detects_cuda_oom():
@@ -67,12 +69,16 @@ async def test_protein_design_approval_policy_thresholds():
 
     assert await policy.decide("run_pxdesign", {"num_samples": 201}, None)
     assert not await policy.decide("run_pxdesign", {"num_samples": 200}, None)
+    assert await policy.decide("run_rfd3", {"num_samples": 201}, None)
+    assert not await policy.decide("run_rfd3", {"num_samples": 200}, None)
     assert await policy.decide("run_bindcraft", {"iterations": 101}, None)
 
 
 def test_core_approval_policy_covers_protein_design_tools():
     assert agent_loop._needs_approval("run_pxdesign", {"num_samples": 250})
     assert agent_loop._needs_approval("run_boltzgen", {"num_samples": 250})
+    assert agent_loop._needs_approval("run_rfd3", {"num_samples": 250})
+    assert not agent_loop._needs_approval("run_rfd3", {"num_samples": 200})
     assert agent_loop._needs_approval("run_bindcraft", {"iterations": 101})
     assert not agent_loop._needs_approval("run_bindcraft", {"iterations": 100})
 

@@ -185,7 +185,174 @@ _PROTEIN_DESIGN_TOOL_SPECS = [
         "module": "agent.workflows.protein_design.tools",
         "handler": "_bindcraft_tool",
     },
+    {
+        "name": "run_rfd3",
+        "description": (
+            "Generate protein binders with atom-level precision and all-atom modeling using RFdiffusion3 (RFD3). "
+            "Optimized for 10x speedup and high-precision target hotspot compliance."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_pdb": {
+                    "type": "string",
+                    "description": "Path to target PDB file.",
+                },
+                "interface_residues": {
+                    "type": "string",
+                    "description": "Comma-separated target interface residue indices.",
+                },
+                "num_samples": {"type": "integer", "default": 100},
+                "hotspot_residues": {
+                    "type": "string",
+                    "description": "Optional comma-separated target hotspot residue numbers.",
+                },
+                "atom_precision": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether to request all-atom high-precision modeling.",
+                },
+                "tool_runtime": {
+                    "type": "string",
+                    "enum": ["local", "sandbox"],
+                    "default": "local",
+                },
+            },
+            "required": ["target_pdb"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_rfd3_tool",
+    },
 ]
+
+
+_MEMU_TOOL_SPECS = [
+    {
+        "name": "memu_retrieve_memories",
+        "description": (
+            "Retrieve persistent user preferences, past binder-design campaign histories, "
+            "hyperparameter recommendations, and successful tool-orchestration strategies using MemU semantic search. "
+            "USE THIS TOOL to 'remember' what worked in previous runs or query user's specific instructions."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Semantic query describing what memory, preference, or past run parameters to search.",
+                },
+                "user_id": {
+                    "type": "string",
+                    "default": "default_user",
+                    "description": "Unique identifier of the user to fetch memories for.",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "default": "default_agent",
+                    "description": "Unique identifier of the agent.",
+                },
+            },
+            "required": ["query"],
+        },
+        "handler": "memu_retrieve_handler",
+    },
+    {
+        "name": "memu_memorize_session",
+        "description": (
+            "Memorize the current conversation context, successful binder design hyperparams, "
+            "or new custom protocols to MemU persistent memory layer. Extracts structured memory categories for future use."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "conversation": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {"type": "string", "enum": ["user", "assistant"]},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["role", "content"],
+                    },
+                    "description": "List of recent conversation messages (minimum 3 messages) to extract memory from.",
+                },
+                "user_id": {
+                    "type": "string",
+                    "default": "default_user",
+                    "description": "Unique identifier of the user.",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "default": "default_agent",
+                    "description": "Unique identifier of the agent.",
+                },
+                "user_name": {
+                    "type": "string",
+                    "description": "Display name of the user.",
+                },
+                "agent_name": {
+                    "type": "string",
+                    "description": "Display name of the agent.",
+                },
+            },
+            "required": ["conversation"],
+        },
+        "handler": "memu_memorize_handler",
+    },
+]
+
+
+async def memu_retrieve_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
+    from agent.core.memu import MemUClient
+
+    client = MemUClient()
+    if not client.is_configured():
+        return (
+            "Error: MEMU_API_KEY environment variable is not configured. MemU long-term memory is disabled.",
+            False,
+        )
+    query = arguments["query"]
+    user_id = arguments.get("user_id") or "default_user"
+    agent_id = arguments.get("agent_id") or "default_agent"
+    try:
+        res = client.retrieve(user_id=user_id, agent_id=agent_id, query=query)
+        import json
+
+        return json.dumps(res, indent=2, ensure_ascii=False), True
+    except Exception as e:
+        return f"Error retrieving memories: {e}", False
+
+
+async def memu_memorize_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
+    from agent.core.memu import MemUClient
+
+    client = MemUClient()
+    if not client.is_configured():
+        return (
+            "Error: MEMU_API_KEY environment variable is not configured. MemU long-term memory is disabled.",
+            False,
+        )
+    conversation = arguments["conversation"]
+    user_id = arguments.get("user_id") or "default_user"
+    agent_id = arguments.get("agent_id") or "default_agent"
+    user_name = arguments.get("user_name")
+    agent_name = arguments.get("agent_name")
+    try:
+        res = client.memorize(
+            conversation=conversation,
+            user_id=user_id,
+            agent_id=agent_id,
+            user_name=user_name,
+            agent_name=agent_name,
+        )
+        import json
+
+        return json.dumps(res, indent=2, ensure_ascii=False), res.get(
+            "status"
+        ) != "FAILED"
+    except Exception as e:
+        return f"Error saving session memory: {e}", False
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -734,6 +901,16 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             handler=_lazy_handler(spec["module"], spec["handler"]),
         )
         for spec in _PROTEIN_DESIGN_TOOL_SPECS
+    )
+
+    tools.extend(
+        ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            parameters=spec["parameters"],
+            handler=globals()[spec["handler"]],
+        )
+        for spec in _MEMU_TOOL_SPECS
     )
 
     # Sandbox or local tools (highest priority)

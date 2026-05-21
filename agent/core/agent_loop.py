@@ -257,7 +257,7 @@ def _base_needs_approval(
 
         return True
 
-    if tool_name in {"run_pxdesign", "run_boltzgen"}:
+    if tool_name in {"run_pxdesign", "run_boltzgen", "run_rfd3"}:
         return int(tool_args.get("num_samples") or 0) > 200
 
     if tool_name == "run_bindcraft":

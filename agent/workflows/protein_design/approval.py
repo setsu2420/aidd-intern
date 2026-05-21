@@ -10,7 +10,7 @@ class ProteinDesignApprovalPolicy:
 
     async def decide(self, tool_name: str, args: dict[str, Any], session: Any) -> bool:
         """Return True when the call must pause for human authorization."""
-        if tool_name in {"run_pxdesign", "run_boltzgen"}:
+        if tool_name in {"run_pxdesign", "run_boltzgen", "run_rfd3"}:
             if int(args.get("num_samples") or 0) > 200:
                 return True
         if tool_name == "run_bindcraft":

@@ -25,11 +25,13 @@ MIN_SAFE_GPU_FREE_MB = 8_000
 TOOL_GPU_MB_PER_SAMPLE = {
     "pxdesign": 450,
     "boltzgen": 700,
+    "rfd3": 200,
 }
 TOOL_BASE_GPU_MB = {
     "pxdesign": 6_000,
     "boltzgen": 10_000,
     "bindcraft": 14_000,
+    "rfd3": 8_000,
 }
 MAX_TOOL_OUTPUT_CHARS = 12_000
 
@@ -308,6 +310,38 @@ def _write_bindcraft_json(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+async def run_rfd3_handler(
+    target_pdb: str,
+    interface_residues: str | None = None,
+    num_samples: int = 100,
+    hotspot_residues: str | None = None,
+    atom_precision: bool = True,
+    tool_runtime: str = "local",
+) -> dict[str, Any]:
+    """Execute RFdiffusion3 (RFD3) atom-level diffusion and design."""
+    target = _safe_path(target_pdb)
+    gpu_plan = _gpu_plan("rfd3", num_samples=num_samples)
+    if not gpu_plan["can_run"]:
+        return _base_output("rfd3", [], 75, "", gpu_plan["reason"] or "", gpu_plan)
+    num_samples = int(gpu_plan.get("num_samples", num_samples))
+    command = [
+        *_runtime_prefix("rfd3", tool_runtime),
+        "generate",
+        "--target-pdb",
+        str(target),
+        "--num-samples",
+        str(num_samples),
+    ]
+    if interface_residues:
+        command.extend(["--interface-residues", interface_residues])
+    if hotspot_residues:
+        command.extend(["--hotspot-residues", hotspot_residues])
+    if atom_precision:
+        command.append("--atom-precision")
+    returncode, stdout, stderr = await _run_command(command)
+    return _base_output("rfd3", command, returncode, stdout, stderr, gpu_plan)
+
+
 async def run_pxdesign_handler(
     target_pdb: str,
     interface_residues: str,
@@ -489,6 +523,18 @@ async def run_bindcraft_handler(
 
 def _format_result(payload: dict[str, Any]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+async def _rfd3_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    result = await run_rfd3_handler(
+        target_pdb=arguments["target_pdb"],
+        interface_residues=arguments.get("interface_residues"),
+        num_samples=int(arguments.get("num_samples") or 100),
+        hotspot_residues=arguments.get("hotspot_residues"),
+        atom_precision=bool(arguments.get("atom_precision", True)),
+        tool_runtime=arguments.get("tool_runtime") or "local",
+    )
+    return _format_result(result), result["returncode"] == 0
 
 
 async def _pxdesign_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
