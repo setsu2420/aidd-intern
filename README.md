@@ -89,16 +89,28 @@ Hugging Face Jobs.
 Follow the `ml-intern` style installation to set up the agent runtime:
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
-
-# 2. Sync dependencies and install the CLI tool
 uv sync --extra dev
 uv tool install -e .
-
-# 3. Configure environment
 cp .env.example .env
+```
+
+Please use the HTTPS address above for first-time installation. The SSH address `git@github.com:setsu2420/aidd-intern.git` is only available if you have already configured a GitHub SSH key and have repository access.
+
+Note: You must run `uv sync` and `uv tool install -e .` inside the `aidd-intern` directory because they require the local `pyproject.toml` file to resolve dependencies.
+
+If your environment encounters a `GnuTLS recv error (-110)` or other GitHub HTTPS transport failures during `git clone`, retry by forcing Git to use HTTP/1.1 with a shallow clone:
+
+```bash
+git -c http.version=HTTP/1.1 clone --depth 1 \
+  https://github.com/setsu2420/aidd-intern.git
+```
+
+If you need a robust one-click bootstrap script that automatically falls back to downloading the GitHub source archive when Git fails, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
 ```
 
 After installation, the `aidd-intern` command will be available in your shell.
@@ -115,6 +127,22 @@ AIDD-Intern defaults to using **SiliconFlow** with the **DeepSeek-V4-Flash** mod
     ```bash
     AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
     ```
+
+Before your first real LLM call, you must configure your API keys. Edit `.env` and set at least one API key corresponding to your chosen model. For example:
+- `openrouter/openai/gpt-5.2` requires `OPENROUTER_API_KEY`
+- `openai/gpt-5.5` requires `OPENAI_API_KEY`
+- `anthropic/claude-opus-4-6` requires `ANTHROPIC_API_KEY`
+- `siliconflow/deepseek-ai/DeepSeek-V4-Flash` requires `SILICONFLOW_API_KEY`
+
+The Node package harness can help configure provider settings interactively without manually editing files:
+
+```bash
+aidd-intern configure-llm
+aidd-intern configure-llm openrouter
+aidd-intern configure-llm local
+```
+
+The config setup follows the pattern of modern developer assistants: select a provider, set a default model, configure its specific credentials in `.env`, and check the status using a doctor command before your first session.
 
 Run the diagnostic to verify your setup:
 
@@ -145,24 +173,49 @@ aidd-intern configure-llm openrouter
 
 ## Local Updates
 
-Update your local checkout and the installed CLI:
+If you installed the Node package globally via GitHub, update it using:
+
+```bash
+npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
+```
+
+Note: Trying to run `npm install -g aidd-intern@latest` currently returns
+404 because the package is not yet published to the public npm registry.
+
+The Node CLI also provides interactive update entries that print progress step-by-step:
 
 ```bash
 aidd-intern update
-```
-
-Use `--with-frontend` if you also need to refresh frontend dependencies:
-
-```bash
-aidd-intern update --with-frontend
-```
-
-For a dry run or to check version status:
-
-```bash
-aidd-intern update --dry-run
 aidd-intern update --check
+aidd-intern update --dry-run
 ```
+
+`aidd-intern update` only refreshes the globally installed Node harness package; it does not touch your source checkout, nor does it update your Python runtime managed via `uv tool install -e .`. If your `aidd-intern` command currently points to the Python CLI, use the `npm run update:local` source-checkout update path below instead.
+
+For a source checkout update, run in your repository root:
+
+```bash
+scripts/update-local.sh
+npm run update:local
+```
+
+This script will print and execute:
+
+1. `git pull --ff-only origin <current-branch>`
+2. `uv sync --extra dev`
+3. `uv tool install -e .`
+4. Optional frontend dependency refresh with `npm ci` in `frontend/`
+5. `command -v aidd-intern`
+
+To sync frontend dependencies as well, run:
+
+```bash
+scripts/update-local.sh --with-frontend
+npm run update:local:frontend
+node src/cli.ts update --checkout --with-frontend
+```
+
+`git pull --ff-only` will fail if your local branch has diverged from the remote, rather than silently creating a merge commit. Set `AIDD_INTERN_UPDATE_REMOTE` or `AIDD_INTERN_UPDATE_BRANCH` only if you explicitly need to update from a different remote or branch.
 
 ## Local Diagnostics
 

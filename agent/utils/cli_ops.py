@@ -1,8 +1,6 @@
 """CLI operations for aidd-intern: update, configure-llm, etc."""
 
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

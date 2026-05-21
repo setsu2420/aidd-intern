@@ -1873,7 +1873,9 @@ def cli():
     )
 
     # Arguments for 'update' command
-    parser.add_argument("--check", action="store_true", help="[update] Check for updates")
+    parser.add_argument(
+        "--check", action="store_true", help="[update] Check for updates"
+    )
     parser.add_argument(
         "--dry-run", action="store_true", help="[update] Print update commands"
     )

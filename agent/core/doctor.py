@@ -349,3 +349,7 @@ def _check_proteinmcp_setting() -> DoctorCheck:
         "AIDD_INTERN_ENABLE_PROTEINMCP=1 but launcher script is missing",
         "Restore scripts/run-proteinmcp-local.sh or disable ProteinMCP.",
     )
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_doctor())
