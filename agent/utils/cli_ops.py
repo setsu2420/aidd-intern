@@ -359,3 +359,61 @@ def run_interactive_first_run_setup() -> None:
         load_dotenv(dotenv_path, override=True)
     except Exception as e:
         print(f"\nerror: 写入 `.env` 文件失败: {e}")
+
+
+def maybe_interactive_update() -> None:
+    """Check for update at CLI startup. If outdated and stdout is a TTY, prompt to update instantly."""
+    import sys
+    import os
+    from agent.core.version_check import check_for_update
+
+    # Check if disabled
+    if os.environ.get("AIDD_INTERN_DISABLE_UPDATE_CHECK") in ("1", "true", "TRUE"):
+        return
+
+    # Check if it's an interactive TTY session
+    if not sys.stdout.isatty():
+        return
+
+    try:
+        # Check for update with a 3.0s timeout so we do not block user startup in bad network conditions
+        result = check_for_update(timeout=3.0)
+    except Exception:
+        # Silently ignore checks failure (e.g. offline or no git)
+        return
+
+    if result.status != "outdated":
+        return
+
+    # Get short SHAs for neat display
+    curr_sha = result.current[:7] if result.current else "unknown"
+    late_sha = result.latest[:7] if result.latest else "unknown"
+
+    print("\n" + "=" * 65)
+    print("🎉 检测到 AIDD-Intern 智能药物设计助手有新版本可用！")
+    print("-" * 65)
+    print(f"  - 当前版本: {curr_sha}")
+    print(f"  - 最新版本: {late_sha} (来自 {result.source})")
+    print("  - 更新将同步最新的蛋白质结合剂设计流程与算法性能优化")
+    print("=" * 65)
+
+    try:
+        choice = input("是否要立即自动拉取并更新项目代码？(y/N): ").strip().lower()
+        if choice in ("y", "yes"):
+            print("\n开始自动执行系统更新，这可能需要数十秒，请稍候...")
+            code = run_update(with_frontend=False)
+            if code == 0:
+                print("\n" + "=" * 65)
+                print("🎉 系统已成功更新到最新版本！")
+                print("请重新运行 `aidd-intern` 开启全新的智能大分子设计之旅。")
+                print("=" * 65 + "\n")
+                sys.exit(0)
+            else:
+                print(
+                    f"\nwarning: 自动更新脚本返回了非零状态码 ({code})，更新可能未完全成功。"
+                )
+                print("您可以稍后手动执行 `scripts/update-local.sh` 尝试升级。\n")
+        else:
+            print("已跳过自动升级。系统正在继续启动...\n")
+    except (KeyboardInterrupt, EOFError):
+        print("\n已取消升级。系统正在继续启动...\n")

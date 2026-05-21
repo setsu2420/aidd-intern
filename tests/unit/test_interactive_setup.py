@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from agent.utils.cli_ops import (
+    maybe_interactive_update,
     needs_interactive_setup,
     run_interactive_first_run_setup,
 )
@@ -95,3 +98,110 @@ def test_run_interactive_first_run_setup_writes_dotenv(tmp_path, monkeypatch):
     )
     # 3. Assert provider-specific API key is written
     assert "SILICONFLOW_API_KEY=sk-mock-siliconflow-api-key" in content
+
+
+def test_maybe_interactive_update_disabled(monkeypatch):
+    import sys
+
+    # Disable by env variable
+    monkeypatch.setenv("AIDD_INTERN_DISABLE_UPDATE_CHECK", "1")
+
+    # Mock sys.stdout.isatty to True to test env check first
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    # We should return early and not raise any exceptions
+    maybe_interactive_update()
+
+
+def test_maybe_interactive_update_non_tty(monkeypatch):
+    import sys
+
+    # Mock sys.stdout.isatty to False
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    # We should return early and not raise any exceptions
+    maybe_interactive_update()
+
+
+def test_maybe_interactive_update_is_current(monkeypatch):
+    import sys
+
+    # Mock sys.stdout.isatty to True
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    # Mock version check result as current
+    from agent.core.version_check import VersionCheckResult
+
+    mock_result = VersionCheckResult(
+        status="current",
+        source="origin/main",
+        detail="matches",
+    )
+    monkeypatch.setattr(
+        "agent.core.version_check.check_for_update",
+        lambda *args, **kwargs: mock_result,
+    )
+
+    # Should skip update without prompting or exit
+    maybe_interactive_update()
+
+
+def test_maybe_interactive_update_outdated_declined(monkeypatch):
+    import sys
+
+    # Mock sys.stdout.isatty to True
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    # Mock outdated version check
+    from agent.core.version_check import VersionCheckResult
+
+    mock_result = VersionCheckResult(
+        status="outdated",
+        source="origin/main",
+        detail="behind",
+        current="123456789",
+        latest="987654321",
+    )
+    monkeypatch.setattr(
+        "agent.core.version_check.check_for_update",
+        lambda *args, **kwargs: mock_result,
+    )
+
+    # Mock user input "n" to decline update
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    # Should print message and continue without exit
+    maybe_interactive_update()
+
+
+def test_maybe_interactive_update_outdated_accepted(monkeypatch):
+    import sys
+
+    # Mock sys.stdout.isatty to True
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+
+    # Mock outdated version check
+    from agent.core.version_check import VersionCheckResult
+
+    mock_result = VersionCheckResult(
+        status="outdated",
+        source="origin/main",
+        detail="behind",
+        current="123456789",
+        latest="987654321",
+    )
+    monkeypatch.setattr(
+        "agent.core.version_check.check_for_update",
+        lambda *args, **kwargs: mock_result,
+    )
+
+    # Mock user input "y" to accept update
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+    # Mock run_update returning 0
+    monkeypatch.setattr("agent.utils.cli_ops.run_update", lambda *args, **kwargs: 0)
+
+    # Should trigger sys.exit(0)
+    with pytest.raises(SystemExit) as excinfo:
+        maybe_interactive_update()
+    assert excinfo.value.code == 0

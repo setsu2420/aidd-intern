@@ -1956,6 +1956,17 @@ def cli():
     if needs_interactive_setup(args):
         run_interactive_first_run_setup()
 
+    # 首次下载或启动时自动检查更新并交互式询问升级
+    if not args.prompt_or_command or args.prompt_or_command not in (
+        "doctor",
+        "update",
+        "configure-llm",
+        "prepare",
+    ):
+        from agent.utils.cli_ops import maybe_interactive_update
+
+        maybe_interactive_update()
+
     try:
         if args.prompt_or_command == "doctor" or args.doctor:
             from agent.core.doctor import run_doctor
