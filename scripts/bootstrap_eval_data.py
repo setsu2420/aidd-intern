@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -12,7 +11,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.tools.aidd_prepare_tool import aidd_prepare_handler
+from agent.tools.aidd_prepare_tool import aidd_prepare_handler  # noqa: E402
+
 
 async def bootstrap_task(
     task_id: str,
@@ -26,9 +26,11 @@ async def bootstrap_task(
         return True
 
     # 1. Download full PDB
-    temp_raw_pdb = PROJECT_ROOT / "examples" / "protein_design" / "raw" / f"{pdb_id}.pdb"
+    temp_raw_pdb = (
+        PROJECT_ROOT / "examples" / "protein_design" / "raw" / f"{pdb_id}.pdb"
+    )
     temp_raw_pdb.parent.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"Step 1: Downloading PDB {pdb_id} from RCSB...")
     download_res, download_ok = await aidd_prepare_handler(
         {
@@ -37,13 +39,13 @@ async def bootstrap_task(
             "output_path": str(temp_raw_pdb),
         }
     )
-    
+
     if not download_ok:
         print(f"Failed to download PDB {pdb_id}: {download_res}")
         return False
-        
+
     print(f"Successfully downloaded PDB {pdb_id} to {temp_raw_pdb}")
-    
+
     # 2. Crop structure to only target chain
     output_pdb_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Step 2: Cropping structure to chains {chains}...")
@@ -55,11 +57,11 @@ async def bootstrap_task(
             "output_path": str(output_pdb_path),
         }
     )
-    
+
     if not crop_ok:
         print(f"Failed to crop structure: {crop_res}")
         return False
-        
+
     print(f"Step 3: Verifying final cropped PDB at {output_pdb_path}")
     if output_pdb_path.exists():
         print(f"Success! Prepared PDB target saved at {output_pdb_path}")
@@ -75,22 +77,29 @@ async def bootstrap_task(
         print("Verification failed: Output PDB does not exist.")
         return False
 
+
 async def main() -> None:
     targets = [
         {
             "task_id": "il7ra_hotspot",
             "pdb_id": "3DI2",
             "chains": ["A"],
-            "output_pdb_path": PROJECT_ROOT / "examples" / "protein_design" / "il7ra.pdb",
+            "output_pdb_path": PROJECT_ROOT
+            / "examples"
+            / "protein_design"
+            / "il7ra.pdb",
         },
         {
             "task_id": "pdl1_hotspot",
             "pdb_id": "4ZQK",
             "chains": ["A"],
-            "output_pdb_path": PROJECT_ROOT / "examples" / "protein_design" / "pdl1.pdb",
-        }
+            "output_pdb_path": PROJECT_ROOT
+            / "examples"
+            / "protein_design"
+            / "pdl1.pdb",
+        },
     ]
-    
+
     success = True
     for t in targets:
         ok = await bootstrap_task(
@@ -101,13 +110,14 @@ async def main() -> None:
         )
         if not ok:
             success = False
-            
+
     if success:
         print("\nAll evaluation targets bootstrapped successfully!")
         sys.exit(0)
     else:
         print("\nSome evaluation targets failed to bootstrap.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

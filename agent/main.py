@@ -1947,6 +1947,15 @@ def cli():
     # We'll handle it manually.
     args, unknown = parser.parse_known_args()
 
+    # 首次使用交互式模型及 API 密钥配置引导
+    from agent.utils.cli_ops import (
+        needs_interactive_setup,
+        run_interactive_first_run_setup,
+    )
+
+    if needs_interactive_setup(args):
+        run_interactive_first_run_setup()
+
     try:
         if args.prompt_or_command == "doctor" or args.doctor:
             from agent.core.doctor import run_doctor
