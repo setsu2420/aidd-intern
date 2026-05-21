@@ -204,29 +204,36 @@ def run_interactive_first_run_setup() -> None:
     from dotenv import load_dotenv
 
     print("=" * 65)
-    print("🌟 欢迎首次使用 AIDD-Intern 智能药物设计助手！ 🌟")
+    print("🌟 Welcome to AIDD-Intern Drug Design Assistant! 🌟")
     print("=" * 65)
-    print("检测到您当前尚未配置任何大分子药物设计默认 LLM 大模型与 API 密钥。")
-    print("智能体需要 LLM 才能自动分析靶点、识别热点、生成结合剂和反射学习。")
+    print("We detected that you haven't configured any default LLM models or API keys.")
+    print(
+        "The agent requires an LLM to automatically analyze targets, identify hotspots,"
+    )
+    print("generate macromolecular binders, and learn from reflection loops.")
     print("-" * 65)
 
-    print("第一步: 请选择您的 LLM 提供商 (LLM Provider)")
-    print("  [1] OpenRouter  - 推荐：汇聚全球顶级推理模型，科研任务极其稳定")
-    print("  [2] SiliconFlow - 推荐：国内低延迟、高性价比，最稳定的 DeepSeek 等通道")
-    print("  [3] OpenAI      - 官方直接接入 GPT-4o / GPT-3.5 等原生模型")
-    print("  [4] Anthropic   - 官方直接接入 Claude 3.5 Sonnet 等高级推理模型")
-    print("  [5] 本地部署     - 兼容 OpenAI 的本地大模型 (如 Ollama, vLLM 等)")
+    print("Step 1: Choose your LLM Provider")
+    print(
+        "  [1] OpenRouter  - Recommended: Aggregates global SOTA models, extremely stable"
+    )
+    print(
+        "  [2] SiliconFlow - Recommended: Low latency & cost-efficient, stable endpoint for DeepSeek"
+    )
+    print("  [3] OpenAI      - Directly use official GPT-4o / gpt-4o-mini models")
+    print("  [4] Anthropic   - Directly use official Claude 3.5 Sonnet / Haiku")
+    print("  [5] Local/Custom - Use local models via Ollama, vLLM, or custom servers")
     print("")
 
     choice = ""
     while choice not in {"1", "2", "3", "4", "5"}:
         try:
-            choice = input("请选择提供商 (输入 1-5, 默认 1): ").strip()
+            choice = input("Select your provider (1-5, default 1): ").strip()
             if choice == "":
                 choice = "1"
         except (KeyboardInterrupt, EOFError):
             print(
-                "\n配置已被中断。若需手动配置，请直接编辑项目根目录下的 `.env` 文件。"
+                "\nSetup interrupted. To configure manually, edit the `.env` file in the project root."
             )
             return
 
@@ -236,56 +243,58 @@ def run_interactive_first_run_setup() -> None:
             "name": "OpenRouter",
             "default_model": "openrouter/openai/gpt-5.2",
             "api_key_name": "OPENROUTER_API_KEY",
-            "prompt_msg": "请输入您的 OpenRouter API 密钥 (格式如 sk-or-v1-...): ",
-            "note": "（提示：您可以在 https://openrouter.ai 获取密钥）",
+            "prompt_msg": "Enter your OpenRouter API Key (sk-or-v1-...): ",
+            "note": "(Tip: You can obtain your key at https://openrouter.ai)",
         },
         "2": {
             "name": "SiliconFlow",
             "default_model": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
             "api_key_name": "SILICONFLOW_API_KEY",
-            "prompt_msg": "请输入您的 SiliconFlow API 密钥 (格式如 sk-...): ",
-            "note": "（提示：您可以在 https://siliconflow.cn 获取密钥）",
+            "prompt_msg": "Enter your SiliconFlow API Key (sk-...): ",
+            "note": "(Tip: You can obtain your key at https://siliconflow.cn)",
         },
         "3": {
             "name": "OpenAI",
             "default_model": "openai/gpt-4o",
             "api_key_name": "OPENAI_API_KEY",
-            "prompt_msg": "请输入您的 OpenAI API 密钥 (格式如 sk-...): ",
-            "note": "（提示：您可以在 https://platform.openai.com 获取密钥）",
+            "prompt_msg": "Enter your OpenAI API Key (sk-...): ",
+            "note": "(Tip: You can obtain your key at https://platform.openai.com)",
         },
         "4": {
             "name": "Anthropic",
             "default_model": "anthropic/claude-3.5-sonnet",
             "api_key_name": "ANTHROPIC_API_KEY",
-            "prompt_msg": "请输入您的 Anthropic API 密钥 (格式如 sk-ant-...): ",
-            "note": "（提示：您可以在 https://console.anthropic.com 获取密钥）",
+            "prompt_msg": "Enter your Anthropic API Key (sk-ant-...): ",
+            "note": "(Tip: You can obtain your key at https://console.anthropic.com)",
         },
         "5": {
             "name": "Local (Ollama/vLLM)",
             "default_model": "ollama/llama3.1:8b",
             "api_key_name": "LOCAL_LLM_API_KEY",
-            "prompt_msg": "请输入您的本地 API 密钥 (若无密钥直接按回车): ",
-            "note": "（提示：您可以在此指定本地 Model ID，本地端点 URL 可随后在 .env 里调整）",
+            "prompt_msg": "Enter your local/custom API Key (or press Enter if none): ",
+            "note": "(Tip: Specify your local model ID; endpoint URL can be configured in .env later)",
         },
     }
 
     provider_info = provider_map[choice]
-    print(f"\n您已选择提供商: {provider_info['name']}")
+    print(f"\nYou have selected provider: {provider_info['name']}")
     print("-" * 65)
 
     # Choose model
-    print("第二步: 请配置您想默认使用的 Model ID")
-    print(f"系统推荐的默认模型: [ {provider_info['default_model']} ]")
+    print("Step 2: Configure your default Model ID")
+    print(f"Recommended default model: [ {provider_info['default_model']} ]")
     try:
-        model_id = input("请输入 Model ID (直接按回车使用默认推荐): ").strip()
+        model_id = input(
+            "Enter Model ID (press Enter to use recommended default): "
+        ).strip()
         if not model_id:
             model_id = provider_info["default_model"]
     except (KeyboardInterrupt, EOFError):
-        print("\n配置已被中断。")
+        print("\nSetup interrupted.")
         return
 
     # Input API Key
-    print(f"\n第三步: 请配置您的 API 密钥 {provider_info['note']}")
+    print(f"\nStep 3: Configure your API Key {provider_info['note']}")
     api_key = ""
     while not api_key:
         try:
@@ -294,18 +303,20 @@ def run_interactive_first_run_setup() -> None:
                 api_key = "local-no-key"
                 break
         except (KeyboardInterrupt, EOFError):
-            print("\n配置已被中断。")
+            print("\nSetup interrupted.")
             return
 
     # Optional HF Token
-    print("\n第四步: 配置 Hugging Face Token [可选]")
-    print("部分的科学 MCP 工具在下载模型权重时可能需要 HF_TOKEN 进行授权。")
+    print("\nStep 4: Configure Hugging Face Token [Optional]")
+    print(
+        "Some biological MCP tools may require an HF_TOKEN for authentication when downloading weights."
+    )
     try:
         hf_token = input(
-            "请输入您的 HF_TOKEN (格式如 hf_...，不需要请直接回车跳过): "
+            "Enter your HF_TOKEN (hf_..., or press Enter to skip): "
         ).strip()
     except (KeyboardInterrupt, EOFError):
-        print("\n配置已被中断。")
+        print("\nSetup interrupted.")
         return
 
     # Write back merged environment settings to project root .env
@@ -347,18 +358,22 @@ def run_interactive_first_run_setup() -> None:
     try:
         dotenv_path.write_text("\n".join(final_lines) + "\n", encoding="utf-8")
         print("\n" + "=" * 65)
-        print("🎉 配置保存成功！🎉")
-        print("您的专属 LLM 凭证已成功写入项目根目录下的 `.env` 文件：")
-        print(f"  - 默认模型 ID: {model_id}")
-        print(f"  - API 密钥已写入: {provider_info['api_key_name']}")
+        print("🎉 Configuration Saved Successfully! 🎉")
+        print(
+            "Your LLM credentials have been written to the `.env` file in the project root:"
+        )
+        print(f"  - Default Model ID: {model_id}")
+        print(f"  - API Key Written: {provider_info['api_key_name']}")
         if hf_token:
-            print("  - HF 令牌已写入: HF_TOKEN")
+            print("  - HF Token Written: HF_TOKEN")
         print("-" * 65)
-        print("配置环境已成功重新加载！系统即刻自动拉起智能大分子设计服务...\n")
+        print(
+            "Environment reloaded successfully! The agent is launching the macromolecular design loop now...\n"
+        )
 
         load_dotenv(dotenv_path, override=True)
     except Exception as e:
-        print(f"\nerror: 写入 `.env` 文件失败: {e}")
+        print(f"\nerror: Failed to write to `.env` file: {e}")
 
 
 def maybe_interactive_update() -> None:
@@ -389,31 +404,57 @@ def maybe_interactive_update() -> None:
     curr_sha = result.current[:7] if result.current else "unknown"
     late_sha = result.latest[:7] if result.latest else "unknown"
 
-    print("\n" + "=" * 65)
-    print("🎉 检测到 AIDD-Intern 智能药物设计助手有新版本可用！")
-    print("-" * 65)
-    print(f"  - 当前版本: {curr_sha}")
-    print(f"  - 最新版本: {late_sha} (来自 {result.source})")
-    print("  - 更新将同步最新的蛋白质结合剂设计流程与算法性能优化")
-    print("=" * 65)
+    # Color definitions for interactive shell beauty
+    CYAN = "\033[1;36m"
+    GREEN = "\033[1;32m"
+    YELLOW = "\033[1;33m"
+    RESET = "\033[0m"
+
+    print(f"\n{CYAN}" + "=" * 65 + f"{RESET}")
+    print(f"{GREEN}🎉 A new version of AIDD-Intern is available!{RESET}")
+    print(f"{CYAN}" + "-" * 65 + f"{RESET}")
+    print(f"  - Current Version: {YELLOW}{curr_sha}{RESET}")
+    print(f"  - Latest Version:  {GREEN}{late_sha}{RESET} (via {result.source})")
+    print(
+        "  - Update includes the latest binder design workflows & performance optimizations."
+    )
+    print(f"{CYAN}" + "=" * 65 + f"{RESET}")
 
     try:
-        choice = input("是否要立即自动拉取并更新项目代码？(y/N): ").strip().lower()
+        choice = (
+            input(
+                "Would you like to automatically pull and update the project now? (y/N): "
+            )
+            .strip()
+            .lower()
+        )
         if choice in ("y", "yes"):
-            print("\n开始自动执行系统更新，这可能需要数十秒，请稍候...")
+            print(
+                f"\n{YELLOW}Starting automatic update. This may take a few moments...{RESET}"
+            )
             code = run_update(with_frontend=False)
             if code == 0:
-                print("\n" + "=" * 65)
-                print("🎉 系统已成功更新到最新版本！")
-                print("请重新运行 `aidd-intern` 开启全新的智能大分子设计之旅。")
-                print("=" * 65 + "\n")
+                print(f"\n{CYAN}" + "=" * 65 + f"{RESET}")
+                print(
+                    f"{GREEN}🎉 System updated successfully to the latest version!{RESET}"
+                )
+                print(
+                    "Please restart `aidd-intern` to experience the new macromolecular design features."
+                )
+                print(f"{CYAN}" + "=" * 65 + f"{RESET}\n")
                 sys.exit(0)
             else:
                 print(
-                    f"\nwarning: 自动更新脚本返回了非零状态码 ({code})，更新可能未完全成功。"
+                    f"\n{YELLOW}warning: The update script returned a non-zero exit code ({code}). Update might be incomplete.{RESET}"
                 )
-                print("您可以稍后手动执行 `scripts/update-local.sh` 尝试升级。\n")
+                print("💡 Troubleshooting suggestions:")
+                print(
+                    "  1. If you have local changes, run `git stash` first to prevent merge conflicts."
+                )
+                print(
+                    "  2. You can also try upgrading manually later by running `scripts/update-local.sh`.\n"
+                )
         else:
-            print("已跳过自动升级。系统正在继续启动...\n")
+            print("Skipping automatic update. Continuing startup...\n")
     except (KeyboardInterrupt, EOFError):
-        print("\n已取消升级。系统正在继续启动...\n")
+        print("\nUpdate cancelled. Continuing startup...\n")
