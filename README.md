@@ -103,7 +103,20 @@ cp .env.example .env
 
 After installation, the `aidd-intern` command will be available in your shell.
 
-Before the first real LLM call, edit `.env` and set at least one API key. Run the diagnostic to verify your setup:
+### Configure LLM
+
+AIDD-Intern defaults to using **SiliconFlow** with the **DeepSeek-V4-Flash** model. To get started:
+
+1.  Set your SiliconFlow API key in `.env`:
+    ```bash
+    SILICONFLOW_API_KEY=sk-...
+    ```
+2.  (Optional) If you want a different model by default, set:
+    ```bash
+    AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
+    ```
+
+Run the diagnostic to verify your setup:
 
 ```bash
 aidd-intern doctor
