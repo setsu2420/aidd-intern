@@ -4,9 +4,6 @@
   "description": "Node.js CLI for AIDD-Intern smoke tests, integration checks, and evaluation runs",
   "type": "module",
   "license": "Apache-2.0",
-  "bin": {
-    "aidd-intern": "dist/cli.js"
-  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

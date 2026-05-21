@@ -79,146 +79,77 @@ Hugging Face Jobs.
 
 ### Requirements
 
-- Node.js 22+ and npm for the Node package; Git is only needed for source
-  checkouts or frontend development
-- Python 3.11+, `uv`, and Git only when working from a source checkout or on the backend
-- Conda/Mamba and GPU only for local PXDesign, BindCraft, or similar scientific
-  tools
+-   Python 3.11+
+-   [uv](https://github.com/astral-sh/uv) (Fast Python package manager)
+-   Node.js 22+ (Optional: only if you work on the frontend or Node harness)
+-   Git (For source checkout)
 
-### Install The Node Package
+### Installation
 
-```bash
-npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
-```
-
-Use this path when you want the Node CLI harness for smoke, integration, eval,
-update, and configuration helpers. The package name has not been published to
-the public npm registry yet, so `npm install -g aidd-intern@latest` returns
-404. npm installs the GitHub archive tarball directly using the committed
-prebuilt `dist/` package files, so this path does not depend on local Git or
-GitHub SSH keys.
-
-### Optional: Full Python Agent Runtime From Source
+Follow the `ml-intern` style installation to set up the agent runtime:
 
 ```bash
+# 1. Clone the repository
 git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
+
+# 2. Sync dependencies and install the CLI tool
 uv sync --extra dev
 uv tool install -e .
+
+# 3. Configure environment
 cp .env.example .env
 ```
 
-Use the HTTPS URL above for first-time setup. The SSH form
-`git@github.com:setsu2420/aidd-intern.git` only works after your GitHub account
-has an SSH key with access to the repository. Run the `uv` commands from inside
-`aidd-intern`, because `uv sync` and `uv tool install -e .` read this project's
-`pyproject.toml`.
+After installation, the `aidd-intern` command will be available in your shell.
 
-If a server fails during `git clone` with `GnuTLS recv error (-110)` or another
-GitHub HTTPS transport error, retry with Git HTTP/1.1:
+Before the first real LLM call, edit `.env` and set at least one API key. Run the diagnostic to verify your setup:
 
 ```bash
-git -c http.version=HTTP/1.1 clone --depth 1 \
-  https://github.com/setsu2420/aidd-intern.git
+aidd-intern doctor
 ```
 
-When you need one command that can also fall back to a GitHub source archive:
+### Usage
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
-```
-
-Before the first real LLM call, edit `.env` and set at least one API key that
-matches the model you plan to use. For example, set `OPENROUTER_API_KEY` for
-`openrouter/openai/gpt-5.2`, `OPENAI_API_KEY` for `openai/gpt-5.5`,
-`ANTHROPIC_API_KEY` for `anthropic/claude-opus-4-6`, or `SILICONFLOW_API_KEY`
-for `siliconflow/deepseek-ai/DeepSeek-V4-Flash`. If you do not run a local vLLM
-server, also set `AIDD_INTERN_DEFAULT_MODEL_ID` to a remote model in `.env`.
-
-Run the source-checkout agent after the model provider is configured:
+**Interactive Mode:**
 
 ```bash
 aidd-intern
 ```
 
-Check the local install without starting a chat session:
+**Headless Mode:**
 
 ```bash
-aidd-intern --doctor
+aidd-intern "Research recent protein binder design tools. Prefer Google Search, cite sources."
 ```
 
-### Research Without A Local GPU
-
-Use a remote model and ask for source-backed research when you only need code
-reading, planning, or reports:
+**Configure LLM:**
 
 ```bash
-aidd-intern --model openrouter/openai/gpt-5.2 \
-  "Research recent protein binder design tools. Prefer Google Search, cite sources, and include publication dates."
+aidd-intern configure-llm
+aidd-intern configure-llm openrouter
 ```
-
-This keeps local filesystem tools, web search, paper/document/GitHub lookup, and
-the binder/protein workflow tools available without starting heavy local MCP
-servers.
 
 ## Local Updates
 
-For users who installed the Node package globally from GitHub, update with:
-
-```bash
-npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
-```
-
-The Node CLI also exposes this as a step-printing command:
+Update your local checkout and the installed CLI:
 
 ```bash
 aidd-intern update
-aidd-intern update --check
+```
+
+Use `--with-frontend` if you also need to refresh frontend dependencies:
+
+```bash
+aidd-intern update --with-frontend
+```
+
+For a dry run or to check version status:
+
+```bash
 aidd-intern update --dry-run
+aidd-intern update --check
 ```
-
-`aidd-intern update` updates the globally installed Node harness package only.
-It does not edit a source checkout and it does not refresh the Python
-`uv tool install -e .` runtime. If you cloned the repository for the Python
-agent runtime, use the `npm run update:local` source-checkout path below
-instead.
-
-For an existing source checkout, update from GitHub and refresh the local Python
-CLI from the repository root:
-
-```bash
-scripts/update-local.sh
-npm run update:local
-```
-
-The update script runs these steps and prints each step before executing it:
-
-1. `git pull --ff-only origin <current-branch>`
-2. `uv sync --extra dev`
-3. `uv tool install -e .`
-4. optional `npm ci` in `frontend/`
-5. `command -v aidd-intern`
-
-Use `--with-frontend` when frontend dependencies should also be refreshed:
-
-```bash
-scripts/update-local.sh --with-frontend
-npm run update:local:frontend
-node src/cli.ts update --checkout --with-frontend
-```
-
-`git pull --ff-only` fails instead of creating a merge commit when your local
-branch has diverged from the remote branch. Set `AIDD_INTERN_UPDATE_REMOTE` or
-`AIDD_INTERN_UPDATE_BRANCH` only when you intentionally update from a different
-remote or branch.
-
-Existing users keep their local configuration when updating. The update path
-does not overwrite `.env`, user-level config under `~/.config/aidd-intern/`, or
-local secrets; it only pulls the Git branch, syncs dependencies, and reinstalls
-the editable CLI. Interactive Python startup from a source checkout and
-`aidd-intern --doctor` run a read-only GitHub version check and print the
-update command when the local checkout is behind. Set
-`AIDD_INTERN_DISABLE_UPDATE_CHECK=1` to suppress this notice.
 
 ## Local Diagnostics
 

@@ -1839,8 +1839,13 @@ def cli():
     warnings.filterwarnings("ignore", category=SyntaxWarning, module="whoosh")
 
     parser = argparse.ArgumentParser(description="aidd-intern CLI")
+
+    # Interactive/Headless (default if no command)
     parser.add_argument(
-        "prompt", nargs="?", default=None, help="Run headlessly with this prompt"
+        "prompt_or_command",
+        nargs="?",
+        default=None,
+        help="Run headlessly with this prompt, or a sub-command (update, configure-llm, doctor, prepare)",
     )
     parser.add_argument(
         "--model", "-m", default=None, help="Model to use (default: from config)"
@@ -1866,6 +1871,19 @@ def cli():
         action="store_true",
         help="Run local installation diagnostics and exit",
     )
+
+    # Arguments for 'update' command
+    parser.add_argument("--check", action="store_true", help="[update] Check for updates")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="[update] Print update commands"
+    )
+    parser.add_argument(
+        "--with-frontend",
+        action="store_true",
+        help="[update] Also refresh frontend dependencies",
+    )
+
+    # Arguments for 'prepare' command
     parser.add_argument(
         "--prepare-aidd",
         action="store_true",
@@ -1921,14 +1939,33 @@ def cli():
         default=4.5,
         help="Atom contact cutoff in Angstrom for --prepare-aidd hotspot ranking",
     )
-    args = parser.parse_args()
+
+    # The 'configure-llm' command takes a provider as a positional arg
+    # which conflicts with 'prompt_or_command' if we're not careful.
+    # We'll handle it manually.
+    args, unknown = parser.parse_known_args()
 
     try:
-        if args.doctor:
+        if args.prompt_or_command == "doctor" or args.doctor:
             from agent.core.doctor import run_doctor
 
             raise SystemExit(run_doctor())
-        elif args.prepare_aidd:
+        elif args.prompt_or_command == "update":
+            from agent.utils.cli_ops import run_update
+
+            raise SystemExit(
+                run_update(
+                    check=args.check,
+                    dry_run=args.dry_run,
+                    with_frontend=args.with_frontend,
+                )
+            )
+        elif args.prompt_or_command == "configure-llm":
+            from agent.utils.cli_ops import run_configure_llm
+
+            provider = unknown[0] if unknown else None
+            raise SystemExit(run_configure_llm(provider))
+        elif args.prompt_or_command == "prepare" or args.prepare_aidd:
             from agent.tools.aidd_prepare_tool import run_aidd_preparation_cli
 
             raise SystemExit(
@@ -1946,13 +1983,15 @@ def cli():
                     )
                 )
             )
-        elif args.prompt:
+        elif args.prompt_or_command:
+            # Check if it's a known command that didn't match above (e.g. typos or future commands)
+            # Otherwise treat it as a prompt.
             max_iter = args.max_iterations
             if max_iter is not None and max_iter < 0:
                 max_iter = 10_000  # effectively unlimited
             asyncio.run(
                 headless_main(
-                    args.prompt,
+                    args.prompt_or_command,
                     model=args.model,
                     max_iterations=max_iter,
                     stream=not args.no_stream,
