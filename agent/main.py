@@ -337,7 +337,7 @@ def _clear_terminal() -> None:
 
 
 class _ThinkingShimmer:
-    """Animated shiny/shimmer thinking indicator — a bright gradient sweeps across the text."""
+    """Animated shiny/shimmer thinking indicator — a bright gradient sweeps across the text with real-time metrics."""
 
     _BASE = (90, 90, 110)  # dim base color
     _HIGHLIGHT = (255, 200, 80)  # bright shimmer highlight (warm gold)
@@ -348,11 +348,15 @@ class _ThinkingShimmer:
         self._console = console
         self._task = None
         self._running = False
+        self._start_time = 0.0
 
     def start(self):
         if self._running:
             return
+        import time
+
         self._running = True
+        self._start_time = time.monotonic()
         self._task = asyncio.ensure_future(self._animate())
 
     def stop(self):
@@ -386,12 +390,15 @@ class _ThinkingShimmer:
         return "".join(out)
 
     async def _animate(self):
-        text = "Thinking..."
-        n = len(text)
+        import time
+
         speed = 0.45  # characters per frame
         pos = 0.0
         try:
             while self._running:
+                elapsed = time.monotonic() - self._start_time
+                text = f"Thinking ({elapsed:.1f}s)..."
+                n = len(text)
                 frame = self._render_frame(text, pos)
                 self._console.file.write(f"\r  {frame}")
                 self._console.file.flush()
@@ -497,10 +504,7 @@ async def event_listener(
             event = await event_queue.get()
 
             # Record turn start time on first activity
-            if not turn_metrics["in_progress"] and event.event_type not in (
-                "ready",
-                "llm_call",
-            ):
+            if not turn_metrics["in_progress"] and event.event_type != "ready":
                 import time
 
                 turn_metrics["start_time"] = time.monotonic()
@@ -1423,7 +1427,28 @@ async def main(
     _clear_terminal()
 
     # Create prompt session for input (needed early for token prompt)
-    prompt_session = _get_prompt_session_factory()()
+    from prompt_toolkit.history import FileHistory
+    import os
+    import inspect
+
+    history_dir = os.path.expanduser("~/.aidd-intern")
+    os.makedirs(history_dir, exist_ok=True)
+    history_file = os.path.join(history_dir, "input_history")
+
+    factory = _get_prompt_session_factory()
+    # Safely pass history only if supported by the factory (to handle test mocks gracefully)
+    try:
+        sig = inspect.signature(factory)
+        supports_history = "history" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+    except Exception:
+        supports_history = True
+
+    if supports_history:
+        prompt_session = factory(history=FileHistory(history_file))
+    else:
+        prompt_session = factory()
 
     load_config_fn = _get_load_config()
     resolve_hf_token_fn = _get_resolve_hf_token()
