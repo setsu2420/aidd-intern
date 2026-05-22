@@ -338,11 +338,46 @@ _MEMU_TOOL_SPECS = [
         },
         "handler": "memu_memorize_handler",
     },
+    {
+        "name": "update_task_canvas",
+        "description": (
+            "Update the Symbolic Short-Term Memory task canvas. This canvas allows tracking complex workflow steps, "
+            "adding task execution states, detailing run durations, and visually chaining tasks via DAG edges."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "node": {
+                    "type": "string",
+                    "description": "Name or identifier of the workflow step/node to add or update.",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["PENDING", "RUNNING", "SUCCESS", "FAILED"],
+                    "default": "PENDING",
+                    "description": "Status state of the workflow step/node.",
+                },
+                "details": {
+                    "type": "string",
+                    "description": "Optional human-readable execution details or performance duration (e.g. '0.45s', 'processing structural alignment').",
+                },
+                "edge_to": {
+                    "type": "string",
+                    "description": "Optional target node name to draw a directed DAG edge from this node to the target node.",
+                },
+            },
+            "required": ["node"],
+        },
+        "handler": "update_task_canvas_handler",
+    },
 ]
 
 
-async def memu_retrieve_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
+async def memu_retrieve_handler(
+    arguments: dict[str, Any], session: Any = None
+) -> tuple[str, bool]:
     from agent.core.memu import MemUClient
+    from agent.core.memory import LayeredMemoryPipeline
 
     client = MemUClient()
     if not client.is_configured():
@@ -354,12 +389,48 @@ async def memu_retrieve_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
     user_id = arguments.get("user_id") or "default_user"
     agent_id = arguments.get("agent_id") or "default_agent"
     try:
-        res = client.retrieve(user_id=user_id, agent_id=agent_id, query=query)
+        pipeline = LayeredMemoryPipeline(client=client)
+        user_name = "User"
+        if session and getattr(session, "hf_username", None):
+            user_name = session.hf_username
+
+        res = pipeline.retrieve_layered(
+            user_id=user_id, agent_id=agent_id, query=query, user_name=user_name
+        )
         import json
 
         return json.dumps(res, indent=2, ensure_ascii=False), True
     except Exception as e:
         return f"Error retrieving memories: {e}", False
+
+
+async def update_task_canvas_handler(
+    arguments: dict[str, Any], session: Any = None
+) -> tuple[str, bool]:
+    if (
+        session is None
+        or not hasattr(session, "task_canvas")
+        or session.task_canvas is None
+    ):
+        return (
+            "Error: Session task canvas is uninitialized or unavailable in the current context.",
+            False,
+        )
+
+    node = arguments["node"]
+    status = arguments.get("status") or "PENDING"
+    details = arguments.get("details")
+    edge_to = arguments.get("edge_to")
+
+    session.task_canvas.update_node(node, status, details)
+    if edge_to:
+        session.task_canvas.add_edge(node, edge_to)
+
+    rendered = session.task_canvas.render_mermaid()
+    return (
+        f"Successfully updated task canvas node '{node}' to state '{status}'.\n\nCurrent Canvas:\n{rendered}",
+        True,
+    )
 
 
 async def memu_memorize_handler(arguments: dict[str, Any]) -> tuple[str, bool]:

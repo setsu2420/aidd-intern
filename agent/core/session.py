@@ -206,6 +206,10 @@ class Session:
         self.persistence_store = persistence_store
         self.tool_router = tool_router
         self.stream = stream
+        from agent.core.memory import MermaidTaskCanvas
+
+        self.task_canvas = MermaidTaskCanvas()
+        self.last_tool_run: Optional[str] = None
         if config is None:
             raise ValueError("Session requires a Config")
         tool_specs = tool_router.get_tool_specs_for_llm() if tool_router else []

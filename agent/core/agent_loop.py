@@ -2255,6 +2255,13 @@ class Handlers:
                 )
             )
 
+            # Update Symbolic Short-Term Memory Canvas status to RUNNING
+            if getattr(session, "task_canvas", None) is not None:
+                session.task_canvas.update_node(tool_name, "RUNNING")
+                if getattr(session, "last_tool_run", None):
+                    session.task_canvas.add_edge(session.last_tool_run, tool_name)
+                session.last_tool_run = tool_name
+
             await _record_manual_approved_spend_if_needed(session, tool_name, tool_args)
 
             start_time = time.monotonic()
@@ -2262,6 +2269,13 @@ class Handlers:
                 tool_name, tool_args, session=session, tool_call_id=tc.id
             )
             duration_s = time.monotonic() - start_time
+
+            # Update Symbolic Short-Term Memory Canvas status to SUCCESS/FAILED
+            if getattr(session, "task_canvas", None) is not None:
+                status = "SUCCESS" if success else "FAILED"
+                session.task_canvas.update_node(
+                    tool_name, status, details=f"{duration_s:.2f}s"
+                )
 
             return (tc, tool_name, output, success, was_edited, duration_s)
 
