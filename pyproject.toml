@@ -46,6 +46,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.2.0",
     "ruff>=0.15.12",
+    "maturin>=1.5.0",
 ]
 
 # All dependencies (eval + dev)
