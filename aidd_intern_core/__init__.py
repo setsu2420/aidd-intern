@@ -19,7 +19,7 @@ try:
         clip_ansi_string,
         visible_width,
     )
+
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
-

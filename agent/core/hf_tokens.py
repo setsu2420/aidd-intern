@@ -5,6 +5,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
+# 就地清洗全局环境变量以防用户配置带有换行符或前后空格导致三方库鉴权失败
+for env_key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "INFERENCE_TOKEN"):
+    val = os.environ.get(env_key)
+    if val is not None:
+        cleaned = val.replace("\r", "").replace("\n", "").strip()
+        if cleaned != val:
+            os.environ[env_key] = cleaned
+
 
 def clean_hf_token(token: str | None) -> str | None:
     """Normalize token strings the same way huggingface_hub does."""

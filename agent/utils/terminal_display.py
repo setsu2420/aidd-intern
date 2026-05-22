@@ -81,24 +81,24 @@ def _clip_to_width(s: str, width: int) -> str:
 
 _THEME = Theme(
     {
-        "tool.name": "bold rgb(255,200,80)",
-        "tool.args": "dim",
-        "tool.ok": "dim green",
-        "tool.fail": "dim red",
+        "tool.name": "bold rgb(255,213,79)",
+        "tool.args": "dim rgb(200,200,200)",
+        "tool.ok": "bold rgb(120,220,140)",
+        "tool.fail": "bold rgb(255,100,100)",
         "context.ok": "dim green",
         "context.warn": "bold yellow",
         "context.danger": "bold red",
         "info": "dim",
         "muted": "dim",
-        # Markdown emphasis colors
-        "markdown.strong": "bold rgb(255,200,80)",
-        "markdown.emphasis": "italic rgb(180,140,40)",
-        "markdown.code": "rgb(120,220,255)",
-        "markdown.code_block": "rgb(120,220,255)",
-        "markdown.link": "underline rgb(90,180,255)",
-        "markdown.h1": "bold rgb(255,200,80)",
-        "markdown.h2": "bold rgb(240,180,95)",
-        "markdown.h3": "bold rgb(220,165,100)",
+        # Markdown 视觉强调颜色
+        "markdown.strong": "bold rgb(255,213,79)",
+        "markdown.emphasis": "italic rgb(255,236,179)",
+        "markdown.code": "bold rgb(128,222,234)",
+        "markdown.code_block": "rgb(224,242,241)",
+        "markdown.link": "underline rgb(41,182,246)",
+        "markdown.h1": "bold rgb(255,183,77)",
+        "markdown.h2": "bold rgb(255,204,128)",
+        "markdown.h3": "bold rgb(255,224,178)",
     }
 )
 
@@ -357,18 +357,53 @@ def print_banner(
 ) -> None:
     """Print particle logo then CRT boot sequence with system info."""
     model_label = model or "unknown"
+
+    try:
+        from aidd_intern_core import save_json_atomic  # noqa: F401
+
+        rust_status = (
+            "[bold rgb(80,200,120)]Rust native Core active[/bold rgb(80,200,120)]"
+        )
+    except ImportError:
+        rust_status = "[bold rgb(255,180,50)]Python fallback[/bold rgb(255,180,50)]"
+
+    logo = (
+        "[bold rgb(255,200,80)]"
+        "       ___   ____ ___   ___         ____      __                 \n"
+        "      /   | /  _// __ \\ / __ \\       /  _/___  / /_ ___  _________ \n"
+        "     / /| | / / / / / // / / /______ / // __ \\/ __// _ \\/ ___/ __ \\\n"
+        "    / ___ |/ / / /_/ // /_/ /_____// // / / / /_ /  __/ /  / / / /\n"
+        "   /_/  |_/___/_____//_____/     /___/_/ /_/\\__/ \\___/_/  /_/ /_/ \n"
+        "[/bold rgb(255,200,80)]"
+    )
+
+    card_content = (
+        f"  • [bold cyan]Model:[/bold cyan]       {model_label}\n"
+        f"  • [bold cyan]Sandbox:[/bold cyan]     {tool_runtime or 'local filesystem'}\n"
+        f"  • [bold cyan]Acceleration:[/bold cyan] {rust_status}\n"
+        f"  • [bold cyan]Tools Status:[/bold cyan] Tools: loading..."
+    )
+
+    from rich.panel import Panel
+    from rich import box
+
+    status_panel = Panel(
+        card_content,
+        title="[bold rgb(255,200,80)]Runtime System Card[/bold rgb(255,200,80)]",
+        title_align="left",
+        border_style="dim rgb(180,140,40)",
+        box=box.ROUNDED,
+        expand=False,
+    )
+
     if not _boot_animation_enabled():
         _console.print()
-        _console.print(f"{_I}[tool.name]aidd-intern[/tool.name] runtime starting...")
-        _console.print(f"{_I}[muted]Model:[/muted] {model_label}")
-        _console.print(
-            f"{_I}[muted]Tool runtime:[/muted] {tool_runtime or 'local filesystem'}"
-        )
-        _console.print(f"{_I}[muted]Tools:[/muted] loading...")
+        _console.print(logo)
+        _console.print(status_panel)
+        _console.print()
         return
 
     from agent.utils.particle_logo import run_particle_logo
-    from agent.utils.crt_boot import run_boot_sequence
 
     # Particle coalesce logo — 1.5s converge, 2s hold
     run_particle_logo(_console, hold_seconds=2.0)
@@ -377,71 +412,125 @@ def print_banner(
     _console.file.write("\033[2J\033[H")
     _console.file.flush()
 
-    # Warm gold palette matching the shimmer highlight (255, 200, 80)
-    gold = "rgb(255,200,80)"
-    dim_gold = "rgb(180,140,40)"
-
-    boot_lines = [
-        (f"{_I}aidd-intern runtime starting...", gold),
-        (f"{_I}  Model: {model_label}", dim_gold),
-        (f"{_I}  Tool runtime: {tool_runtime or 'local filesystem'}", dim_gold),
-        (f"{_I}  Tools: loading...", dim_gold),
-    ]
-
-    run_boot_sequence(_console, boot_lines)
+    # Render ASCII logo and panel immediately after CRT boot warm-up
+    _console.print(logo)
+    _console.print(status_panel)
+    _console.print()
 
 
 # ── Init progress ──────────────────────────────────────────────────────
 
 
 def print_init_done(tool_count: int = 0) -> None:
-    _console.print(f"{_I}[muted]Tools:[/muted] {tool_count} loaded")
     _console.print(
-        f"{_I}[tool.name]/help[/tool.name] [muted]for commands[/muted] · "
-        f"[tool.name]/model[/tool.name] [muted]to switch[/muted] · "
-        f"[tool.name]/quit[/tool.name] [muted]to exit[/muted]"
+        f"{_I}[bold rgb(80,200,120)]✔[/bold rgb(80,200,120)] [bold]Tools initialized successfully.[/bold] "
+        f"[dim](Tools: {tool_count} loaded)[/dim]"
     )
-    _console.print(f"{_I}[tool.name]Ready.[/tool.name]")
+    _console.print(
+        f"{_I}[dim]Type [bold rgb(255,200,80)]/help[/bold rgb(255,200,80)] for commands · "
+        f"[bold rgb(255,200,80)]/model[/bold rgb(255,200,80)] to switch models · "
+        f"[bold rgb(255,200,80)]/quit[/bold rgb(255,200,80)] to exit[/dim]"
+    )
+    _console.print(f"{_I}[bold rgb(255,200,80)]Intern Ready.[/bold rgb(255,200,80)]\n")
 
 
 # ── Tool calls ─────────────────────────────────────────────────────────
 
 
 def print_tool_call(tool_name: str, args_preview: str) -> None:
-    f = _console.file
-    f.write(
-        f"{_I}\033[38;2;255;200;80m▸ {tool_name}\033[0m  \033[2m{args_preview}\033[0m\n"
+    icon = "⚙️"
+    name_lower = tool_name.lower()
+    if "search" in name_lower or "grep" in name_lower:
+        icon = "🔍"
+    elif "file" in name_lower or "write" in name_lower or "replace" in name_lower:
+        icon = "💾"
+    elif "run" in name_lower or "execute" in name_lower or "command" in name_lower:
+        icon = "💻"
+    elif "read" in name_lower or "view" in name_lower:
+        icon = "📖"
+    elif "mcp" in name_lower:
+        icon = "🔌"
+
+    from rich.panel import Panel
+    from rich import box
+
+    call_panel = Panel(
+        f"  [muted]{escape(args_preview)}[/muted]",
+        title=f"{icon} [bold rgb(255,200,80)]运行工具: {tool_name}[/bold rgb(255,200,80)]",
+        title_align="left",
+        border_style="dim rgb(180,140,40)",
+        box=box.ROUNDED,
+        expand=False,
     )
-    f.flush()
+    _console.print()
+    _console.print(f"{_I}", call_panel)
 
 
 def print_tool_duration(tool_name: str, success: bool, duration_s: float) -> None:
     if duration_s <= 0:
         return
-    style = "tool.ok" if success else "tool.fail"
-    icon = "✔" if success else "✖"
+    icon = (
+        "[bold rgb(80,200,120)]✔[/bold rgb(80,200,120)]"
+        if success
+        else "[bold rgb(255,75,75)]✖[/bold rgb(255,75,75)]"
+    )
+    color = "rgb(80,200,120)" if success else "rgb(255,75,75)"
     _console.print(
-        f"{_I}  [{style}]{icon} {tool_name} completed in {duration_s:.2f}s[/{style}]"
+        f"{_I}  {icon} [bold rgb(200,200,200)]{tool_name}[/bold rgb(200,200,200)] "
+        f"[dim]执行完毕，耗时[/dim] [bold {color}]{duration_s:.2f}s[/bold {color}]"
     )
 
 
 def print_tool_output(
     output: str, success: bool, truncate: bool = True, duration_s: float = 0.0
 ) -> None:
+    raw_output = output
+    total_lines = len(raw_output.split("\n"))
+
     if truncate:
         output = _truncate(output, max_lines=10)
-    style = "tool.ok" if success else "tool.fail"
 
+    truncated_lines = total_lines - 10
+    truncation_footer = ""
+    if truncate and truncated_lines > 0:
+        truncation_footer = (
+            f"  ·  [dim]... (已省略多余的 {truncated_lines} 行日志)[/dim]"
+        )
+
+    icon = (
+        "[bold rgb(80,200,120)]✔[/bold rgb(80,200,120)]"
+        if success
+        else "[bold rgb(255,75,75)]✖[/bold rgb(255,75,75)]"
+    )
+    status_text = f"{icon} [dim]执行完毕"
     if duration_s > 0:
-        _console.print(f"[{style}]{_I}  [took {duration_s:.2f}s][/{style}]")
+        status_text += f" (耗时 {duration_s:.2f}s)"
+    status_text += "[/dim]"
+    if truncation_footer:
+        status_text += truncation_footer
 
-    # Indent each line of tool output
-    indented = "\n".join(f"{_I}  {line}" for line in output.split("\n"))
-    _console.print(f"[{style}]{indented}[/{style}]")
+    from rich.panel import Panel
+    from rich import box
+
+    indented_output = "\n".join(f"  {line}" for line in output.split("\n"))
+
+    output_panel = Panel(
+        indented_output,
+        title="[bold rgb(180,180,180)]工具执行结果[/bold rgb(180,180,180)]",
+        title_align="left",
+        subtitle=status_text,
+        subtitle_align="left",
+        border_style="dim rgb(120,120,120)" if success else "dim rgb(255,75,75)",
+        box=box.ROUNDED,
+        expand=False,
+    )
+
+    _console.print(f"{_I}", output_panel)
+    _console.print()
 
 
 class SubAgentDisplayManager:
-    """Manages multiple concurrent sub-agent displays.
+    """Manages multiple concurrent sub-agent displays with live spinner and active tool calls.
 
     Each agent gets its own stats and rolling tool-call log.
     All agents are rendered together so terminal escape-code
@@ -449,10 +538,13 @@ class SubAgentDisplayManager:
     """
 
     _MAX_VISIBLE = 4  # tool-call lines shown per agent
+    _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
     def __init__(self):
         self._agents: dict[str, dict] = {}  # agent_id -> state dict
         self._lines_on_screen = 0
+        self._spinner_idx = 0
+        self._loop_task: "asyncio.Task | None" = None
 
     def start(self, agent_id: str, label: str = "research") -> None:
         import time
@@ -465,6 +557,26 @@ class SubAgentDisplayManager:
             "start_time": time.monotonic(),
         }
         self._redraw()
+
+        if self._loop_task is None:
+            try:
+                loop = asyncio.get_running_loop()
+                self._loop_task = loop.create_task(self._spinner_loop())
+            except RuntimeError:
+                pass
+
+    async def _spinner_loop(self):
+        try:
+            while self._agents:
+                self._spinner_idx = (self._spinner_idx + 1) % len(self._FRAMES)
+                self._redraw()
+                await asyncio.sleep(0.08)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+        finally:
+            self._loop_task = None
 
     def set_tokens(self, agent_id: str, tokens: int) -> None:
         if agent_id in self._agents:
@@ -499,10 +611,9 @@ class SubAgentDisplayManager:
     def _render_completion_line(agent: dict) -> str:
         stats = SubAgentDisplayManager._format_stats(agent)
         label = agent["label"]
-        # dim green check + dim label; stats in parens
-        line = f"{_I}\033[38;2;120;200;140m✓\033[0m \033[2m{label}\033[0m"
+        line = f"{_I}\033[38;2;100;200;120m✔\033[0m \033[1;38;2;220;220;220m{label}\033[0m \033[38;2;140;140;140m已就绪\033[0m"
         if stats:
-            line += f"  \033[2m({stats})\033[0m"
+            line += f"  \033[2;38;2;140;140;140m({stats})\033[0m"
         return line
 
     @staticmethod
@@ -527,13 +638,23 @@ class SubAgentDisplayManager:
             f.flush()
 
     def _render_agent_lines(self, agent: dict, compact: bool = False) -> list[str]:
-        """Render one concise research-agent status line."""
+        """Render one concise research-agent status line with live spinner and recent calls."""
         stats = self._format_stats(agent)
         label = agent["label"]
-        header = f"{_I}\033[38;2;255;200;80m▸ {label}\033[0m"
+        frame = self._FRAMES[self._spinner_idx]
+        header = f"{_I}\033[38;2;255;200;80m{frame}\033[0m \033[1;38;2;240;240;240m{label}\033[0m"
         if stats:
-            header += f"  \033[2m({stats})\033[0m"
-        return [header]
+            header += f"  \033[2;38;2;140;140;140m({stats})\033[0m"
+
+        lines = [header]
+        if not compact:
+            # 仅展示最近 3 次工具调用，限制在 MAX_VISIBLE - 1 行
+            visible_calls = agent["calls"][-3:]
+            for call in visible_calls:
+                lines.append(
+                    f"{_I}  \033[2;38;2;120;120;120m↳\033[0m \033[2;38;2;180;180;180m{call}\033[0m"
+                )
+        return lines
 
     def _redraw(self) -> None:
         f = _console.file

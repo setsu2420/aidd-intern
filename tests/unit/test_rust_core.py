@@ -17,7 +17,6 @@ import pytest
 # ---------------------------------------------------------------------------
 try:
     import aidd_intern_core
-    from aidd_intern_core import save_json_atomic
 
     RUST_AVAILABLE = True
 except ImportError:
