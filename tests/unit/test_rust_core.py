@@ -15,14 +15,14 @@ from unittest import mock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Availability probe
-# ---------------------------------------------------------------------------
 try:
     import aidd_intern_core
+    from aidd_intern_core import save_json_atomic
 
     RUST_AVAILABLE = True
 except ImportError:
     RUST_AVAILABLE = False
+
 
 skip_no_rust = pytest.mark.skipif(
     not RUST_AVAILABLE, reason="aidd_intern_core Rust module is not compiled"

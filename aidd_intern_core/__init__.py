@@ -19,5 +19,7 @@ try:
         clip_ansi_string,
         visible_width,
     )
+    RUST_AVAILABLE = True
 except ImportError:
-    pass  # Native module not compiled; callers should check RUST_AVAILABLE
+    RUST_AVAILABLE = False
+
