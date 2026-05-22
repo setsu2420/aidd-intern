@@ -914,6 +914,68 @@ class SessionManager:
                 SANDBOX_SHUTDOWN_CLEANUP_TIMEOUT_S,
             )
 
+    async def _auto_memorize_session(self, session: "Session") -> None:
+        """Archive session conversation to MemU long-term memory (fire-and-forget).
+
+        Only runs when MEMU_API_KEY is set and the session has at least 3
+        messages. Failures are silently logged — they must never block or
+        delay session teardown.
+        """
+        import os
+
+        if not os.environ.get("MEMU_API_KEY"):
+            return
+
+        try:
+            messages = session.context_manager.items
+        except Exception:
+            return
+
+        # Convert context items to the MemU conversation format
+        conversation = []
+        for msg in messages:
+            role = getattr(msg, "role", None)
+            content = getattr(msg, "content", None)
+            if role in ("user", "assistant") and content:
+                # Handle content that may be a list of parts
+                if isinstance(content, list):
+                    text_parts = [
+                        p.get("text", "") if isinstance(p, dict) else str(p)
+                        for p in content
+                    ]
+                    content = "\n".join(t for t in text_parts if t)
+                if content:
+                    conversation.append({"role": role, "content": str(content)})
+
+        if len(conversation) < 3:
+            return
+
+        # Fire-and-forget: launch as background task so teardown is immediate
+        async def _do_memorize():
+            try:
+                from agent.core.memu import MemUClient
+
+                client = MemUClient()
+                user_id = getattr(session, "user_id", None) or "default_user"
+                agent_id = session.session_id
+                user_name = getattr(session, "hf_username", None)
+                await client.amemorize(
+                    conversation=conversation,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    user_name=user_name,
+                    agent_name="aidd-intern",
+                )
+                logger.info(
+                    "Auto-memorized session %s (%d messages)",
+                    session.session_id,
+                    len(conversation),
+                )
+            except Exception as exc:
+                logger.debug("Auto-memorize background task failed: %s", exc)
+
+        asyncio.create_task(_do_memorize())
+
     async def _run_session(
         self,
         session_id: str,
@@ -987,6 +1049,15 @@ class SessionManager:
                     )
                 except Exception as e:
                     logger.warning(f"Final-flush failed for {session_id}: {e}")
+
+            # Auto-memorization: archive session conversation to MemU long-term
+            # memory when MEMU_API_KEY is set and conversation is long enough.
+            # Runs as a fire-and-forget background task so shutdown is never
+            # blocked by network I/O.
+            try:
+                await self._auto_memorize_session(session)
+            except Exception as e:
+                logger.debug(f"Auto-memorize skipped for {session_id}: {e}")
 
             async with self._lock:
                 if session_id in self.sessions:

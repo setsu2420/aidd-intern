@@ -232,3 +232,20 @@ class LayeredMemoryPipeline:
         structured = self.format_layered_memories(raw_res, user_name=user_name)
         # Include original fields for maximum backwards compatibility
         return {**raw_res, **structured}
+
+    async def aretrieve_layered(
+        self,
+        user_id: str,
+        agent_id: str,
+        query: Union[str, List[Dict[str, Any]]],
+        user_name: str | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Performs asynchronous semantic retrieval from MemU and returns structured hierarchical layers.
+        """
+        raw_res = await self.client.aretrieve(
+            user_id=user_id, agent_id=agent_id, query=query
+        )
+        structured = self.format_layered_memories(raw_res, user_name=user_name)
+        # Include original fields for maximum backwards compatibility
+        return {**raw_res, **structured}

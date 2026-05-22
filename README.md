@@ -83,6 +83,47 @@ scripts/update-local.sh
 ```
 This script executes `git pull --ff-only origin <current-branch>`, `uv sync --extra dev`, and `uv tool install -e .` safely.
 
+## Rust Acceleration (Optional)
+
+AIDD-Intern ships with an optional Rust native extension (`aidd_intern_core`) that accelerates JSON serialization, secret redaction, and ANSI string processing by up to **3.2x** with GIL-free concurrency.
+
+**The Rust extension is fully optional** — if your system does not have a Rust toolchain, the project works identically using pure-Python fallbacks with zero configuration.
+
+### Automatic (recommended)
+
+If you already have Rust installed, simply run:
+```bash
+uv sync --extra dev
+```
+The build system (`setuptools-rust`) will automatically detect and compile the native extension.
+
+### One-click setup (installs Rust + compiles)
+
+If you don't have Rust yet, run the setup script:
+```bash
+./scripts/setup-rust.sh
+```
+This installs the Rust toolchain via `rustup` (if not present) and compiles the release-optimised native extension.
+
+### Manual setup
+
+1. Install Rust:
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   source $HOME/.cargo/env
+   ```
+2. Rebuild the project:
+   ```bash
+   uv sync --extra dev
+   ```
+
+### Verify
+
+```bash
+python -c "from aidd_intern_core import json_dumps_sorted; print(json_dumps_sorted({'hello': 'world'}))"
+```
+If no error is raised, the Rust acceleration is active.
+
 ## AIDD Preparation Stage
 
 Before launching heavier binder design generation tasks, complete the four preparation steps:
@@ -116,6 +157,7 @@ This workflow creates the following structured outputs:
 - `agent/`: Async agent runtime, context managers, CLI, and core tools.
 - `backend/`: FastAPI backend serving hosted browser sessions.
 - `configs/`: Model catalog and default MCP settings.
-- `rust_core/`: Optional high-performance logging extension built with PyO3 + Maturin.
+- `aidd_intern_core/`: Python wrapper for the Rust native extension (auto-compiled when Rust is available).
+- `src/`: Rust source code for the native extension (`lib.rs`).
 - `scripts/`: Dev launchers, scientific tool installers, and sandbox cleanups.
 - `tests/`: Automated pytest unit and integration suites.

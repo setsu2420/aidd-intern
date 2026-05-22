@@ -32,6 +32,27 @@
 - Do not commit tokens, generated traces, model weights, checkpoints, databases,
   or generated structure batches.
 
+## Rust Native Acceleration (Optional)
+
+AIDD-Intern includes an optional PyO3-based Rust extension (`aidd_intern_core`)
+that accelerates JSON serialization (3.2x), secret redaction, and ANSI string
+processing with GIL-free concurrency.
+
+- **Zero-config**: `uv sync` / `uv tool install -e .` automatically detects and
+  compiles the Rust extension when `rustc` + `cargo` are available. If no Rust
+  toolchain is found, the build silently falls back to pure-Python
+  implementations — no errors, no extra flags.
+- **One-click setup**: Run `./scripts/setup-rust.sh` to install rustup (if
+  needed) and compile the release-optimised native extension in one command.
+- **Manual setup**:
+  1. Install Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`
+  2. Reload shell or run: `source $HOME/.cargo/env`
+  3. Rebuild: `uv sync --extra dev` or `maturin develop --release`
+- **Fallback guarantee**: Every call site wraps native imports in
+  `try/except ImportError` so the agent runs identically without the extension.
+- **CI note**: CI does not require Rust; the `optional=True` flag in `setup.py`
+  ensures the build succeeds on all platforms regardless of toolchain presence.
+
 ## Local Dev Servers
 
 - Preferred all-in-one launcher: `./scripts/dev.sh`. It starts the backend.

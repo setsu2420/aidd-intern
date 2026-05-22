@@ -48,6 +48,7 @@ dev = [
     "pytest-asyncio>=1.2.0",
     "ruff>=0.15.12",
     "maturin>=1.5.0",
+    "setuptools-rust>=1.8",
 ]
 
 # All dependencies (eval + dev)
@@ -59,13 +60,14 @@ all = [
 aidd-intern = "agent.main:cli"
 
 [build-system]
-requires = ["maturin>=1.5,<2.0"]
-build-backend = "maturin"
+requires = ["setuptools>=68.0", "setuptools-rust>=1.8"]
+build-backend = "setuptools.build_meta"
 
-[tool.maturin]
-features = ["pyo3/extension-module"]
-python-source = "."
-module-name = "aidd_intern_core._native"
+[tool.setuptools.packages.find]
+include = ["agent*", "aidd_intern_core*", "backend*"]
+
+[tool.setuptools.package-data]
+aidd_intern_core = ["*.so", "*.pyd", "*.dylib"]
 
 [tool.uv]
 package = true

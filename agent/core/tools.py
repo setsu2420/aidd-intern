@@ -394,7 +394,7 @@ async def memu_retrieve_handler(
         if session and getattr(session, "hf_username", None):
             user_name = session.hf_username
 
-        res = pipeline.retrieve_layered(
+        res = await pipeline.aretrieve_layered(
             user_id=user_id, agent_id=agent_id, query=query, user_name=user_name
         )
         import json
@@ -448,7 +448,7 @@ async def memu_memorize_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
     user_name = arguments.get("user_name")
     agent_name = arguments.get("agent_name")
     try:
-        res = client.memorize(
+        res = await client.amemorize(
             conversation=conversation,
             user_id=user_id,
             agent_id=agent_id,

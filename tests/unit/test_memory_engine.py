@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.core.memory import MermaidTaskCanvas, LayeredMemoryPipeline
 from agent.core.tools import create_builtin_tools
@@ -103,10 +103,10 @@ async def test_update_task_canvas_handler_works():
 
 
 @pytest.mark.asyncio
-@patch("agent.core.memu.MemUClient.retrieve")
-async def test_layered_retrieve_handler_works(mock_retrieve, monkeypatch):
+@patch("agent.core.memu.MemUClient.aretrieve", new_callable=AsyncMock)
+async def test_layered_retrieve_handler_works(mock_aretrieve, monkeypatch):
     monkeypatch.setenv("MEMU_API_KEY", "dummy_key")
-    mock_retrieve.return_value = {
+    mock_aretrieve.return_value = {
         "rewritten_query": "What are user's preferences?",
         "categories": [],
         "items": [{"memory_type": "preference", "content": "Loves standard models"}],

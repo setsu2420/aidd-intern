@@ -1,0 +1,29 @@
+# AIDD-Intern Docker Compose - 一键容器化部署
+# Usage: docker compose up --build
+# Requires: .env file with API keys (see .env.example)
+
+services:
+  aidd-intern:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${AIDD_INTERN_BACKEND_PORT:-7860}:7860"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - session_data:/app/session_logs
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  session_data:
+    driver: local

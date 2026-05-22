@@ -80,6 +80,47 @@ scripts/update-local.sh
 ```
 该脚本将无损地执行 `git pull --ff-only origin <current-branch>`、`uv sync --extra dev` 及 `uv tool install -e .` 以刷新依赖与命令行工具。
 
+## Rust 加速（可选）
+
+AIDD-Intern 内置了可选的 Rust 原生扩展模块（`aidd_intern_core`），可为 JSON 序列化、敏感信息清洗及 ANSI 字符串处理提供最高 **3.2 倍**的加速，并支持 GIL-free 并发。
+
+**Rust 扩展完全可选** — 若您的系统未安装 Rust 工具链，项目将自动使用纯 Python 实现，零配置即可正常运行。
+
+### 自动检测（推荐）
+
+如果您已安装 Rust，只需运行：
+```bash
+uv sync --extra dev
+```
+构建系统（`setuptools-rust`）会自动检测并编译原生扩展。
+
+### 一键安装（安装 Rust + 编译）
+
+如果您尚未安装 Rust，运行以下脚本：
+```bash
+./scripts/setup-rust.sh
+```
+该脚本会通过 `rustup` 自动安装 Rust 工具链（若不存在），并编译 release 优化版本的原生扩展。
+
+### 手动配置
+
+1. 安装 Rust：
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   source $HOME/.cargo/env
+   ```
+2. 重新构建项目：
+   ```bash
+   uv sync --extra dev
+   ```
+
+### 验证
+
+```bash
+python -c "from aidd_intern_core import json_dumps_sorted; print(json_dumps_sorted({'hello': 'world'}))"
+```
+若无报错，则 Rust 加速已启用。
+
 ## AIDD 准备阶段
 
 在运行 binder 科学计算生成任务之前，需完成以下四个本地准备任务：
@@ -113,6 +154,7 @@ aidd-intern --prepare-aidd \
 - `agent/`：Agent 运行时、上下文管理、命令行入口及内置工具。
 - `backend/`：FastAPI Web 后端服务，负责会话管理与 API 路由。
 - `configs/`：共享模型目录及 MCP 配置。
-- `rust_core/`：基于 PyO3 + Maturin 的高性能 Trace 写入加速模块。
+- `aidd_intern_core/`：Rust 原生扩展的 Python 包装器（Rust 可用时自动编译）。
+- `src/`：Rust 原生扩展源代码（`lib.rs`）。
 - `scripts/`：本地开发启动器、科学工具 MCP 安装与一键配置工具。
 - `tests/`：pytest 单元测试与集成测试套件。

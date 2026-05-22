@@ -78,6 +78,8 @@ echo "STEP 2: Syncing Python dependencies"
 uv sync --extra dev
 
 echo "STEP 2.5: Compile High-Performance Rust Core (Optional Acceleration)"
+# setuptools-rust auto-compiles the Rust extension during `uv sync` when rustc is available.
+# For a release-optimised build (3.2x JSON speedup), run: scripts/setup-rust.sh
 CARGO_BIN=""
 if command -v cargo >/dev/null 2>&1; then
   CARGO_BIN="cargo"
@@ -86,23 +88,12 @@ elif [[ -f "$HOME/.cargo/bin/cargo" ]]; then
 fi
 
 if [[ -n "$CARGO_BIN" ]]; then
-  echo "Found Rust compiler. Compiling aidd_intern_core module..."
-  if [[ -f "$HOME/.cargo/env" ]]; then
-    . "$HOME/.cargo/env"
-  fi
-  if (
-    cd "$repo_root"
-    unset CONDA_PREFIX || true
-    uv run --with maturin maturin develop
-  ); then
-    echo "aidd_intern_core successfully compiled and installed."
-  else
-    echo "warning: Failed to compile aidd_intern_core module. Continuing without Rust core acceleration." >&2
-    echo "AIDD-Intern will safely fall back to the native Python engine." >&2
-  fi
+  echo "Rust toolchain detected. For maximum performance, run: ./scripts/setup-rust.sh"
+  echo "(Debug build already installed via uv sync above)"
 else
   echo "Rust compiler not found. Skipping optional high-performance Rust core acceleration compilation."
   echo "AIDD-Intern will safely fall back to the native Python engine."
+  echo "To enable Rust acceleration later, run: ./scripts/setup-rust.sh"
 fi
 
 echo "STEP 3: Reinstalling the editable Python CLI"

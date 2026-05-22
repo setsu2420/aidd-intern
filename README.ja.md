@@ -80,6 +80,47 @@ scripts/update-local.sh
 ```
 このスクリプトは `git pull --ff-only origin <current-branch>`、`uv sync --extra dev`、および `uv tool install -e .` を安全に実行し、依存関係とコマンドツールを更新します。
 
+## Rust 高速化（オプショナル）
+
+AIDD-Intern には、JSON シリアライゼーション、機密情報のマスク処理、ANSI 文字列処理を最大 **3.2 倍**高速化するオプショナルな Rust ネイティブ拡張モジュール（`aidd_intern_core`）が含まれています。GIL-free の並行処理もサポートしています。
+
+**Rust 拡張は完全にオプショナルです** — システムに Rust ツールチェーンがインストールされていない場合でも、プロジェクトは純粋な Python 実装を使用してゼロ設定で同一に動作します。
+
+### 自動検出（推奨）
+
+Rust が既にインストールされている場合は、以下を実行するだけです：
+```bash
+uv sync --extra dev
+```
+ビルドシステム（`setuptools-rust`）が自動的に検出してネイティブ拡張をコンパイルします。
+
+### ワンクリックセットアップ（Rust 安装 + コンパイル）
+
+Rust がまだインストールされていない場合は、セットアップスクリプトを実行します：
+```bash
+./scripts/setup-rust.sh
+```
+このスクリプトは `rustup` 経由で Rust ツールチェーンを自動安装し（存在しない場合）、リリース最適化版のネイティブ拡張をコンパイルします。
+
+### 手動セットアップ
+
+1. Rust をインストール：
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   source $HOME/.cargo/env
+   ```
+2. プロジェクトを再ビルド：
+   ```bash
+   uv sync --extra dev
+   ```
+
+### 確認
+
+```bash
+python -c "from aidd_intern_core import json_dumps_sorted; print(json_dumps_sorted({'hello': 'world'}))"
+```
+エラーが発生しなければ、Rust 高速化が有効になっています。
+
 ## AIDD 準備段階
 
 重い binder 科学計算生成タスクを実行する前に、以下の 4 つの準備タスクを完了させる必要があります：
@@ -113,6 +154,7 @@ aidd-intern --prepare-aidd \
 - `agent/`：Agent 実行環境、コンテキスト管理、CLI、および内蔵ツール。
 - `backend/`：FastAPI Web バックエンド、セッション管理および API ルーティング。
 - `configs/`：共有モデルカタログおよび MCP 設定ファイル。
-- `rust_core/`：PyO3 + Maturin に基づく高性能な Trace 書き込み高速化モジュール。
+- `aidd_intern_core/`：Rust ネイティブ拡張の Python ラッパー（Rust が利用可能な場合自动コンパイル）。
+- `src/`：Rust ネイティブ拡張のソースコード（`lib.rs`）。
 - `scripts/`：ローカル開発起動スクリプト、科学計算ツール MCP インストールおよび一键設定ツール。
 - `tests/`：pytest ユニットテストおよび統合テストスイート。
