@@ -13,6 +13,14 @@ from rich.markdown import Heading, Markdown
 from rich.panel import Panel
 from rich.theme import Theme
 
+try:
+    from aidd_intern_core import clip_ansi_string as _rust_clip_ansi_string
+    from aidd_intern_core import visible_width as _rust_visible_width  # noqa: F401
+
+    _RUST_ANSI_AVAILABLE = True
+except ImportError:
+    _RUST_ANSI_AVAILABLE = False
+
 
 class _LeftHeading(Heading):
     """Rich's default Markdown renders h1/h2 centered via Align.center.
@@ -35,7 +43,16 @@ def _clip_to_width(s: str, width: int) -> str:
     Needed for the sub-agent live redraw: cursor-up-and-erase assumes one
     logical line == one terminal row. If a line wraps, cursor-up undershoots
     and the next redraw corrupts the display. Truncating prevents wrap.
+
+    When the Rust core is available, delegates to the native implementation
+    which uses unicode-width for CJK-aware column counting and runs without
+    the GIL.
     """
+    if _RUST_ANSI_AVAILABLE:
+        try:
+            return _rust_clip_ansi_string(s, width)
+        except Exception:
+            pass
     if width <= 0:
         return s
     out: list[str] = []
@@ -58,7 +75,7 @@ def _clip_to_width(s: str, width: int) -> str:
         i += 1
     if truncated:
         # Strip styles (so ellipsis isn't left hanging inside a style run)
-        out.append("\033[0m…")
+        out.append("\033[0m\u2026")
     return "".join(out)
 
 

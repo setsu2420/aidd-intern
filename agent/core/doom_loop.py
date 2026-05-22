@@ -12,6 +12,15 @@ from dataclasses import dataclass
 
 from litellm import Message
 
+try:
+    from aidd_intern_core import (
+        normalize_and_hash_args as _rust_normalize_and_hash_args,
+    )
+
+    _RUST_HASH_AVAILABLE = True
+except ImportError:
+    _RUST_HASH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +61,15 @@ def _hash_args(args_str: str) -> str:
     The input is normalised via :func:`_normalize_args` first so that
     semantically-identical tool calls produce the same hash regardless of key
     order or whitespace.
+
+    When the Rust core is available, delegates to the native implementation
+    which combines normalisation + MD5 in a single GIL-free call.
     """
+    if _RUST_HASH_AVAILABLE:
+        try:
+            return _rust_normalize_and_hash_args(args_str)
+        except Exception:
+            pass
     return hashlib.md5(_normalize_args(args_str).encode()).hexdigest()[:12]
 
 

@@ -29,6 +29,7 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "pymongo>=4.17.0",
     "python-multipart>=0.0.20",
+    "tenacity>=8.0.0",
 ]
 
 [project.optional-dependencies]
@@ -58,24 +59,13 @@ all = [
 aidd-intern = "agent.main:cli"
 
 [build-system]
-requires = ["setuptools>=64"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
 
-[tool.setuptools.packages.find]
-# `configs` ships the JSON files loaded by agent.main.CLI_CONFIG_PATH at
-# runtime (resolves to <site-packages>/configs/cli_agent_config.json).
-# Without it, `uv tool install` / `pip install` produce a broken install
-# that imports fine but crashes at startup with FileNotFoundError.
-include = ["agent*", "configs"]
-
-[tool.setuptools.package-data]
-configs = ["*.json"]
-# Agent data files: system prompts loaded by ContextManager._load_system_prompt
-# at runtime (`<site-packages>/agent/prompts/system_prompt_v3.yaml`), plus the
-# package README. Without these, headless_main hangs forever — submission_loop
-# crashes with FileNotFoundError but headless_main doesn't check agent_task.done()
-# and just keeps awaiting the "ready" event_queue item that will never come.
-agent = ["README.md", "prompts/*.yaml", "workflows/*/*.yaml"]
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "."
+module-name = "aidd_intern_core._native"
 
 [tool.uv]
 package = true

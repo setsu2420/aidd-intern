@@ -85,3 +85,9 @@ wandb/
 *.pth
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+
+# Rust build artifacts
+target/
+aidd_intern_core/_native*.so
+aidd_intern_core/_native*.pyd
+aidd_intern_core/_native*.dylib

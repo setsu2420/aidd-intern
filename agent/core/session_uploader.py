@@ -28,6 +28,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+try:
+    from aidd_intern_core import json_dumps_sorted as _rust_json_dumps_sorted
+
+    _RUST_JSON_AVAILABLE = True
+except ImportError:
+    _RUST_JSON_AVAILABLE = False
+
 # Token resolution for the org KPI dataset. Fallback chain (least-privilege
 # first) — matches backend/kpis_scheduler.py so one write-scoped token on the
 # Space covers every telemetry dataset. Never hardcode tokens in source.
@@ -277,6 +284,12 @@ def _write_row_payload(data: dict, tmp_path: str) -> None:
     }
 
     with open(tmp_path, "w") as tmp:
+        if _RUST_JSON_AVAILABLE:
+            try:
+                tmp.write(_rust_json_dumps_sorted(session_row))
+                return
+            except Exception:
+                pass
         json.dump(session_row, tmp)
 
 
@@ -287,6 +300,13 @@ def _write_claude_code_payload(data: dict, tmp_path: str) -> None:
     events = to_claude_code_jsonl(scrubbed)
     with open(tmp_path, "w") as tmp:
         for event in events:
+            if _RUST_JSON_AVAILABLE:
+                try:
+                    tmp.write(_rust_json_dumps_sorted(event))
+                    tmp.write("\n")
+                    continue
+                except Exception:
+                    pass
             tmp.write(json.dumps(event))
             tmp.write("\n")
 

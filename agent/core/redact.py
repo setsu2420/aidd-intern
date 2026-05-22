@@ -12,6 +12,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+try:
+    from aidd_intern_core import scrub_string as _rust_scrub_string
+    from aidd_intern_core import scrub_obj as _rust_scrub_obj
+
+    _RUST_SCRUB_AVAILABLE = True
+except ImportError:
+    _RUST_SCRUB_AVAILABLE = False
+
 # Each entry: (compiled regex, replacement placeholder).
 # Patterns are conservative: they only match tokens with the canonical prefix
 # and a minimum body length so we don't paint over normal text.
@@ -43,9 +51,18 @@ _SECRETY_NAMES = re.compile(
 
 
 def scrub_string(s: str) -> str:
-    """Apply all redaction patterns to a single string. Safe on non-strings."""
+    """Apply all redaction patterns to a single string. Safe on non-strings.
+
+    When the Rust core is available, delegates to the native implementation
+    which uses pre-compiled regex and runs without the GIL.
+    """
     if not isinstance(s, str) or not s:
         return s
+    if _RUST_SCRUB_AVAILABLE:
+        try:
+            return _rust_scrub_string(s)
+        except Exception:
+            pass
     out = s
     for pat, repl in _PATTERNS:
         out = pat.sub(repl, out)
@@ -56,7 +73,16 @@ def scrub_string(s: str) -> str:
 def scrub(obj: Any) -> Any:
     """Recursively scrub every string value in a nested dict/list structure.
 
-    Returns a new object — inputs are not mutated."""
+    Returns a new object — inputs are not mutated.
+
+    When the Rust core is available, delegates to the native implementation
+    which traverses the object graph without the GIL.
+    """
+    if _RUST_SCRUB_AVAILABLE:
+        try:
+            return _rust_scrub_obj(obj)
+        except Exception:
+            pass
     if isinstance(obj, str):
         return scrub_string(obj)
     if isinstance(obj, dict):

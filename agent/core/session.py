@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 try:
     import aidd_intern_core
+    from aidd_intern_core import json_dumps_sorted as _rust_json_dumps_sorted
 
     RUST_AVAILABLE = True
 except ImportError:
@@ -663,7 +664,7 @@ class Session:
             if RUST_AVAILABLE:
                 try:
                     # Offload the atomic file write and flush to Rust to release GIL
-                    content_bytes = json.dumps(trajectory, indent=2).encode("utf-8")
+                    content_bytes = _rust_json_dumps_sorted(trajectory).encode("utf-8")
                     aidd_intern_core.save_json_atomic(str(filepath), content_bytes)
                 except Exception as rust_err:
                     logger.warning(
