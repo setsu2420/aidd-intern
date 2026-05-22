@@ -5,6 +5,7 @@ Terminal display utilities — rich-powered CLI formatting.
 import asyncio
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console
@@ -79,10 +80,10 @@ def _clip_to_width(s: str, width: int) -> str:
     return "".join(out)
 
 
-_THEME = Theme(
-    {
-        "tool.name": "bold rgb(255,213,79)",
-        "tool.args": "dim rgb(200,200,200)",
+THEMES = {
+    "sunset": {
+        "tool.name": "bold rgb(255,180,80)",
+        "tool.args": "dim rgb(220,200,180)",
         "tool.ok": "bold rgb(120,220,140)",
         "tool.fail": "bold rgb(255,100,100)",
         "context.ok": "dim green",
@@ -90,19 +91,151 @@ _THEME = Theme(
         "context.danger": "bold red",
         "info": "dim",
         "muted": "dim",
-        # Markdown 视觉强调颜色
-        "markdown.strong": "bold rgb(255,213,79)",
-        "markdown.emphasis": "italic rgb(255,236,179)",
+        "markdown.strong": "bold rgb(255,183,77)",
+        "markdown.emphasis": "italic rgb(255,224,178)",
         "markdown.code": "bold rgb(128,222,234)",
         "markdown.code_block": "rgb(224,242,241)",
         "markdown.link": "underline rgb(41,182,246)",
-        "markdown.h1": "bold rgb(255,183,77)",
-        "markdown.h2": "bold rgb(255,204,128)",
-        "markdown.h3": "bold rgb(255,224,178)",
-    }
-)
+        "markdown.h1": "bold rgb(255,140,0)",
+        "markdown.h2": "bold rgb(255,180,50)",
+        "markdown.h3": "bold rgb(255,200,100)",
+    },
+    "cyberpunk": {
+        "tool.name": "bold rgb(255,0,127)",
+        "tool.args": "dim rgb(0,255,255)",
+        "tool.ok": "bold rgb(57,255,20)",
+        "tool.fail": "bold rgb(255,7,58)",
+        "context.ok": "dim rgb(0,255,255)",
+        "context.warn": "bold rgb(255,255,0)",
+        "context.danger": "bold rgb(255,7,58)",
+        "info": "dim rgb(0,255,255)",
+        "muted": "dim rgb(180,180,180)",
+        "markdown.strong": "bold rgb(255,0,127)",
+        "markdown.emphasis": "italic rgb(0,255,255)",
+        "markdown.code": "bold rgb(255,255,0)",
+        "markdown.code_block": "rgb(20,20,40)",
+        "markdown.link": "underline rgb(0,255,255)",
+        "markdown.h1": "bold rgb(255,0,127)",
+        "markdown.h2": "bold rgb(0,255,255)",
+        "markdown.h3": "bold rgb(255,255,0)",
+    },
+    "aurora": {
+        "tool.name": "bold rgb(0,230,118)",
+        "tool.args": "dim rgb(186,104,200)",
+        "tool.ok": "bold rgb(0,229,255)",
+        "tool.fail": "bold rgb(255,23,68)",
+        "context.ok": "dim rgb(0,229,255)",
+        "context.warn": "bold rgb(255,235,59)",
+        "context.danger": "bold rgb(255,23,68)",
+        "info": "dim rgb(0,230,118)",
+        "muted": "dim rgb(160,180,170)",
+        "markdown.strong": "bold rgb(0,230,118)",
+        "markdown.emphasis": "italic rgb(186,104,200)",
+        "markdown.code": "bold rgb(224,64,251)",
+        "markdown.code_block": "rgb(30,40,45)",
+        "markdown.link": "underline rgb(0,229,255)",
+        "markdown.h1": "bold rgb(0,230,118)",
+        "markdown.h2": "bold rgb(0,229,255)",
+        "markdown.h3": "bold rgb(186,104,200)",
+    },
+    "monochrome": {
+        "tool.name": "bold white",
+        "tool.args": "dim gray",
+        "tool.ok": "bold rgb(240,240,240)",
+        "tool.fail": "bold rgb(150,150,150)",
+        "context.ok": "dim gray",
+        "context.warn": "bold white",
+        "context.danger": "bold white underline",
+        "info": "dim",
+        "muted": "dim",
+        "markdown.strong": "bold white",
+        "markdown.emphasis": "italic rgb(200,200,200)",
+        "markdown.code": "bold rgb(220,220,220)",
+        "markdown.code_block": "rgb(20,20,20)",
+        "markdown.link": "underline white",
+        "markdown.h1": "bold white",
+        "markdown.h2": "bold rgb(200,200,200)",
+        "markdown.h3": "bold rgb(160,160,160)",
+    },
+    "ocean": {
+        "tool.name": "bold rgb(33,150,243)",
+        "tool.args": "dim rgb(178,223,219)",
+        "tool.ok": "bold rgb(76,175,80)",
+        "tool.fail": "bold rgb(244,67,54)",
+        "context.ok": "dim rgb(178,223,219)",
+        "context.warn": "bold rgb(255,152,0)",
+        "context.danger": "bold rgb(244,67,54)",
+        "info": "dim rgb(33,150,243)",
+        "muted": "dim rgb(150,180,200)",
+        "markdown.strong": "bold rgb(33,150,243)",
+        "markdown.emphasis": "italic rgb(178,223,219)",
+        "markdown.code": "bold rgb(0,188,212)",
+        "markdown.code_block": "rgb(224,242,241)",
+        "markdown.link": "underline rgb(33,150,243)",
+        "markdown.h1": "bold rgb(13,71,161)",
+        "markdown.h2": "bold rgb(25,118,210)",
+        "markdown.h3": "bold rgb(30,136,229)",
+    },
+}
 
+_active_theme_name = "sunset"
+_has_custom_theme = False
+
+
+def _get_theme_save_path() -> Path:
+    p = Path.home() / ".aidd-intern"
+    p.mkdir(parents=True, exist_ok=True)
+    return p / "theme.txt"
+
+
+def load_saved_theme() -> str:
+    path = _get_theme_save_path()
+    if path.exists():
+        try:
+            theme_val = path.read_text(encoding="utf-8").strip().lower()
+            if theme_val in THEMES:
+                return theme_val
+        except Exception:
+            pass
+    return "sunset"
+
+
+def save_theme(theme_name: str) -> None:
+    try:
+        path = _get_theme_save_path()
+        path.write_text(theme_name, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def set_theme(theme_name: str) -> bool:
+    global _active_theme_name, _has_custom_theme
+    t_name = theme_name.strip().lower()
+    if t_name not in THEMES:
+        return False
+
+    _active_theme_name = t_name
+
+    if _has_custom_theme:
+        try:
+            _console.pop_theme()
+        except Exception:
+            pass
+
+    _console.push_theme(Theme(THEMES[t_name]))
+    _has_custom_theme = True
+    save_theme(t_name)
+    return True
+
+
+def get_theme_names() -> list[str]:
+    return list(THEMES.keys())
+
+
+_THEME = Theme(THEMES["sunset"])
 _console = Console(theme=_THEME, highlight=False)
+set_theme(load_saved_theme())
+
 
 # Indent prefix for all agent output (aligns under the `>` prompt)
 _I = "  "
@@ -192,6 +325,94 @@ def format_context_status(
     if include_items:
         text += f" | items {status['items']}"
     return text
+
+
+def format_context_status_html(session: Any) -> Any:
+    from prompt_toolkit.formatted_text import HTML
+
+    status = _context_status(session)
+    config = getattr(session, "config", None)
+
+    # 1. 取得主题名
+    theme_label = _active_theme_name.upper()
+
+    # 2. 取得 Model 和 YOLO
+    model_name = "unknown"
+    yolo_active = False
+    tool_runtime_str = "local"
+    if config:
+        model_name = getattr(config, "model_name", "unknown")
+        if "/" in model_name:
+            model_name = model_name.split("/")[-1]
+        yolo_active = getattr(config, "yolo_mode", False)
+        tool_runtime_str = getattr(config, "tool_runtime", "local")
+
+    # 3. 取得累计 token 消耗
+    total_tokens_consumed = 0
+    llm_calls_count = 0
+    if getattr(session, "logged_events", None):
+        llm_calls = [
+            e for e in session.logged_events if e.get("event_type") == "llm_call"
+        ]
+        total_tokens_consumed = sum(
+            int((e.get("data") or {}).get("total_tokens") or 0) for e in llm_calls
+        )
+        llm_calls_count = len(llm_calls)
+
+    # 4. 取得 Context tokens 占比和进度条
+    percent = 0.0
+    used_tokens = 0
+    max_tokens = 0
+    if status:
+        percent = float(status["percent"])
+        used_tokens = int(status["used_tokens"])
+        max_tokens = int(status["max_tokens"])
+
+    # 平滑进度条
+    width = 10
+    filled = int(round(max(0.0, min(percent, 100.0)) / 100.0 * width))
+    bar = "█" * filled + "░" * (width - filled)
+
+    # YOLO气泡配色
+    if yolo_active:
+        yolo_html = '<style bg="ansigreen" fg="ansiwhite"><b> YOLO </b></style>'
+    else:
+        yolo_html = '<style bg="ansigray" fg="ansiwhite"><b> YOLO </b></style>'
+
+    # Sandbox气泡配色
+    if tool_runtime_str == "sandbox":
+        sandbox_html = '<style bg="ansipurple" fg="ansiwhite"><b> SANDBOX </b></style>'
+    else:
+        sandbox_html = '<style bg="ansiblue" fg="ansiwhite"><b> FILESYSTEM </b></style>'
+
+    # 主题不同，状态栏色调也不同
+    theme_colors = {
+        "sunset": ("#FFA726", "#FFFFFF", "#FFA726"),
+        "cyberpunk": ("#FF007F", "#FFFFFF", "#00FFFF"),
+        "aurora": ("#00E676", "#FFFFFF", "#00E5FF"),
+        "monochrome": ("#FFFFFF", "#000000", "#B0B0B0"),
+        "ocean": ("#2196F3", "#FFFFFF", "#00BCD4"),
+    }
+
+    primary_color, text_color, accent_color = theme_colors.get(
+        _active_theme_name, ("#FFA726", "#FFFFFF", "#FFA726")
+    )
+
+    # 使用 prompt_toolkit 能够理解的 style
+    html_str = (
+        f'<style bg="{primary_color}" fg="{text_color}"><b> AIDD-INTERN </b></style>'
+        f'<style bg="#333333" fg="#E0E0E0"> {model_name} </style> '
+        f"{yolo_html}"
+        f"{sandbox_html} "
+        f'<style bg="#444444" fg="#80D8FF"> <b>Tokens:</b> {_format_token_count(total_tokens_consumed)} </style>'
+        f'<style bg="#222222" fg="#BDBDBD"> 🧪 Calls: {llm_calls_count} </style> | '
+        f'<style fg="{accent_color}"><b>Context</b></style> '
+        f'<style fg="{accent_color}">{bar}</style> '
+        f'<style fg="#E0E0E0"><b>{_format_token_count(used_tokens)}</b>/{_format_token_count(max_tokens)} ({percent:.1f}%)</style> | '
+        f'<style fg="#9E9E9E">Theme: <b>{theme_label}</b></style>'
+    )
+
+    return HTML(html_str)
 
 
 def _context_status_style(percent: float) -> str:
@@ -367,14 +588,33 @@ def print_banner(
     except ImportError:
         rust_status = "[bold rgb(255,180,50)]Python fallback[/bold rgb(255,180,50)]"
 
+    # 主题不同，采用对应的渐变和高亮色
+    theme_rgb = {
+        "sunset": "rgb(255,180,80)",
+        "cyberpunk": "rgb(255,0,127)",
+        "aurora": "rgb(0,230,118)",
+        "monochrome": "rgb(255,255,255)",
+        "ocean": "rgb(33,150,243)",
+    }
+    theme_dim_rgb = {
+        "sunset": "rgb(180,120,40)",
+        "cyberpunk": "rgb(180,0,90)",
+        "aurora": "rgb(0,160,80)",
+        "monochrome": "rgb(120,120,120)",
+        "ocean": "rgb(20,100,180)",
+    }
+
+    color = theme_rgb.get(_active_theme_name, "rgb(255,200,80)")
+    dim_color = theme_dim_rgb.get(_active_theme_name, "rgb(180,140,40)")
+
     logo = (
-        "[bold rgb(255,200,80)]"
+        f"[bold {color}]"
         "       ___   ____ ___   ___         ____      __                 \n"
         "      /   | /  _// __ \\ / __ \\       /  _/___  / /_ ___  _________ \n"
         "     / /| | / / / / / // / / /______ / // __ \\/ __// _ \\/ ___/ __ \\\n"
         "    / ___ |/ / / /_/ // /_/ /_____// // / / / /_ /  __/ /  / / / /\n"
         "   /_/  |_/___/_____//_____/     /___/_/ /_/\\__/ \\___/_/  /_/ /_/ \n"
-        "[/bold rgb(255,200,80)]"
+        f"[/bold {color}]"
     )
 
     card_content = (
@@ -389,9 +629,9 @@ def print_banner(
 
     status_panel = Panel(
         card_content,
-        title="[bold rgb(255,200,80)]Runtime System Card[/bold rgb(255,200,80)]",
+        title=f"[bold {color}]Runtime System Card[/bold {color}]",
         title_align="left",
-        border_style="dim rgb(180,140,40)",
+        border_style=f"dim {dim_color}",
         box=box.ROUNDED,
         expand=False,
     )
@@ -422,16 +662,24 @@ def print_banner(
 
 
 def print_init_done(tool_count: int = 0) -> None:
+    color = {
+        "sunset": "rgb(255,180,80)",
+        "cyberpunk": "rgb(255,0,127)",
+        "aurora": "rgb(0,230,118)",
+        "monochrome": "rgb(255,255,255)",
+        "ocean": "rgb(33,150,243)",
+    }.get(_active_theme_name, "rgb(255,200,80)")
+
     _console.print(
         f"{_I}[bold rgb(80,200,120)]✔[/bold rgb(80,200,120)] [bold]Tools initialized successfully.[/bold] "
         f"[dim](Tools: {tool_count} loaded)[/dim]"
     )
     _console.print(
-        f"{_I}[dim]Type [bold rgb(255,200,80)]/help[/bold rgb(255,200,80)] for commands · "
-        f"[bold rgb(255,200,80)]/model[/bold rgb(255,200,80)] to switch models · "
-        f"[bold rgb(255,200,80)]/quit[/bold rgb(255,200,80)] to exit[/dim]"
+        f"{_I}[dim]Type [bold {color}]/help[/bold {color}] for commands · "
+        f"[bold {color}]/model[/bold {color}] to switch models · "
+        f"[bold {color}]/quit[/bold {color}] to exit[/dim]"
     )
-    _console.print(f"{_I}[bold rgb(255,200,80)]Intern Ready.[/bold rgb(255,200,80)]\n")
+    _console.print(f"{_I}[bold {color}]Intern Ready.[/bold {color}]\n")
 
 
 # ── Tool calls ─────────────────────────────────────────────────────────
@@ -451,33 +699,21 @@ def print_tool_call(tool_name: str, args_preview: str) -> None:
     elif "mcp" in name_lower:
         icon = "🔌"
 
-    from rich.panel import Panel
-    from rich import box
-
-    call_panel = Panel(
-        f"  [muted]{escape(args_preview)}[/muted]",
-        title=f"{icon} [bold rgb(255,200,80)]运行工具: {tool_name}[/bold rgb(255,200,80)]",
-        title_align="left",
-        border_style="dim rgb(180,140,40)",
-        box=box.ROUNDED,
-        expand=False,
-    )
+    # 使用简洁内联流打印，而不是庞大圆角 Panel
     _console.print()
-    _console.print(f"{_I}", call_panel)
+    _console.print(
+        f"{_I}{icon} [tool.name]运行工具: {tool_name}[/tool.name] "
+        f"[tool.args]{escape(args_preview)}[/tool.args]"
+    )
 
 
 def print_tool_duration(tool_name: str, success: bool, duration_s: float) -> None:
     if duration_s <= 0:
         return
-    icon = (
-        "[bold rgb(80,200,120)]✔[/bold rgb(80,200,120)]"
-        if success
-        else "[bold rgb(255,75,75)]✖[/bold rgb(255,75,75)]"
-    )
-    color = "rgb(80,200,120)" if success else "rgb(255,75,75)"
+    icon = "[tool.ok]✔[/tool.ok]" if success else "[tool.fail]✖[/tool.fail]"
     _console.print(
-        f"{_I}  {icon} [bold rgb(200,200,200)]{tool_name}[/bold rgb(200,200,200)] "
-        f"[dim]执行完毕，耗时[/dim] [bold {color}]{duration_s:.2f}s[/bold {color}]"
+        f"{_I}  {icon} [tool.name]{tool_name}[/tool.name] "
+        f"[dim]执行完毕，耗时[/dim] [bold]{duration_s:.2f}s[/bold]"
     )
 
 
@@ -485,6 +721,9 @@ def print_tool_output(
     output: str, success: bool, truncate: bool = True, duration_s: float = 0.0
 ) -> None:
     raw_output = output
+    if not raw_output.strip():
+        return
+
     total_lines = len(raw_output.split("\n"))
 
     if truncate:
@@ -497,11 +736,7 @@ def print_tool_output(
             f"  ·  [dim]... (已省略多余的 {truncated_lines} 行日志)[/dim]"
         )
 
-    icon = (
-        "[bold rgb(80,200,120)]✔[/bold rgb(80,200,120)]"
-        if success
-        else "[bold rgb(255,75,75)]✖[/bold rgb(255,75,75)]"
-    )
+    icon = "[tool.ok]✔[/tool.ok]" if success else "[tool.fail]✖[/tool.fail]"
     status_text = f"{icon} [dim]执行完毕"
     if duration_s > 0:
         status_text += f" (耗时 {duration_s:.2f}s)"
@@ -516,12 +751,12 @@ def print_tool_output(
 
     output_panel = Panel(
         indented_output,
-        title="[bold rgb(180,180,180)]工具执行结果[/bold rgb(180,180,180)]",
+        title="[bold rgb(160,160,160)]工具执行结果[/bold rgb(160,160,160)]",
         title_align="left",
         subtitle=status_text,
         subtitle_align="left",
-        border_style="dim rgb(120,120,120)" if success else "dim rgb(255,75,75)",
-        box=box.ROUNDED,
+        border_style="dim gray" if success else "dim red",
+        box=box.MINIMAL,
         expand=False,
     )
 
@@ -713,7 +948,7 @@ async def print_markdown(
         file=buf,
         width=_console.width,
         highlight=False,
-        theme=_THEME,
+        theme=Theme(THEMES[_active_theme_name]),
         force_terminal=True,
         color_system=_console.color_system or "truecolor",
     )
@@ -824,6 +1059,16 @@ HELP_ROWS: tuple[tuple[str, str, str], ...] = (
         "/share-traces",
         "[public|private]",
         "Show or change HF trace visibility",
+    ),
+    (
+        "/theme",
+        "[name]",
+        "List available themes or switch (sunset|cyberpunk|aurora|monochrome|ocean)",
+    ),
+    (
+        "/hf-token",
+        "[token]",
+        "Show, validate or dynamically set Hugging Face token",
     ),
     ("/quit", "", "Exit"),
 )

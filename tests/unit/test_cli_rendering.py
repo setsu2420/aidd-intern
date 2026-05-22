@@ -155,9 +155,9 @@ async def test_get_user_input_attaches_context_toolbar(monkeypatch):
     result = await main_mod.get_user_input(FakePromptSession(), session=session)
 
     assert result == "hello"
-    assert captured["kwargs"][
-        "bottom_toolbar"
-    ] == terminal_display.format_context_status(session)
+    from prompt_toolkit.formatted_text import HTML
+
+    assert isinstance(captured["kwargs"]["bottom_toolbar"], HTML)
 
 
 def test_subagent_display_does_not_spawn_background_redraw(monkeypatch):

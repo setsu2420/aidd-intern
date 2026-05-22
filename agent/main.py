@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from prompt_toolkit.completion import Completer, Completion
+
 from agent.core.approval_policy import is_scheduled_operation
 
 CLI_CONFIG_PATH = Path(__file__).parent.parent / "configs" / "cli_agent_config.json"
@@ -336,11 +338,127 @@ def _clear_terminal() -> None:
         pass
 
 
+class TUICompleter(Completer):
+    """A premium context-aware TUI completer supporting commands, parameters and local path scan."""
+
+    def __init__(self, config=None, session_holder=None):
+        self.config = config
+        self.session_holder = session_holder
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+
+        # 1. 以 '/' 开头，进行指令及参数补全
+        if text.startswith("/"):
+            commands = {
+                "/help": "显示所有可用命令帮助信息",
+                "/undo": "撤销上一步操作",
+                "/compact": "强制对上下文进行紧凑压缩",
+                "/new": "创建一个干净的新对话会话",
+                "/clear": "清除会话内容并清空终端屏幕",
+                "/resume": "从历史持久化会话中恢复",
+                "/model": "切换或查询模型状态",
+                "/yolo": "切换 YOLO 自动确认模式",
+                "/effort": "设置模型推理努力级别 (reasoning effort)",
+                "/status": "查看当前会话运行状态信息",
+                "/usage": "查看本会话的 Token 和费用累计消耗",
+                "/plan": "查看并管理当前活跃任务计划",
+                "/theme": "查看或切换终端色彩主题",
+                "/share-traces": "控制个人会话追踪数据集的公开可见性",
+                "/hf-token": "动态查询或验证设置 Hugging Face Token",
+            }
+
+            parts = text.split()
+            # 如果是 "/theme " 开头，联想主题
+            if len(parts) >= 1 and parts[0] == "/theme":
+                themes = ["sunset", "cyberpunk", "aurora", "monochrome", "ocean"]
+                if text.startswith("/theme "):
+                    theme_input = text[7:]
+                    for t in themes:
+                        if t.startswith(theme_input.lower()):
+                            yield Completion(
+                                t,
+                                start_position=-len(theme_input),
+                                display_meta="色彩主题",
+                            )
+                    return
+
+            # 如果是 "/effort " 开头，联想 effort 级别
+            if len(parts) >= 1 and parts[0] == "/effort":
+                efforts = ["minimal", "low", "medium", "high", "xhigh", "max", "off"]
+                if text.startswith("/effort "):
+                    effort_input = text[8:]
+                    for e in efforts:
+                        if e.startswith(effort_input.lower()):
+                            yield Completion(
+                                e,
+                                start_position=-len(effort_input),
+                                display_meta="推理努力度",
+                            )
+                    return
+
+            # 如果是 "/share-traces " 开头，联想 public/private
+            if len(parts) >= 1 and parts[0] == "/share-traces":
+                options = ["public", "private"]
+                if text.startswith("/share-traces "):
+                    trace_input = text[14:]
+                    for o in options:
+                        if o.startswith(trace_input.lower()):
+                            yield Completion(
+                                o,
+                                start_position=-len(trace_input),
+                                display_meta="数据集可见性",
+                            )
+                    return
+
+            # 普通指令补全
+            if len(parts) <= 1:
+                cmd_input = parts[0] if parts else "/"
+                for cmd, desc in commands.items():
+                    if cmd.startswith(cmd_input.lower()):
+                        yield Completion(
+                            cmd, start_position=-len(cmd_input), display_meta=desc
+                        )
+                return
+
+        # 2. 以 '@' 开头，进行本地文件和目录自动补全
+        if "@" in text:
+            last_at_idx = text.rfind("@")
+            path_input = text[last_at_idx + 1 :]
+
+            dir_part, file_part = os.path.split(path_input)
+            search_dir = dir_part if dir_part else "."
+
+            try:
+                entries = os.listdir(search_dir)
+                for entry in entries:
+                    full_path = os.path.join(dir_part, entry) if dir_part else entry
+                    if full_path.lower().startswith(path_input.lower()):
+                        if (
+                            entry.startswith(".")
+                            and not entry.startswith("..")
+                            and not path_input.startswith(".")
+                        ):
+                            continue
+
+                        is_dir = os.path.isdir(os.path.join(search_dir, entry))
+                        suffix = "/" if is_dir else ""
+                        meta = "📁 目录" if is_dir else "📄 文件"
+
+                        yield Completion(
+                            full_path + suffix,
+                            start_position=-len(path_input),
+                            display_meta=meta,
+                        )
+            except Exception:
+                pass
+            return
+
+
 class _ThinkingShimmer:
     """Animated shiny/shimmer thinking indicator — a bright gradient sweeps across the text with real-time metrics."""
 
     _BASE = (90, 90, 110)  # dim base color
-    _HIGHLIGHT = (255, 200, 80)  # bright shimmer highlight (warm gold)
     _WIDTH = 5  # shimmer width in characters
     _FPS = 24
 
@@ -349,6 +467,7 @@ class _ThinkingShimmer:
         self._task = None
         self._running = False
         self._start_time = 0.0
+        self._HIGHLIGHT = (255, 200, 80)
 
     def start(self):
         if self._running:
@@ -392,6 +511,29 @@ class _ThinkingShimmer:
     async def _animate(self):
         import time
 
+        td = _terminal_display()
+        active_theme = td._active_theme_name
+
+        # 动态选取高亮色
+        theme_highlights = {
+            "sunset": (255, 167, 38),
+            "cyberpunk": (255, 0, 127),
+            "aurora": (0, 230, 118),
+            "monochrome": (240, 240, 240),
+            "ocean": (33, 150, 243),
+        }
+        self._HIGHLIGHT = theme_highlights.get(active_theme, (255, 200, 80))
+
+        # 动态选取前缀呼吸 Emoji
+        theme_emojis = {
+            "sunset": "🧬 ",
+            "cyberpunk": "⚡ ",
+            "aurora": "🧪 ",
+            "monochrome": "▪ ",
+            "ocean": "🌊 ",
+        }
+        emoji = theme_emojis.get(active_theme, "🧬 ")
+
         speed = 0.45  # characters per frame
         pos = 0.0
         try:
@@ -400,7 +542,7 @@ class _ThinkingShimmer:
                 text = f"Thinking ({elapsed:.1f}s)..."
                 n = len(text)
                 frame = self._render_frame(text, pos)
-                self._console.file.write(f"\r  {frame}")
+                self._console.file.write(f"\r  {emoji}{frame}")
                 self._console.file.flush()
                 pos = (pos + speed) % (n + self._WIDTH)
                 await asyncio.sleep(1.0 / self._FPS)
@@ -1055,11 +1197,83 @@ async def get_user_input(prompt_session: Any, session: Any | None = None) -> str
     from prompt_toolkit.formatted_text import HTML
 
     td = _terminal_display()
-    bottom_toolbar = td.format_context_status(session) if session else None
+    bottom_toolbar = td.format_context_status_html(session) if session else None
+
+    theme_colors = {
+        "sunset": "ansiyellow",
+        "cyberpunk": "ansimagenta",
+        "aurora": "ansigreen",
+        "monochrome": "ansiwhite",
+        "ocean": "ansiblue",
+    }
+    color = theme_colors.get(td._active_theme_name, "ansiyellow")
+
+    prompt_str = f'\n<style fg="{color}"><b>🧬 intern</b></style> <b>❯</b> '
     return await prompt_session.prompt_async(
-        HTML("\n<b><cyan>></cyan></b> "),
+        HTML(prompt_str),
         bottom_toolbar=bottom_toolbar,
     )
+
+
+async def _execute_local_shell_command(cmd: str) -> None:
+    """Execute a local shell command and render it in a highly aesthetic panel."""
+    from rich.panel import Panel
+    from rich.text import Text
+    import asyncio
+
+    td = _terminal_display()
+    console = td.get_console()
+
+    theme_colors = {
+        "sunset": "orange3",
+        "cyberpunk": "deeppink",
+        "aurora": "springgreen3",
+        "monochrome": "grey70",
+        "ocean": "dodgerblue3",
+    }
+    theme_accent = theme_colors.get(td._active_theme_name, "orange3")
+
+    console.print(
+        f"\n[bold {theme_accent}]⚙ 正在执行本地指令:[/bold {theme_accent}] [italic dim]{cmd}[/italic dim]"
+    )
+
+    # 异步执行 shell
+    proc = await asyncio.create_subprocess_shell(
+        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+
+    stdout, stderr = await proc.communicate()
+    exit_code = proc.returncode
+
+    stdout_str = stdout.decode("utf-8", errors="replace")
+    stderr_str = stderr.decode("utf-8", errors="replace")
+
+    output_text = Text()
+    if stdout_str:
+        output_text.append(stdout_str)
+    if stderr_str:
+        if stdout_str:
+            output_text.append("\n")
+        output_text.append(stderr_str, style="bold red")
+
+    if not stdout_str and not stderr_str:
+        output_text.append("(无任何标准输出)", style="italic dim")
+
+    status_icon = "✔" if exit_code == 0 else "✖"
+    status_style = "green" if exit_code == 0 else "bold red"
+
+    title = f"[{theme_accent}]Shell 穿透终端[/[{theme_accent}]]"
+    subtitle = f"[{status_style}]{status_icon} 退出码: {exit_code}[/{status_style}]"
+
+    panel = Panel(
+        output_text,
+        title=title,
+        subtitle=subtitle,
+        border_style=theme_accent,
+        padding=(1, 2),
+    )
+    console.print(panel)
+    console.print()
 
 
 # ── Slash command helpers ────────────────────────────────────────────────
@@ -1299,9 +1513,130 @@ async def _handle_slash_command(
         td.print_plan()
         return None
 
+    if command == "/theme":
+        console = td.get_console()
+        themes = td.get_theme_names()
+        if not arg:
+            console.print(
+                "\n[bold rgb(255,200,80)]可用主题列表 (Available Themes):[/bold rgb(255,200,80)]"
+            )
+            for t in themes:
+                color_map = {
+                    "sunset": "bold rgb(255,180,80)",
+                    "cyberpunk": "bold rgb(255,0,127)",
+                    "aurora": "bold rgb(0,230,118)",
+                    "monochrome": "bold white",
+                    "ocean": "bold rgb(33,150,243)",
+                }
+                curr = " (当前激活)" if t == td._active_theme_name else ""
+                console.print(
+                    f"  • [{color_map.get(t, 'white')}]{t}[/{color_map.get(t, 'white')}]{curr}"
+                )
+            console.print(
+                "\n[dim]切换主题请使用: [bold]/theme <theme_name>[/bold][/dim]\n"
+            )
+            return None
+
+        success = td.set_theme(arg)
+        if success:
+            console.print(
+                f"\n🧬 [bold rgb(80,200,120)]✔ 主题切换成功！[/bold rgb(80,200,120)] 当前主题已设为 [bold cyan]{arg.lower()}[/bold cyan]。\n"
+            )
+        else:
+            console.print(f"\n✖ [bold red]无效的主题名:[/bold red] '{arg}'")
+            console.print(f"[dim]可选主题: {', '.join(themes)}[/dim]\n")
+        return None
+
     if command == "/share-traces":
         session = session_holder[0] if session_holder else None
         await _handle_share_traces_command(arg, config, session)
+        return None
+
+    if command == "/hf-token":
+        console = td.get_console()
+        if not arg:
+            # 查看当前 Token 状态
+            token = (
+                getattr(config, "hf_token", None)
+                or (
+                    session_holder[0].hf_token
+                    if (session_holder and session_holder[0])
+                    else None
+                )
+                or resolve_hf_token()
+            )
+            if not token:
+                console.print(
+                    "\n[yellow]⚠ 当前未设置 Hugging Face Token。[/yellow] 一部分 Hub MCP 工具及 Sandbox 可能会受到限制。"
+                )
+                console.print(
+                    "[dim]设置 Token 请使用: [bold]/hf-token <your_token>[/bold][/dim]\n"
+                )
+            else:
+                validated_token, username = _validated_hf_token(token)
+                if validated_token:
+                    # 掩码显示
+                    masked = (
+                        token[:4] + "*" * (len(token) - 8) + token[-4:]
+                        if len(token) > 8
+                        else "****"
+                    )
+                    console.print(
+                        "\n🧬 [bold rgb(80,200,120)]✔ Hugging Face Token 验证成功！[/bold rgb(80,200,120)]"
+                    )
+                    console.print(
+                        f"  • 用户名 (User): [bold cyan]{username}[/bold cyan]"
+                    )
+                    console.print(f"  • 令牌 (Token): [dim]{masked}[/dim]\n")
+                else:
+                    console.print(
+                        "\n✖ [bold red]当前载入的 Hugging Face Token 验证失败！[/bold red] 该 Token 可能是失效或过期的。"
+                    )
+                    console.print(
+                        "[dim]重新设置请使用: [bold]/hf-token <your_token>[/bold][/dim]\n"
+                    )
+            return None
+
+        # 设置新 Token
+        new_token = arg.strip()
+        console.print("[dim]正在与 Hugging Face 服务器握手验证...[/dim]")
+        try:
+            from huggingface_hub import HfApi, login
+
+            # 实时握手验证
+            user_info = HfApi(token=new_token).whoami()
+            username = user_info.get("name", "unknown")
+
+            # 保存到本地缓存
+            try:
+                login(token=new_token, add_to_git_credential=False)
+                console.print(
+                    "[dim]Token 已成功保存至 ~/.cache/huggingface/token[/dim]"
+                )
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: could not persist token to cache ({e})[/yellow]"
+                )
+
+            # 热重载到当前 session 和 config 中
+            config.hf_token = new_token
+            session = session_holder[0] if session_holder else None
+            if session:
+                session.hf_token = new_token
+                session.user_id = username
+                if getattr(session, "tool_router", None):
+                    session.tool_router.hf_token = new_token
+
+            console.print(
+                "\n🧬 [bold rgb(80,200,120)]✔ Hugging Face Token 动态设置并验证成功！[/bold rgb(80,200,120)]"
+            )
+            console.print(f"  • 用户名 (User): [bold cyan]{username}[/bold cyan]\n")
+
+        except Exception as e:
+            console.print(
+                "\n✖ [bold red]Hugging Face Token 验证失败！[/bold red] 请检查令牌是否正确或网络状况。"
+            )
+            console.print(f"[dim]详细报错: {str(e)}[/dim]\n")
         return None
 
     print(f"Unknown command: {command}. Type /help for available commands.")
@@ -1436,19 +1771,28 @@ async def main(
     history_file = os.path.join(history_dir, "input_history")
 
     factory = _get_prompt_session_factory()
-    # Safely pass history only if supported by the factory (to handle test mocks gracefully)
+    # Safely pass history and completer only if supported by the factory (to handle test mocks gracefully)
     try:
         sig = inspect.signature(factory)
         supports_history = "history" in sig.parameters or any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
+        supports_completer = "completer" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
     except Exception:
         supports_history = True
+        supports_completer = True
 
+    completer = TUICompleter()
+    kwargs = {}
     if supports_history:
-        prompt_session = factory(history=FileHistory(history_file))
-    else:
-        prompt_session = factory()
+        kwargs["history"] = FileHistory(history_file)
+    if supports_completer:
+        kwargs["completer"] = completer
+        kwargs["complete_while_typing"] = True
+
+    prompt_session = factory(**kwargs)
 
     load_config_fn = _get_load_config()
     resolve_hf_token_fn = _get_resolve_hf_token()
@@ -1461,12 +1805,28 @@ async def main(
     _apply_tool_runtime_override(config, sandbox_tools=sandbox_tools)
     local_mode = _is_local_tool_runtime(config)
 
+    # 动态将 config 注入 completer
+    completer.config = config
+
     # HF token — required for Hub-backed models/tools and sandbox tools, but
     # not for non-HF LLMs using only local filesystem tools.
     hf_token = resolve_hf_token_fn()
     non_hf_model = is_local_model_id(
         config.model_name
     ) or is_openai_compatible_model_id(config.model_name)
+
+    # 启动时强反馈校验
+    if hf_token:
+        validated_tok, hf_user = _validated_hf_token(hf_token)
+        if not validated_tok:
+            from rich.console import Console
+
+            Console().print(
+                "\n[bold red]✖ 检测到本地缓存或环境变量中的 Hugging Face Token，但验证失败 (可能已过期或无效)！[/bold red]"
+            )
+            hf_token = None
+            hf_user = None
+
     if not hf_token and (not non_hf_model or not local_mode):
         hf_token = await _prompt_and_save_hf_token(prompt_session)
 
@@ -1595,6 +1955,10 @@ async def main(
             if sigint_available:
                 _install_sigint()
 
+            # 动态向 completer 注入 session_holder
+            if hasattr(prompt_session, "completer") and prompt_session.completer:
+                prompt_session.completer.session_holder = session_holder
+
             try:
                 await turn_complete_event.wait()
             except asyncio.CancelledError:
@@ -1632,6 +1996,18 @@ async def main(
 
             # Skip empty input
             if not user_input.strip():
+                turn_complete_event.set()
+                continue
+
+            # Handle local shell escape command via '!'
+            if user_input.strip().startswith("!"):
+                cmd = user_input.strip()[1:].strip()
+                if cmd:
+                    await _execute_local_shell_command(cmd)
+                else:
+                    td.get_console().print(
+                        "[yellow]⚠ 缺少可执行的 Shell 命令。示例: !git status[/yellow]"
+                    )
                 turn_complete_event.set()
                 continue
 
