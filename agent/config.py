@@ -20,6 +20,19 @@ MCPServerConfig = Union[StdioMCPServer, RemoteMCPServer]
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+class MemoryConfig(BaseModel):
+    """Memory configuration for TencentDB-Agent-Memory and MemU provider"""
+
+    enabled: bool = True
+    framework: str = "TencentDB-Agent-Memory"
+    provider: str = "MemU"
+    short_term_symbolic: bool = True
+    long_term_layered: bool = True
+    cache_ttl_s: int = 300
+    memu_api_key: str | None = None
+    memu_base_url: str = "https://api.memu.so"
+
+
 class Config(BaseModel):
     """Configuration manager"""
 
@@ -59,6 +72,7 @@ class Config(BaseModel):
     # Valid values: None | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     reasoning_effort: str | None = "max"
     messaging: MessagingConfig = MessagingConfig()
+    memory: MemoryConfig = MemoryConfig()
 
 
 USER_CONFIG_ENV_VAR = "AIDD_INTERN_CLI_CONFIG"

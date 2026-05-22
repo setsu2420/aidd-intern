@@ -15,11 +15,12 @@ from litellm import Message
 try:
     from aidd_intern_core import (
         normalize_and_hash_args as _rust_normalize_and_hash_args,
+        detect_doom_loop_rust,
     )
 
-    _RUST_HASH_AVAILABLE = True
+    _RUST_CORE_AVAILABLE = True
 except ImportError:
-    _RUST_HASH_AVAILABLE = False
+    _RUST_CORE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def _hash_args(args_str: str) -> str:
     When the Rust core is available, delegates to the native implementation
     which combines normalisation + MD5 in a single GIL-free call.
     """
-    if _RUST_HASH_AVAILABLE:
+    if _RUST_CORE_AVAILABLE:
         try:
             return _rust_normalize_and_hash_args(args_str)
         except Exception:
@@ -168,6 +169,66 @@ def detect_repeating_sequence(
 
 def check_for_doom_loop(messages: list[Message]) -> str | None:
     """Check for doom loop patterns. Returns a corrective prompt or None."""
+    if _RUST_CORE_AVAILABLE:
+        try:
+            raw_sigs = []
+            recent = messages[-30:] if len(messages) > 30 else messages
+            for idx, msg in enumerate(recent):
+                if getattr(msg, "role", None) != "assistant":
+                    continue
+                tool_calls = getattr(msg, "tool_calls", None)
+                if not tool_calls:
+                    continue
+                for tc in tool_calls:
+                    fn = getattr(tc, "function", None)
+                    if not fn:
+                        continue
+                    name = getattr(fn, "name", "") or ""
+                    args_str = getattr(fn, "arguments", "") or ""
+                    result_content = None
+                    for follow in recent[idx + 1 :]:
+                        role = getattr(follow, "role", None)
+                        if role == "tool" and getattr(
+                            follow, "tool_call_id", None
+                        ) == getattr(tc, "id", None):
+                            result_content = str(getattr(follow, "content", "") or "")
+                            break
+                        if role in {"assistant", "user"}:
+                            break
+                    raw_sigs.append((name, args_str, result_content))
+
+            res = detect_doom_loop_rust(raw_sigs, 3)
+            if res:
+                loop_type, desc = res
+                if loop_type == "consecutive":
+                    logger.warning(
+                        "Repetition guard activated (Rust): 3+ identical consecutive calls to '%s'",
+                        desc,
+                    )
+                    return (
+                        f"[SYSTEM: REPETITION GUARD] You have called '{desc}' with the same "
+                        f"arguments multiple times in a row, getting the same result each time. "
+                        f"STOP repeating this approach — it is not working. "
+                        f"Step back and try a fundamentally different strategy. "
+                        f"Consider: using a different tool, changing your arguments significantly, "
+                        f"or explaining to the user what you're stuck on and asking for guidance."
+                    )
+                elif loop_type == "sequence":
+                    logger.warning(
+                        "Repetition guard activated (Rust): repeating sequence [%s]",
+                        desc,
+                    )
+                    return (
+                        f"[SYSTEM: REPETITION GUARD] You are stuck in a repeating cycle of tool calls: "
+                        f"[{desc}]. This pattern has repeated multiple times without progress. "
+                        f"STOP this cycle and try a fundamentally different approach. "
+                        f"Consider: breaking down the problem differently, using alternative tools, "
+                        f"or explaining to the user what you're stuck on and asking for guidance."
+                    )
+            return None
+        except Exception as e:
+            logger.warning("Rust detect_doom_loop failed, falling back: %s", e)
+
     signatures = extract_recent_tool_signatures(messages, lookback=30)
     if len(signatures) < 3:
         return None

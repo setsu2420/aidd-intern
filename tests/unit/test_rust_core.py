@@ -433,6 +433,45 @@ def test_redact_fallback_equivalence():
         assert rust_out == py_out, f"Mismatch for input: {s!r}"
 
 
+@skip_no_rust
+def test_format_layered_memories_rust():
+    mock_retrieval_res = {
+        "rewritten_query": "What are user's design constraints?",
+        "categories": [
+            {
+                "name": "aidd_parameters",
+                "description": "Preferred binder target hotspots and hyperparameters",
+                "summary": "### AIDD Preferences\n- Target hotspot: GLU45\n- Epochs: 200",
+            }
+        ],
+        "items": [
+            {
+                "memory_type": "preference",
+                "content": "Prefers standard protein design pipelines",
+            },
+            {"memory_type": "constraint", "content": "Must fit within 12GB GPU VRAM"},
+        ],
+    }
+
+    res = aidd_intern_core.format_layered_memories_rust(mock_retrieval_res, "Alice")
+    assert len(res["L1_atomic"]) == 2
+    assert res["L1_atomic"][0]["type"] == "preference"
+    assert res["L1_atomic"][0]["content"] == "Prefers standard protein design pipelines"
+
+    assert "aidd_parameters" in res["L2_scenarios"]
+    assert "GLU45" in res["L2_scenarios"]["aidd_parameters"]["summary"]
+
+    assert "# Alice Profile & Persona" in res["L3_profile"]
+    assert "Must fit within 12GB GPU VRAM" in res["L3_profile"]
+
+    prompt = res["formatted_prompt"]
+    assert "🧠 LAYERED LONG-TERM MEMORY ENGINE" in prompt
+    assert "[L3: USER PROFILE & PERSONA]" in prompt
+    assert "[L2: ACTIVE SCENARIO BLOCKS]" in prompt
+    assert "[L1: ATOMIC FACTS & PREFERENCES]" in prompt
+    assert "1. [PREFERENCE] Prefers standard protein design pipelines" in prompt
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Performance benchmarks
 # ═══════════════════════════════════════════════════════════════════════════

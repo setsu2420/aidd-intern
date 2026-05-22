@@ -197,6 +197,114 @@ fn visible_width(py: Python<'_>, s: &str) -> PyResult<usize> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Doom-loop detection (for doom_loop.py)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct ToolCallSignature {
+    name: String,
+    args_hash: String,
+    result_hash: Option<String>,
+}
+
+fn hash_args_rust(args_str: &str) -> String {
+    if args_str.is_empty() {
+        return String::new();
+    }
+    let normalized = match serde_json::from_str::<Value>(args_str) {
+        Ok(value) => {
+            let sorted = sort_json_value(value);
+            serde_json::to_string(&sorted).unwrap_or_else(|_| args_str.to_string())
+        }
+        Err(_) => args_str.to_string(),
+    };
+    let mut hasher = Md5::new();
+    hasher.update(normalized.as_bytes());
+    let digest = hasher.finalize();
+    format!("{digest:x}")[..12].to_string()
+}
+
+/// Detect repeating patterns and consecutive tool calls natively, releasing GIL.
+#[pyfunction]
+fn detect_doom_loop_rust(
+    py: Python<'_>,
+    signatures_py: Vec<(String, String, Option<String>)>,
+    threshold: usize,
+) -> PyResult<Option<(String, String)>> {
+    py.allow_threads(|| {
+        let signatures: Vec<ToolCallSignature> = signatures_py
+            .into_iter()
+            .map(|(name, args, res)| {
+                let args_hash = hash_args_rust(&args);
+                let result_hash = res.map(|r| hash_args_rust(&r));
+                ToolCallSignature {
+                    name,
+                    args_hash,
+                    result_hash,
+                }
+            })
+            .collect();
+
+        if signatures.len() < 3 {
+            return Ok(None);
+        }
+
+        // 1. Check for identical consecutive calls
+        let mut consecutive_count = 1;
+        for i in 1..signatures.len() {
+            if signatures[i] == signatures[i - 1] {
+                consecutive_count += 1;
+                if consecutive_count >= threshold {
+                    return Ok(Some(("consecutive".to_string(), signatures[i].name.clone())));
+                }
+            } else {
+                consecutive_count = 1;
+            }
+        }
+
+        // 2. Check for repeating sequences (sequences of length 2-5 with 2+ reps)
+        let n = signatures.len();
+        for seq_len in 2..=5 {
+            let min_required = seq_len * 2;
+            if n < min_required {
+                continue;
+            }
+
+            // Check the tail of the signatures list
+            let pattern = &signatures[n - min_required..n - min_required + seq_len];
+
+            // Count how many full repetitions from the end
+            let mut reps = 0;
+            let mut i_pos = n - seq_len;
+            loop {
+                let chunk = &signatures[i_pos..i_pos + seq_len];
+                if chunk == pattern {
+                    reps += 1;
+                    if i_pos >= seq_len {
+                        i_pos -= seq_len;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            if reps >= 2 {
+                let pattern_desc = pattern
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect::<Vec<String>>()
+                    .join(" → ");
+                return Ok(Some(("sequence".to_string(), pattern_desc)));
+            }
+        }
+
+        Ok(None)
+    })
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Internal helpers — JSON
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -369,6 +477,198 @@ fn visible_width_impl(s: &str) -> usize {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Value to Python converter
+// ═══════════════════════════════════════════════════════════════════════
+
+fn value_to_py_any(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
+    match value {
+        Value::Null => Ok(py.None()),
+        Value::Bool(b) => Ok((*b).into_pyobject(py)?.to_owned().into_any().unbind()),
+        Value::Number(num) => {
+            if let Some(i) = num.as_i64() {
+                Ok(i.into_pyobject(py)?.into_any().unbind())
+            } else if let Some(f) = num.as_f64() {
+                Ok(f.into_pyobject(py)?.into_any().unbind())
+            } else {
+                Ok(py.None())
+            }
+        }
+        Value::String(s) => Ok(s.as_str().into_pyobject(py)?.into_any().unbind()),
+        Value::Array(arr) => {
+            let list = PyList::empty(py);
+            for item in arr {
+                list.append(value_to_py_any(py, item)?)?;
+            }
+            Ok(list.into_any().unbind())
+        }
+        Value::Object(map) => {
+            let dict = PyDict::new(py);
+            for (k, v) in map {
+                dict.set_item(k, value_to_py_any(py, v)?)?;
+            }
+            Ok(dict.into_any().unbind())
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Layered memories formatting (TencentDB-Agent-Memory L3 User Profile generator)
+// ═══════════════════════════════════════════════════════════════════════
+
+#[pyfunction]
+#[pyo3(signature = (retrieval_res, user_name=None))]
+fn format_layered_memories_rust(
+    py: Python<'_>,
+    retrieval_res: &Bound<'_, PyAny>,
+    user_name: Option<String>,
+) -> PyResult<PyObject> {
+    let value = py_any_to_value(py, retrieval_res)?;
+
+    let res_json = py.allow_threads(|| -> PyResult<Value> {
+        let user_label = user_name.as_deref().unwrap_or("User");
+
+        // 1. Extract L1 (Atomic Memory) from retrieve items
+        let mut l1_atomic = Vec::new();
+        if let Some(items) = value.get("items").and_then(|i| i.as_array()) {
+            for item in items {
+                let mtype = item.get("memory_type").and_then(|t| t.as_str()).unwrap_or("fact");
+                let content = item.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                if !content.is_empty() {
+                    l1_atomic.push(serde_json::json!({
+                        "type": mtype,
+                        "content": content
+                    }));
+                }
+            }
+        }
+
+        // 2. Extract L2 (Scenario Blocks) from retrieve categories
+        let mut l2_scenarios = serde_json::Map::new();
+        if let Some(categories) = value.get("categories").and_then(|c| c.as_array()) {
+            for cat in categories {
+                let name = cat.get("name").and_then(|n| n.as_str()).unwrap_or("general");
+                let desc = cat.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                let summary = cat.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                l2_scenarios.insert(name.to_string(), serde_json::json!({
+                    "description": desc,
+                    "summary": summary
+                }));
+            }
+        }
+
+        // 3. Construct L3 (User Profile) by combining atomic preferences and scenario summaries
+        let mut l3_lines = Vec::new();
+        l3_lines.push(format!("# {} Profile & Persona", user_label));
+
+        // Prefs
+        let mut prefs = Vec::new();
+        for it in &l1_atomic {
+            if let Some(t) = it.get("type").and_then(|t| t.as_str()) {
+                if t == "preference" || t == "habit" {
+                    if let Some(c) = it.get("content").and_then(|c| c.as_str()) {
+                        prefs.push(c);
+                    }
+                }
+            }
+        }
+
+        if !prefs.is_empty() {
+            l3_lines.push("## Personal Preferences & Habits".to_string());
+            for pref in prefs {
+                l3_lines.push(format!("- {}", pref));
+            }
+        } else {
+            l3_lines.push("## Personal Preferences & Habits\n*(No recorded preferences)*".to_string());
+        }
+
+        // Constraints
+        let mut constraints = Vec::new();
+        for it in &l1_atomic {
+            if let Some(t) = it.get("type").and_then(|t| t.as_str()) {
+                if t == "constraint" {
+                    if let Some(c) = it.get("content").and_then(|c| c.as_str()) {
+                        constraints.push(c);
+                    }
+                }
+            }
+        }
+
+        if !constraints.is_empty() {
+            l3_lines.push("## Operational Constraints".to_string());
+            for const_str in constraints {
+                l3_lines.push(format!("- {}", const_str));
+            }
+        }
+
+        // Summaries of categories
+        if !l2_scenarios.is_empty() {
+            l3_lines.push("## Scenario Summaries".to_string());
+            if let Some(categories) = value.get("categories").and_then(|c| c.as_array()) {
+                for cat in categories {
+                    let name = cat.get("name").and_then(|n| n.as_str()).unwrap_or("general");
+                    if let Some(details) = l2_scenarios.get(name) {
+                        let summary = details.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                        l3_lines.push(format!("### Category: {}", name));
+                        l3_lines.push(summary.to_string());
+                    }
+                }
+            }
+        }
+
+        let l3_profile = l3_lines.join("\n");
+
+        // 4. Render the beautiful, structured 4-tier prompt block
+        let mut prompt_blocks = Vec::new();
+        prompt_blocks.push("==================================================".to_string());
+        prompt_blocks.push("🧠 LAYERED LONG-TERM MEMORY ENGINE (TencentDB-Agent-Memory Schema)".to_string());
+        prompt_blocks.push("==================================================".to_string());
+
+        prompt_blocks.push("\n[L3: USER PROFILE & PERSONA]".to_string());
+        prompt_blocks.push(l3_profile.clone());
+
+        prompt_blocks.push("\n[L2: ACTIVE SCENARIO BLOCKS]".to_string());
+        if !l2_scenarios.is_empty() {
+            if let Some(categories) = value.get("categories").and_then(|c| c.as_array()) {
+                for cat in categories {
+                    let name = cat.get("name").and_then(|n| n.as_str()).unwrap_or("general");
+                    if let Some(details) = l2_scenarios.get(name) {
+                        let desc = details.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                        let summary = details.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+                        prompt_blocks.push(format!("### Scenario [{}]: {}", name, desc));
+                        prompt_blocks.push(summary.to_string());
+                    }
+                }
+            }
+        } else {
+            prompt_blocks.push("*(No active scenario blocks)*".to_string());
+        }
+
+        prompt_blocks.push("\n[L1: ATOMIC FACTS & PREFERENCES]".to_string());
+        if !l1_atomic.is_empty() {
+            for (i, it) in l1_atomic.iter().enumerate() {
+                let t = it.get("type").and_then(|t| t.as_str()).unwrap_or("fact");
+                let c = it.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                prompt_blocks.push(format!("{}. [{}] {}", i + 1, t.to_uppercase(), c));
+            }
+        } else {
+            prompt_blocks.push("*(No atomic memories retrieved)*".to_string());
+        }
+
+        prompt_blocks.push("==================================================".to_string());
+        let formatted_prompt = prompt_blocks.join("\n");
+
+        Ok(serde_json::json!({
+            "L1_atomic": l1_atomic,
+            "L2_scenarios": l2_scenarios,
+            "L3_profile": l3_profile,
+            "formatted_prompt": formatted_prompt
+        }))
+    })?;
+
+    value_to_py_any(py, &res_json)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Module registration
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -388,5 +688,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // ANSI string processing
     m.add_function(wrap_pyfunction!(clip_ansi_string, m)?)?;
     m.add_function(wrap_pyfunction!(visible_width, m)?)?;
+    // Doom-loop detection
+    m.add_function(wrap_pyfunction!(detect_doom_loop_rust, m)?)?;
+    // Layered memories formatting
+    m.add_function(wrap_pyfunction!(format_layered_memories_rust, m)?)?;
     Ok(())
 }

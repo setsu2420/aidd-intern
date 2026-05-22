@@ -8,6 +8,16 @@
   "yolo_mode": false,
   "confirm_cpu_jobs": true,
   "auto_file_upload": true,
+  "memory": {
+    "enabled": true,
+    "framework": "TencentDB-Agent-Memory",
+    "provider": "MemU",
+    "short_term_symbolic": true,
+    "long_term_layered": true,
+    "cache_ttl_s": 300,
+    "memu_api_key": "${MEMU_API_KEY:-}",
+    "memu_base_url": "${MEMU_BASE_URL:-https://api.memu.so}"
+  },
   "mcpServers": {
     "hf-mcp-server": {
       "transport": "http",

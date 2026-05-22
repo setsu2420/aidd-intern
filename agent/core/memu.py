@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any, Dict, List, Union
 import httpx
 from tenacity import (
@@ -30,6 +31,21 @@ class MemUClient:
     def __init__(self, api_key: str | None = None, base_url: str = BASE_URL):
         self.api_key = api_key or os.environ.get("MEMU_API_KEY", "")
         self.base_url = base_url.rstrip("/")
+        self._cache: Dict[Any, tuple[float, Any]] = {}
+
+    def _get_cache_key(self, user_id: str, agent_id: str, query: Any) -> Any:
+        """Helper to build a hashable immutable cache key for MemU query."""
+        if isinstance(query, list):
+            flat = []
+            for item in query:
+                if isinstance(item, dict):
+                    flat.append(tuple(sorted(item.items())))
+                else:
+                    flat.append(item)
+            query_key = tuple(flat)
+        else:
+            query_key = query
+        return (user_id, agent_id, query_key)
 
     @property
     def headers(self) -> Dict[str, str]:
@@ -210,12 +226,22 @@ class MemUClient:
                 "resources": [],
             }
 
+        cache_key = self._get_cache_key(user_id, agent_id, query)
+        now = time.time()
+        if cache_key in self._cache:
+            ts, val = self._cache[cache_key]
+            if now - ts < 300.0:  # 5 minutes TTL
+                logger.info("MemU retrieve semantic cache hit!")
+                return val
+
         path = "/api/v3/memory/retrieve"
         payload = {"user_id": user_id, "agent_id": agent_id, "query": query}
         try:
             response = self._send_request("POST", path, json=payload, timeout=20.0)
             if response.status_code == 200:
-                return response.json()
+                res = response.json()
+                self._cache[cache_key] = (time.time(), res)
+                return res
             else:
                 logger.error(
                     f"MemU retrieve failed: {response.status_code} {response.text}"
@@ -250,6 +276,7 @@ class MemUClient:
         try:
             response = self._send_request("POST", path, json=payload, timeout=15.0)
             if response.status_code == 200:
+                self._cache.clear()
                 return response.json()
             else:
                 logger.error(
@@ -371,6 +398,14 @@ class MemUClient:
                 "resources": [],
             }
 
+        cache_key = self._get_cache_key(user_id, agent_id, query)
+        now = time.time()
+        if cache_key in self._cache:
+            ts, val = self._cache[cache_key]
+            if now - ts < 300.0:  # 5 minutes TTL
+                logger.info("MemU retrieve async semantic cache hit!")
+                return val
+
         path = "/api/v3/memory/retrieve"
         payload = {"user_id": user_id, "agent_id": agent_id, "query": query}
         try:
@@ -378,7 +413,9 @@ class MemUClient:
                 "POST", path, json=payload, timeout=20.0
             )
             if response.status_code == 200:
-                return response.json()
+                res = response.json()
+                self._cache[cache_key] = (time.time(), res)
+                return res
             else:
                 logger.error(
                     f"MemU retrieve async failed: {response.status_code} {response.text}"
@@ -415,6 +452,7 @@ class MemUClient:
                 "POST", path, json=payload, timeout=15.0
             )
             if response.status_code == 200:
+                self._cache.clear()
                 return response.json()
             else:
                 logger.error(

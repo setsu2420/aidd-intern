@@ -472,6 +472,7 @@ class _ThinkingShimmer:
 
     def start(self, label: str = "Thinking"):
         import time
+
         if self._running:
             if getattr(self, "label", "Thinking") != label:
                 self.label = label

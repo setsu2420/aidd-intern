@@ -18,6 +18,8 @@ try:
         read_file_utf8,
         clip_ansi_string,
         visible_width,
+        detect_doom_loop_rust,
+        format_layered_memories_rust,
     )
 
     RUST_AVAILABLE = True

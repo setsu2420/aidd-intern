@@ -11,6 +11,13 @@ import logging
 from typing import Any, Dict, List, Union
 from agent.core.memu import MemUClient
 
+try:
+    from aidd_intern_core import format_layered_memories_rust
+
+    _RUST_MEMORY_AVAILABLE = True
+except ImportError:
+    _RUST_MEMORY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -131,6 +138,14 @@ class LayeredMemoryPipeline:
         - L2_scenarios: Categorized Markdown summary sections.
         - L3_profile: Consolidated User profile.
         """
+        if _RUST_MEMORY_AVAILABLE:
+            try:
+                return format_layered_memories_rust(retrieval_res, user_name)
+            except Exception as e:
+                logger.warning(
+                    "Rust format_layered_memories failed, falling back: %s", e
+                )
+
         user_label = user_name or "User"
 
         # 1. Extract L1 (Atomic Memory) from retrieve items
