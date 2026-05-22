@@ -468,12 +468,15 @@ class _ThinkingShimmer:
         self._running = False
         self._start_time = 0.0
         self._HIGHLIGHT = (255, 200, 80)
+        self.label = "Thinking"
 
-    def start(self):
-        if self._running:
-            return
+    def start(self, label: str = "Thinking"):
         import time
-
+        if self._running:
+            if getattr(self, "label", "Thinking") != label:
+                self.label = label
+            return
+        self.label = label
         self._running = True
         self._start_time = time.monotonic()
         self._task = asyncio.ensure_future(self._animate())
@@ -539,7 +542,8 @@ class _ThinkingShimmer:
         try:
             while self._running:
                 elapsed = time.monotonic() - self._start_time
-                text = f"Thinking ({elapsed:.1f}s)..."
+                lbl = getattr(self, "label", "Thinking")
+                text = f"{lbl} ({elapsed:.1f}s)..."
                 n = len(text)
                 frame = self._render_frame(text, pos)
                 self._console.file.write(f"\r  {emoji}{frame}")
@@ -562,6 +566,12 @@ class _StreamBuffer:
 
     def add_chunk(self, text: str):
         self._buffer += text
+
+    def has_complete_block(self) -> bool:
+        """Check if there is a complete renderable block in the buffer."""
+        if self._buffer.count("```") % 2 == 1:
+            return False
+        return "\n\n" in self._buffer
 
     def _pop_block(self) -> str | None:
         """Extract the next complete block, or return None if nothing complete."""
@@ -676,13 +686,17 @@ async def event_listener(
                     # Flush any complete markdown blocks progressively so the
                     # user sees paragraphs appear as they're produced, not just
                     # at the end of the whole response.
-                    shimmer.stop()
-                    await stream_buf.flush_ready(cancel_event=_cancel_event())
+                    if stream_buf.has_complete_block():
+                        shimmer.stop()
+                        await stream_buf.flush_ready(cancel_event=_cancel_event())
+                    else:
+                        # 正在积压缓冲或者高速接收中，确保 shimmer 保持活跃，显示 Generating 动画
+                        shimmer.start("Generating")
             elif event.event_type == "assistant_stream_end":
                 shimmer.stop()
                 await stream_buf.finish(cancel_event=_cancel_event())
             elif event.event_type == "tool_call":
-                shimmer.stop()
+                # 不要把屏幕晾着！当工具运行时，动态运行 shimmer 指示运行状态
                 stream_buf.discard()
                 tool_name = event.data.get("tool", "") if event.data else ""
                 arguments = event.data.get("arguments", {}) if event.data else {}
@@ -692,7 +706,10 @@ async def event_listener(
                     if tool_name != "research":
                         args_str = json.dumps(arguments)[:80]
                         td.print_tool_call(tool_name, args_str)
+                    # 启动运行中 Shimmer 动态提示，展示哪个工具正在拼命工作
+                    shimmer.start(f"Running {tool_name}")
             elif event.event_type == "tool_output":
+                shimmer.stop()  # 停止上一个 tool 运行期间的 shimmer
                 output = event.data.get("output", "") if event.data else ""
                 success = event.data.get("success", False) if event.data else False
                 duration_s = event.data.get("duration_s", 0.0) if event.data else 0.0
@@ -703,7 +720,8 @@ async def event_listener(
                     td.print_tool_output(
                         output, success, truncate=False, duration_s=0.0
                     )
-                shimmer.start()
+                # 重新开启思考/处理中的 shimmer
+                shimmer.start("Thinking")
             elif event.event_type == "turn_complete":
                 shimmer.stop()
                 stream_buf.discard()
