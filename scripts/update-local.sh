@@ -91,18 +91,18 @@ if [[ -n "$CARGO_BIN" ]]; then
     . "$HOME/.cargo/env"
   fi
   if (
-    cd rust_core
+    cd "$repo_root"
     unset CONDA_PREFIX || true
     uv run --with maturin maturin develop
   ); then
     echo "aidd_intern_core successfully compiled and installed."
   else
     echo "warning: Failed to compile aidd_intern_core module. Continuing without Rust core acceleration." >&2
-    echo "AIDD-Intern will safely fall back to the native Python engine for Trace writing." >&2
+    echo "AIDD-Intern will safely fall back to the native Python engine." >&2
   fi
 else
   echo "Rust compiler not found. Skipping optional high-performance Rust core acceleration compilation."
-  echo "AIDD-Intern will safely fall back to the native Python engine for Trace writing."
+  echo "AIDD-Intern will safely fall back to the native Python engine."
 fi
 
 echo "STEP 3: Reinstalling the editable Python CLI"
