@@ -128,3 +128,67 @@ async def test_layered_retrieve_handler_works(mock_retrieve, monkeypatch):
     assert "Bob Profile & Persona" in data["L3_profile"]
     assert "Loves standard models" in data["L3_profile"]
     assert "Loves standard models" in data["formatted_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_event_listener_performance_metrics():
+    from agent.main import event_listener
+    import asyncio
+    from agent.core.session import Event
+
+    event_queue = asyncio.Queue()
+    submission_queue = asyncio.Queue()
+    turn_complete_event = asyncio.Event()
+    ready_event = asyncio.Event()
+
+    class MockConfig:
+        model_name = "test-model"
+
+    class MockSession:
+        def __init__(self):
+            self.config = MockConfig()
+            self._cancelled = asyncio.Event()
+
+        async def send_deferred_turn_complete_notification(self, event):
+            pass
+
+    session_holder = [MockSession()]
+
+    # Run event listener in background task
+    listener_task = asyncio.create_task(
+        event_listener(
+            event_queue,
+            submission_queue,
+            turn_complete_event,
+            ready_event,
+            prompt_session=None,
+            config=session_holder[0].config,
+            session_holder=session_holder,
+        )
+    )
+
+    await asyncio.sleep(0.01)
+
+    # Put a tool_call and output to accumulate tool times
+    await event_queue.put(Event(event_type="tool_call", data={"tool": "PXDesign"}))
+    await event_queue.put(
+        Event(
+            event_type="tool_output",
+            data={"output": "success", "success": True, "duration_s": 1.25},
+        )
+    )
+
+    # Put an llm call to accumulate thinking times
+    await event_queue.put(Event(event_type="llm_call", data={"latency_ms": 3500}))
+
+    # Trigger turn complete
+    await event_queue.put(Event(event_type="turn_complete"))
+
+    # Wait for turn completion
+    await asyncio.wait_for(turn_complete_event.wait(), timeout=3.0)
+
+    listener_task.cancel()
+    try:
+        await listener_task
+    except asyncio.CancelledError:
+        pass

@@ -478,6 +478,14 @@ async def event_listener(
     shimmer = _ThinkingShimmer(console)
     stream_buf = _StreamBuffer(console)
 
+    # Codex performance tracking metrics
+    turn_metrics = {
+        "start_time": 0.0,
+        "llm_time_ms": 0,
+        "tool_time_s": 0.0,
+        "in_progress": False,
+    }
+
     def _cancel_event():
         """Return the session's cancellation Event so print_markdown can abort
         its typewriter loop mid-stream when Ctrl+C fires."""
@@ -487,6 +495,21 @@ async def event_listener(
     while True:
         try:
             event = await event_queue.get()
+
+            # Record turn start time on first activity
+            if not turn_metrics["in_progress"] and event.event_type not in (
+                "ready",
+                "llm_call",
+            ):
+                import time
+
+                turn_metrics["start_time"] = time.monotonic()
+                turn_metrics["in_progress"] = True
+
+            # Intercept telemetry data
+            if event.event_type == "llm_call":
+                latency = event.data.get("latency_ms", 0) if event.data else 0
+                turn_metrics["llm_time_ms"] += latency
 
             if event.event_type == "ready":
                 tool_count = event.data.get("tool_count", 0) if event.data else 0
@@ -527,6 +550,7 @@ async def event_listener(
                 output = event.data.get("output", "") if event.data else ""
                 success = event.data.get("success", False) if event.data else False
                 duration_s = event.data.get("duration_s", 0.0) if event.data else 0.0
+                turn_metrics["tool_time_s"] += duration_s
                 td.print_tool_duration(last_tool_name[0], success, duration_s)
                 # Only show output for plan_tool — everything else is noise
                 if last_tool_name[0] == "plan_tool" and output:
@@ -538,10 +562,50 @@ async def event_listener(
                 shimmer.stop()
                 stream_buf.discard()
                 td.print_turn_complete()
+
+                # Performance metrics rendering
+                import time
+
+                elapsed = 0.0
+                if turn_metrics["in_progress"]:
+                    elapsed = time.monotonic() - turn_metrics["start_time"]
+                llm_s = turn_metrics["llm_time_ms"] / 1000.0
+                tool_s = turn_metrics["tool_time_s"]
+
+                # Format turn metric block
+                metrics_text = (
+                    f"[bold rgb(255,200,80)]⏱ Turn Performance Metrics (Codex Style)[/bold rgb(255,200,80)]\n"
+                    f"  • [bold cyan]Total Elapsed:[/bold cyan] {elapsed:.2f}s\n"
+                    f"  • [bold cyan]Thinking (LLM):[/bold cyan] {llm_s:.2f}s\n"
+                    f"  • [bold cyan]Tool Execution:[/bold cyan] {tool_s:.2f}s"
+                )
+
+                # Reset for next turn
+                turn_metrics["in_progress"] = False
+                turn_metrics["llm_time_ms"] = 0
+                turn_metrics["tool_time_s"] = 0.0
+
                 session = session_holder[0] if session_holder else None
                 if session is not None:
                     td.print_context_status(session, include_turns=True)
                 td.print_plan()
+
+                # Print the metrics Panel beautifully
+                from rich.panel import Panel
+
+                console.print(
+                    "  [dim]──────────────────────────────────────────────────[/dim]"
+                )
+                console.print(
+                    Panel(
+                        metrics_text,
+                        border_style="dim rgb(255,200,80)",
+                        expand=False,
+                        padding=(0, 2),
+                    )
+                )
+                console.print()
+
                 if session is not None:
                     await session.send_deferred_turn_complete_notification(event)
                 turn_complete_event.set()
@@ -549,6 +613,12 @@ async def event_listener(
                 shimmer.stop()
                 stream_buf.discard()
                 td.print_interrupted()
+
+                # Reset metrics on interrupt
+                turn_metrics["in_progress"] = False
+                turn_metrics["llm_time_ms"] = 0
+                turn_metrics["tool_time_s"] = 0.0
+
                 turn_complete_event.set()
             elif event.event_type == "undo_complete":
                 console.print("[dim]Undone.[/dim]")
