@@ -444,7 +444,9 @@ async def test_local_model_local_runtime_drops_invalid_hf_token_for_mcp(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_local_model_sandbox_runtime_prompts_for_hf_token(monkeypatch):
+async def test_local_model_sandbox_runtime_no_hf_token_needed(monkeypatch):
+    """Local models should NOT require an HF token, even with sandbox tools."""
+
     class StopAfterBanner(Exception):
         pass
 
@@ -457,7 +459,7 @@ async def test_local_model_sandbox_runtime_prompts_for_hf_token(monkeypatch):
 
     def fake_banner(*, model=None, hf_user=None, tool_runtime=None):
         assert model == "llamacpp/model"
-        assert hf_user == "tester"
+        assert hf_user is None  # No HF user needed for local models
         assert tool_runtime == "HF sandbox"
         raise StopAfterBanner
 
@@ -466,7 +468,9 @@ async def test_local_model_sandbox_runtime_prompts_for_hf_token(monkeypatch):
     monkeypatch.setattr(main_mod, "resolve_hf_token", lambda: None)
     monkeypatch.setattr(main_mod, "_prompt_and_save_hf_token", fake_prompt)
     monkeypatch.setattr(
-        main_mod, "_validated_hf_token", lambda token: (token, "tester")
+        main_mod,
+        "_validated_hf_token",
+        lambda token: (token, "tester" if token else None),
     )
     monkeypatch.setattr(
         main_mod,
@@ -482,7 +486,7 @@ async def test_local_model_sandbox_runtime_prompts_for_hf_token(monkeypatch):
     with pytest.raises(StopAfterBanner):
         await main_mod.main(sandbox_tools=True)
 
-    assert prompted is True
+    assert prompted is False  # Should NOT prompt for HF token
 
 
 @pytest.mark.asyncio
