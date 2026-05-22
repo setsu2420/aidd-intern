@@ -1,9 +1,4 @@
 <p align="center">
-    <a href="https://github.com/setsu2420/aidd-intern/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"></a>
-    <a href="https://smolagents-aidd-intern.hf.space/"><img alt="Website" src="https://img.shields.io/website/https/smolagents-aidd-intern.hf.space.svg?down_color=red&down_message=offline&up_message=online"></a>
-</p>
-
-<p align="center">
   <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="README.ja.md">日本語</a>
 </p>
 
