@@ -9,231 +9,89 @@
 
 # AIDD-Intern
 
-AIDD-Intern is an asynchronous agent runtime for AI drug discovery research and
-binder/protein-design workflows. It separates LLM calls, context management,
-tool routing, MCP integration, session tracing, the web backend, and AIDD
-domain tools so the same project can run source-backed research on a laptop and
-delegate heavier binder workflows to external compute when available.
-
-AIDD-Intern does not load LLM weights inside the CLI or FastAPI process. It also
-does not import heavy scientific stacks such as BindCraft, BoltzGen, PXDesign,
-Chai-1, or Protenix into the web backend. Use remote LLM APIs or an
-OpenAI-compatible local inference server for the model layer, and connect heavy
-protein-design tools through MCP, subprocesses, containers, clusters, or
-Hugging Face Jobs.
-
-## Languages
-
-- English: [README.md](README.md)
-- 简体中文: [README.zh-CN.md](README.zh-CN.md)
-- 日本語: [README.ja.md](README.ja.md)
+AIDD-Intern is an asynchronous agent runtime for AI drug discovery research and binder/protein-design workflows. It decouples LLM calls, context management, tool routing, MCP integration, session tracing, the web backend, and AIDD domain tools.
 
 ## Contents
 
-- [What It Does](#what-it-does)
+- [Core Features](#core-features)
 - [Quick Start](#quick-start)
 - [Local Updates](#local-updates)
 - [Local Diagnostics](#local-diagnostics)
 - [AIDD Preparation Stage](#aidd-preparation-stage)
-- [Model Configuration And Switching](#model-configuration-and-switching)
-- [API Keys And Search](#api-keys-and-search)
-- [Tool Configuration](#tool-configuration)
-- [CLI Usage](#cli-usage)
-- [Web App](#web-app)
-- [Tools And MCP](#tools-and-mcp)
-- [Context Strategy](#context-strategy)
-- [Startup Performance](#startup-performance)
 - [Project Layout](#project-layout)
-- [Development And Tests](#development-and-tests)
-- [Session Traces](#session-traces)
 
-## What It Does
+## Core Features
 
-- Source-backed research: `research`, `web_search`, `literature_lookup`,
-  `hf_papers`, Hugging Face docs, GitHub code search/read tools, and `aidd_bio`
-  help gather current sources before implementation or scientific decisions.
-- Real Google Search support: when `GOOGLE_SEARCH_API_KEY` and
-  `GOOGLE_SEARCH_ENGINE_ID` are set, `web_search` uses Google Custom Search JSON
-  API with freshness and date sorting options.
-- Model switching: select models with `--model`, configure aliases in
-  `configs/models.json`, and switch interactively with `/model`.
-- Adaptive context windows: remote OpenAI-compatible providers are not pinned to
-  a fixed 65k context. Local unknown models still use a conservative default
-  unless overridden.
-- AIDD binder workflows: `binder_design` is available as a normal built-in tool
-  for campaign planning, manifest creation, output checks, candidate ranking,
-  validation-gap tracking, and reusable skill-card export.
-- AIDD preparation stage: `aidd_prepare` creates a local preparation project,
-  collects literature metadata, downloads RCSB PDB files, crops target
-  structures, and ranks contact-derived hotspot residue candidates.
-- Protein design extensions: PXDesign, BoltzGen, BindCraft, Chai-1, Protenix,
-  Foldseek, and campaign memory tools are registered by default. Heavy local MCP
-  launchers still require explicit setup and opt-in.
-- Local CLI and web UI: the Python CLI runs interactive or headless sessions;
-  the FastAPI web app provides hosted browser sessions.
-- Session tracing: sessions can be saved as Claude Code compatible JSONL and
-  uploaded to a private Hugging Face dataset for review.
+- **Literature & Data Research**: Built-in retrieval tools to gather relevant documents, repositories, and models for drug discovery decision-making.
+- **AIDD Preparation**: Automates project initialization, PDB coordinate retrieval, structural cropping, and residue hotspot ranking.
+- **MCP Tool Integration**: Seamless cold-start and execution for Hugging Face MCP and local ProteinMCP engines (BindCraft, BoltzGen, PXDesign).
+- **Adaptive Context**: Dynamically compresses session history based on active model token boundaries to prevent execution failure.
+- **Dual-Engine Logging**: Employs an optimized Rust extension (PyO3 + Maturin) for high-frequency logging. Gracefully falls back to the native Python logger if a local Rust compiler is not available.
 
 ## Quick Start
 
 ### Requirements
 
--   Python 3.11+
--   [uv](https://github.com/astral-sh/uv) (Fast Python package manager)
--   Git (For source checkout)
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) (Fast Python package manager)
+- Git (For version control)
 
-### Installation
+### Installation & Configuration
 
-Follow the `ml-intern` style installation to set up the agent runtime:
+Run the following commands in your terminal to set up the environment:
 
 ```bash
 git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
 uv sync --extra dev
 uv tool install -e .
-cp .env.example .env
 ```
 
-Please use the HTTPS address above for first-time installation. The SSH address `git@github.com:setsu2420/aidd-intern.git` is only available if you have already configured a GitHub SSH key and have repository access.
+> **Note**: You must run `uv sync` and `uv tool install -e .` inside the `aidd-intern` directory because they require the local `pyproject.toml` file to resolve dependencies.
 
-Note: You must run `uv sync` and `uv tool install -e .` inside the `aidd-intern` directory because they require the local `pyproject.toml` file to resolve dependencies.
-
-If your environment encounters a `GnuTLS recv error (-110)` or other GitHub HTTPS transport failures during `git clone`, retry by forcing Git to use HTTP/1.1 with a shallow clone:
-
+If your network encounters transport failures during the checkout, enforce HTTP/1.1 and perform a shallow clone:
 ```bash
-git -c http.version=HTTP/1.1 clone --depth 1 \
-  https://github.com/setsu2420/aidd-intern.git
+git -c http.version=HTTP/1.1 clone --depth 1 https://github.com/setsu2420/aidd-intern.git
 ```
-
-If you need a robust one-click bootstrap script that automatically falls back to downloading the GitHub source archive when Git fails, run:
-
+Alternatively, run the automated bootstrap script that falls back to source archives when Git fails:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
 ```
 
-After installation, the `aidd-intern` command will be available in your shell.
-
-### Configure LLM
-
-AIDD-Intern defaults to using **SiliconFlow** with the **DeepSeek-V4-Flash** model. To get started:
-
-1.  Set your SiliconFlow API key in `.env`:
-    ```bash
-    SILICONFLOW_API_KEY=sk-...
-    ```
-2.  (Optional) If you want a different model by default, set:
-    ```bash
-    AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
-    ```
-
-Before your first real LLM call, you must configure your API keys. Edit `.env` and set at least one API key corresponding to your chosen model. For example:
+Once installed, prepare the environment file from the template:
+```bash
+cp .env.example .env
+```
+Edit the `.env` file to configure your model and provider credentials, such as:
 - `openrouter/openai/gpt-5.2` requires `OPENROUTER_API_KEY`
 - `openai/gpt-5.5` requires `OPENAI_API_KEY`
 - `anthropic/claude-opus-4-6` requires `ANTHROPIC_API_KEY`
-- `siliconflow/deepseek-ai/DeepSeek-V4-Flash` requires `SILICONFLOW_API_KEY`
-
-The config setup follows the pattern of modern developer assistants: select a provider, set a default model, configure its specific credentials in `.env`, and check the status using a doctor command before your first session.
-
-Run the diagnostic to verify your setup:
-
-```bash
-aidd-intern --doctor
-```
-
-### Usage
-
-**Interactive Mode:**
-
-```bash
-aidd-intern
-```
-
-**Headless Mode:**
-
-```bash
-aidd-intern "Research recent protein binder design tools. Prefer Google Search, cite sources."
-```
-
-**Configure LLM:**
-
-```bash
-aidd-intern configure-llm
-aidd-intern configure-llm openrouter
-```
-
-## Local Updates
-
-For a source checkout update, run in your repository root:
-
-```bash
-scripts/update-local.sh
-```
-
-This script will print and execute:
-
-1. `git pull --ff-only origin <current-branch>`
-2. `uv sync --extra dev`
-3. `uv tool install -e .`
-4. `command -v aidd-intern`
-
-`git pull --ff-only` will fail if your local branch has diverged from the remote, rather than silently creating a merge commit. Set `AIDD_INTERN_UPDATE_REMOTE` or `AIDD_INTERN_UPDATE_BRANCH` only if you explicitly need to update from a different remote or branch.
-
-## High-Performance Rust Core (Optional Acceleration)
-
-To address performance bottlenecks and Python GIL (Global Interpreter Lock) contention when saving large Trace logs at high frequency in multi-agent environments, AIDD-Intern integrates an optional Rust-based C extension (`aidd_intern_core`) under `rust_core/` using **PyO3 + Maturin**.
-
-This library releases the Python GIL during writing and utilizes operation-system-level atomic `rename` operations (via `tempfile`) to persist JSON data. It delivers a **22x+ write performance boost**, significantly improving multi-agent concurrency responsiveness.
-
-### Compile and Install
-
-If your system has a Rust compiler toolchain (`cargo`), the local update script `scripts/update-local.sh` will **automatically detect and compile** this module during the update.
-
-Alternatively, you can manually build and install it into your virtual environment:
-
-```bash
-cd rust_core
-uv run maturin develop
-```
-
-### Fallback-Safe Design
-
-If a Rust compiler is not installed or when running in lean production environments, the runtime will **automatically fall back to the native Python engine** seamlessly. This process is fully transparent, ensuring 100% backward compatibility and normal operation.
 
 ## Local Diagnostics
 
-Run the doctor after setting up the source-checkout Python runtime, after
-editing `.env`, or after updating:
-
+After installation or config modification, run the diagnostic check:
 ```bash
 aidd-intern --doctor
 ```
+This read-only command evaluates Python, Git, uv, configuration variables, API keys, and ProteinMCP status.
 
-The diagnostic is read-only. It prints each step, checks Python, `git`, `uv`,
-config loading, the selected model's expected API key, Google Search
-credentials, the GitHub version status, the update helper, and the
-ProteinMCP opt-in flag.
+## Local Updates
 
-This follows the same practical setup pattern used by Hermes Agent: install,
-configure one provider, run a doctor-style check, then verify a simple chat
-before enabling heavier tools.
+To update your local source directory without disrupting changes, run in your repository root:
+```bash
+scripts/update-local.sh
+```
+This script executes `git pull --ff-only origin <current-branch>`, `uv sync --extra dev`, and `uv tool install -e .` safely.
 
 ## AIDD Preparation Stage
 
-Before running binder generation from the source-checkout Python runtime,
-complete the four local preparation tasks:
+Before launching heavier binder design generation tasks, complete the four preparation steps:
+1. **Literature research**: Collect target metadata, epitopes, binders, and assays.
+2. **PDB download**: Retrieve structure coordinates from the RCSB PDB database.
+3. **Structure cropping**: Crop out target chains or domains that design tools require.
+4. **Hotspot residue determination**: Rank interface residues from target-partner atom contacts.
 
-1. Literature research: collect papers, official pages, DOIs, PMIDs, preprint
-   IDs, known binders, epitopes, and assay constraints with `literature_lookup`
-   and `web_search`.
-2. PDB download: fetch the selected experimental structure from RCSB PDB.
-3. Structure cropping: keep the target chain or domain that downstream design
-   tools should see.
-4. Hotspot residue determination: rank target residues at the target/partner
-   interface, then cross-check the candidates against literature or mutagenesis
-   evidence.
-
-The Python CLI can run the complete preparation pass after installation:
-
+You can execute the entire sequence with a single command:
 ```bash
 aidd-intern --prepare-aidd \
   --target-name "PD-L1" \
@@ -243,415 +101,21 @@ aidd-intern --prepare-aidd \
   --residue-ranges A:19-134 \
   --prep-project-dir runs/pd-l1-prep
 ```
-
-This writes:
-
-- `aidd_preparation_manifest.json`
-- `literature/literature_sources.md`
-- `structures/raw/<PDB_ID>.pdb`
-- `structures/cropped/<PDB_ID>_<chains>_crop.pdb`
-- `analysis/hotspots.json`
-- `aidd_preparation_summary.md`
-
-`aidd_prepare` is also available to the agent as a built-in tool with
-`create_project`, `literature_research`, `download_pdb`, `crop_structure`,
-`identify_hotspots`, and `run_preparation` operations. Hotspots are ranked from
-non-hydrogen atom contacts across the requested target and partner chains; they
-are useful preparation candidates, not experimental binding-energy proof.
-
-## Model Configuration And Switching
-
-The shared model catalog lives at [configs/models.json](configs/models.json).
-It controls the default model, visible model list, aliases, providers, tiers,
-and recommended entries for both CLI and web surfaces.
-
-Set the default model with either environment variables or the catalog. New
-users without a local inference server should choose a remote provider and set
-the matching API key in `.env` first:
-
-```bash
-AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
-AIDD_INTERN_MODELS_CONFIG=configs/models.json
-```
-
-The CLI tool can print provider-specific setup steps without editing files:
-
-```bash
-aidd-intern configure-llm
-aidd-intern configure-llm openrouter
-aidd-intern configure-llm local
-```
-
-The configuration shape intentionally mirrors OpenClaw/Hermes-style setup:
-choose one provider, set a model id, put the provider API key or local base URL
-in `.env`, then run a doctor/check command before using the full workflow.
-
-Start with a specific model:
-
-```bash
-aidd-intern --model openai/gpt-5.5 "your prompt"
-aidd-intern --model anthropic/claude-opus-4-6 "your prompt"
-aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"
-aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt"
-```
-
-Interactive model commands:
-
-```text
-/model list
-/model status
-/model 2
-/model flash
-/model openrouter/openai/gpt-5.2
-/model ollama/llama3.1:8b
-/model --global siliconflow/deepseek-ai/DeepSeek-V4-Flash
-```
-
-`/model <id|alias|number>` changes only the current session. `/model --global
-<id|alias|number>` also writes the selected model back to `configs/models.json`
-as the default for future sessions.
-
-### Local OpenAI-Compatible Models
-
-AIDD-Intern calls local models through LiteLLM-compatible OpenAI HTTP endpoints.
-Start your own inference server first, then use provider prefixes:
-
-```bash
-aidd-intern --model ollama/llama3.1:8b "your prompt"
-aidd-intern --model vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct "your prompt"
-aidd-intern --model lm_studio/google/gemma-3-4b "your prompt"
-aidd-intern --model llamacpp/qwen3.6-35b-a3b-gguf "your prompt"
-```
-
-Common environment variables:
-
-```bash
-LOCAL_LLM_BASE_URL=http://localhost:8000
-LOCAL_LLM_API_KEY=<optional-local-api-key>
-OLLAMA_BASE_URL=http://localhost:11434
-VLLM_API_KEY=<optional-vllm-key>
-```
-
-## API Keys And Search
-
-Create a root `.env` file or export variables in your shell. Do not commit
-tokens, model weights, checkpoints, databases, generated structures, or traces.
-The CLI and backend load the root `.env` automatically.
-
-Start from the checked-in template:
-
-```bash
-cp .env.example .env
-```
-
-```bash
-# LLM providers. Set one or more according to your selected model.
-OPENAI_API_KEY=<your-openai-api-key>
-ANTHROPIC_API_KEY=<your-anthropic-api-key>
-OPENROUTER_API_KEY=<your-openrouter-api-key>
-SILICONFLOW_API_KEY=<your-siliconflow-api-key>
-
-# Default model. This can also be overridden per command with --model.
-AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
-AIDD_INTERN_MODELS_CONFIG=configs/models.json
-
-# Real Google Search. Both variables must be set for the Google provider.
-GOOGLE_SEARCH_API_KEY=<google-custom-search-json-api-key>
-GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id>
-
-# Optional aliases also recognized by the search tool.
-GOOGLE_API_KEY=<google-custom-search-json-api-key>
-GOOGLE_CSE_ID=<programmable-search-engine-id>
-
-# Hugging Face and GitHub tools.
-HF_TOKEN=<your-hugging-face-token>
-GITHUB_TOKEN=<github-personal-access-token>
-
-# Local or LAN OpenAI-compatible inference servers.
-LOCAL_LLM_BASE_URL=http://localhost:8000
-LOCAL_LLM_API_KEY=<optional-local-api-key>
-```
-
-`web_search` behavior:
-
-1. If both Google variables are set, it uses Google Custom Search JSON API.
-2. `recent_days` sends `dateRestrict=dN`.
-3. `sort_by_date=true` sends `sort=date`.
-4. Without Google credentials, local development uses the built-in HTML search
-   fallback and reports the provider in the result.
-5. If Google credentials are configured but Google returns an error, fallback is
-   disabled unless `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` is set.
-
-Google's current documentation says Custom Search JSON API requires both a
-Programmable Search Engine ID and an API key. Google also announced that
-Custom Search JSON API users must transition to an alternative solution by
-January 1, 2027, so keep this dependency explicit in `.env`.
-
-Useful links:
-
-- Google Custom Search JSON API: https://developers.google.com/custom-search/v1/overview
-- Google Programmable Search Engine: https://programmablesearchengine.google.com/
-- OpenAI API keys: https://platform.openai.com/api-keys
-- Anthropic Console: https://console.anthropic.com/
-- OpenRouter API keys: https://openrouter.ai/settings/keys
-- SiliconFlow quickstart: https://docs.siliconflow.cn/en/userguide/quickstart
-- Hugging Face access tokens: https://huggingface.co/docs/hub/security-tokens
-- GitHub personal access tokens: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
-- uv sync: https://docs.astral.sh/uv/concepts/projects/sync/
-- uv tool install: https://docs.astral.sh/uv/concepts/tools/
-- Git pull: https://git-scm.com/docs/git-pull
-
-Run the live Google Search test only when real credentials are available:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 AIDD_INTERN_LIVE_WEB_SEARCH_TESTS=1 \
-  uv run pytest -p no:cacheprovider tests/integration/test_web_search_live.py -s
-```
-
-## Tool Configuration
-
-The tool surface is configured from the checked-in defaults plus a small set of
-environment variables:
-
-- CLI tool config: [configs/cli_agent_config.json](configs/cli_agent_config.json)
-- Web tool config: [configs/frontend_agent_config.json](configs/frontend_agent_config.json)
-- Override the CLI config path with `AIDD_INTERN_CLI_CONFIG=/path/to/cli_agent_config.json`
-- Real Google Search in `web_search` requires both `GOOGLE_SEARCH_API_KEY` and
-  `GOOGLE_SEARCH_ENGINE_ID` (or the aliases `GOOGLE_API_KEY` and
-  `GOOGLE_CSE_ID`)
-- Set `AIDD_INTERN_ALLOW_WEB_SEARCH_FALLBACK=1` to fall back to the local HTML
-  search backend when Google returns an error
-- Override the fallback search backend URL with `CLAWD_WEB_SEARCH_BASE_URL`
-- `HF_TOKEN` enables Hugging Face MCP startup
-- `AIDD_INTERN_ENABLE_PROTEINMCP=1` opts into local ProteinMCP launchers for
-  the heavier generator tools
-- `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` suppresses read-only version checks in
-  interactive startup and `aidd-intern --doctor`
-- `binder_design` and `aidd_prepare` are built-in binder workflow tools and do
-  not need separate MCP setup
-
-## CLI Usage
-
-Interactive:
-
-```bash
-aidd-intern
-```
-
-Headless one-shot:
-
-```bash
-aidd-intern "Research current AlphaFold-style complex validation methods and cite sources."
-```
-
-Common options:
-
-```bash
-aidd-intern "research-only task"
-aidd-intern "plan a binder campaign"
-aidd-intern "run protein design tools"
-aidd-intern --sandbox-tools "test this script in an HF Space sandbox"
-aidd-intern --max-iterations 100 "long task"
-aidd-intern --no-stream "disable streaming"
-```
-
-## Web App
-
-Start the backend service:
-
-```bash
-./scripts/dev.sh
-```
-
-Default URLs:
-
-- Backend health: `curl -g http://[::1]:7860/api`
-
-Or start separately:
-
-```bash
-cd backend
-uv run python -m uvicorn main:app --host ::1 --port 7860
-```
-
-## Tools And MCP
-
-Default config files:
-
-- CLI: [configs/cli_agent_config.json](configs/cli_agent_config.json)
-
-User-level CLI config:
-
-```bash
-~/.config/aidd-intern/cli_agent_config.json
-```
-
-Override the CLI config path:
-
-```bash
-AIDD_INTERN_CLI_CONFIG=/path/to/cli_agent_config.json
-```
-
-MCP startup is intentionally lazy:
-
-- Hugging Face MCP uses `https://hf.co/mcp` and is skipped when `HF_TOKEN` is
-  missing.
-- ProteinMCP launchers are skipped unless `AIDD_INTERN_ENABLE_PROTEINMCP=1` is
-  set.
-- Remote OpenAPI/catalog data is not fetched during startup; tool handlers fetch
-  it only when the tool is called.
-
-Binder and protein-design tools are normal built-in tools. `binder_design`,
-`run_pxdesign`, `run_boltzgen`, `run_bindcraft`, and
-`protein_design_ace_playbook` are visible to the model without a separate
-workflow selector. The heavy local launchers only start after explicit setup and
-environment opt-in.
-
-Install local ProteinMCP tools when needed:
-
-```bash
-scripts/setup-proteinmcp-local.sh all
-scripts/setup-proteinmcp-local.sh bindcraft_mcp
-scripts/setup-proteinmcp-local.sh boltzgen_mcp
-scripts/setup-proteinmcp-local.sh pxdesign_mcp
-```
-
-Run one local MCP server:
-
-```bash
-scripts/run-proteinmcp-local.sh bindcraft_mcp
-scripts/run-proteinmcp-local.sh boltzgen_mcp
-scripts/run-proteinmcp-local.sh pxdesign_mcp
-```
-
-## Context Strategy
-
-Context size is model-aware:
-
-- Known remote models use provider/catalog metadata when available.
-- Unknown local models default to a conservative 65,536-token policy.
-- Remote OpenAI-compatible models are not forced into the local 65k policy.
-- Compaction runs before the model is likely to exceed its context window.
-
-Overrides:
-
-```bash
-AIDD_INTERN_FORCE_MODEL_MAX_TOKENS=1000000
-AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS=131072
-SILICONFLOW_MODEL_MAX_TOKENS=1000000
-OPENROUTER_MODEL_MAX_TOKENS=1048576
-```
-
-## Startup Performance
-
-The CLI startup path is split into a fast banner/config phase and deferred
-runtime loading. Built-in tool schemas are registered without importing heavy
-tool implementations, and handlers are loaded only when called. This keeps
-packages such as `whoosh` and `nbconvert` out of the cold-start path for normal
-local sessions.
-
-To profile imports:
-
-```bash
-PYTHONPROFILEIMPORTTIME=1 uv run python -X importtime -m agent.main \
-  --model siliconflow/deepseek-ai/DeepSeek-V4-Flash </dev/null
-```
-
-There is a regression test that starts a fresh Python subprocess, registers
-local-mode tools, prints each step, and asserts that `docs_tools`,
-`github_read_file`, `whoosh`, and `nbconvert` are still lazy:
-
-```bash
-uv run pytest tests/unit/test_mcp_startup.py -q
-```
+This workflow creates the following structured outputs:
+- `aidd_preparation_manifest.json` (Project metadata)
+- `literature/literature_sources.md` (Literature findings)
+- `structures/raw/<PDB_ID>.pdb` (Raw structure)
+- `structures/cropped/<PDB_ID>_<chains>_crop.pdb` (Cropped structure)
+- `analysis/hotspots.json` (Interface contact residues)
+- `aidd_preparation_summary.md` (Stage report)
+
+> **Disclaimer**: Hotspot recommendations generated by `aidd_prepare` are only preparation candidates, not experimental binding-energy proof.
 
 ## Project Layout
 
-- `agent/`: async agent runtime, CLI entrypoint, context management, model
-  switching, tool routing, session persistence, and built-in tools.
-- `backend/`: FastAPI backend for hosted sessions, auth, quotas, uploads, KPI
-  scheduling, and REST/SSE/WebSocket APIs.
-- `configs/`: shared CLI defaults, model catalog, and MCP settings.
-- `scripts/`: local dev launcher, ProteinMCP setup/run helpers, KPI/SFT tools,
-  sandbox cleanup, and backlog utilities.
-- `fixtures/`: evaluation test prompts for the CLI harness.
-- `tests/`: Python pytest unit and integration tests.
-- `evals/protein_design/`: protein-design benchmark scaffold.
-- `docs/`: architecture, context management, multi-agent, binder workflow, and
-  protein-design guides.
-
-## Development And Tests
-
-Python checks:
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
-```
-
-Format when needed:
-
-```bash
-uv run ruff format .
-uv run ruff check .
-uv run ruff format --check .
-```
-
-Focused checks:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
-  tests/unit/test_binder_design_tool.py \
-  tests/unit/test_mcp_startup.py \
-  tests/unit/test_config.py \
-  tests/unit/test_web_search_tool.py
-
-PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider \
-  tests/unit/test_protein_design_workflow.py
-```
-
-Protein-design benchmark smoke test:
-
-```bash
-uv run python evals/protein_design/runner.py \
-  --model test-model \
-  --output /tmp/protein_design_eval_results.json
-```
-
-Do not commit benchmark outputs or generated temporary files.
-
-## Session Traces
-
-CLI sessions can be uploaded to a private Hugging Face dataset in Claude Code
-compatible JSONL format.
-
-Default target:
-
-```text
-{your-hf-username}/aidd-intern-sessions
-```
-
-CLI commands:
-
-```text
-/share-traces
-/share-traces public
-/share-traces private
-```
-
-Disable sharing:
-
-```json
-{
-  "share_traces": false
-}
-```
-
-Override the trace repo template:
-
-```json
-{
-  "personal_trace_repo_template": "{hf_user}/my-custom-traces"
-}
-```
+- `agent/`: Async agent runtime, context managers, CLI, and core tools.
+- `backend/`: FastAPI backend serving hosted browser sessions.
+- `configs/`: Model catalog and default MCP settings.
+- `rust_core/`: Optional high-performance logging extension built with PyO3 + Maturin.
+- `scripts/`: Dev launchers, scientific tool installers, and sandbox cleanups.
+- `tests/`: Automated pytest unit and integration suites.

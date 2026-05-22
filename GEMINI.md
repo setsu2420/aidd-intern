@@ -89,3 +89,4 @@ The primary workflow for protein binder design:
     - Provide direct Hub URLs for models, datasets, and jobs.
     - Use Trackio for training monitoring and alert at critical decision points.
     - Ensure every response in autonomous mode includes at least one tool call.
+    - **No Citation / No Reference**: Absolutely DO NOT add any external citations, sources, or reference links (such as `[1]`, `[2]`, `[3]` or web search links) in any generated text, agent replies, README files, or other documentation. All citations must be left for the user to add manually.

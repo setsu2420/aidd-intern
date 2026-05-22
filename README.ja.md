@@ -9,173 +9,86 @@
 
 # AIDD-Intern
 
-AIDD-Intern は、AI drug discovery の調査、binder 設計、protein-design
-ワークフローのための非同期エージェント実行基盤です。LLM 呼び出し、コンテキスト
-管理、ツールルーティング、MCP、セッショントレース、Web バックエンド、AIDD
-ドメインツールを分離しているため、ノート PC では出典付き調査を行い、重い
-protein-design 処理は外部計算資源へ委譲できます。
+AIDD-Intern は、AI 創薬（AI Drug Discovery, AIDD）の調査、binder 設計、および protein-design ワークフローのための非同期エージェント実行基盤です。LLM 呼び出し、コンテキスト管理、ツールルーティング、MCP 統合、セッショントレース、Web バックエンド、および AIDD 関連のドメインツールを解耦し、効率的でスケーラブルな開発を可能にします。
 
-AIDD-Intern は CLI や FastAPI プロセス内で LLM 重みを読み込みません。また
-BindCraft、BoltzGen、PXDesign、Chai-1、Protenix などの重い科学計算スタックも
-Web バックエンドへ直接 import しません。モデルはリモート LLM API または
-OpenAI-compatible なローカル推論サーバーで動かし、重い設計ツールは MCP、
-サブプロセス、コンテナ、クラスタ、Hugging Face Jobs 経由で接続します。
+## 目次
 
-## 言語
-
-- English: [README.md](README.md)
-- 简体中文: [README.zh-CN.md](README.zh-CN.md)
-- 日本語: [README.ja.md](README.ja.md)
+- [主な機能](#主な機能)
+- [クイックスタート](#クイックスタート)
+- [ローカル更新](#ローカル更新)
+- [ローカル診断](#ローカル診断)
+- [AIDD 準備段階](#aidd-準備段階)
+- [プロジェクト構成](#プロジェクト構成)
 
 ## 主な機能
 
-- 出典付き調査: `research`、`web_search`、`literature_lookup`、
-  `hf_papers`、Hugging Face docs、GitHub ツール、`aidd_bio` を内蔵。
-- Google Search 対応: `GOOGLE_SEARCH_API_KEY` と
-  `GOOGLE_SEARCH_ENGINE_ID` がある場合、Google Custom Search JSON API を使用。
-- モデル切り替え: `--model`、`configs/models.json`、対話中の `/model`
-  コマンドで切り替え可能。
-- 可変コンテキスト長: リモート OpenAI-compatible provider は固定 65k に縛られず、
-  ローカル未知モデルのみ保守的な既定値を使います。
-- AIDD binder ワークフロー: `binder_design` は通常の内蔵ツールとして利用できます。
-- AIDD preparation stage: `aidd_prepare` は文献メタデータ収集、RCSB PDB
-  ダウンロード、構造 crop、接触ベースの hotspot residue 候補抽出を行います。
-- Protein design 拡張: PXDesign、BoltzGen、BindCraft、Chai-1、Protenix、
-  Foldseek などのツールも通常の内蔵ツールとして登録されます。重いローカル
-  MCP launcher は明示的なセットアップと opt-in が必要です。
-- CLI と Backend: Python CLI、FastAPI backend を含みます。
-- セッショントレース: Claude Code JSONL 互換形式で保存し、Hugging Face の
-  private dataset にアップロードできます。
+- **文献調査とデータ探索**：内蔵された検索ツールを使用し、創薬の意思決定に必要な最新の文献、コードレポジトリ、およびモデル情報を収集します。
+- **AIDD 準備タスク**：準備用プロジェクトの自動生成、PDB 構造データの取得、標的構造のクロップ、およびアミノ酸ホットスポット候補のランキングを実行します。
+- **MCP 科学ツールの統合**：Hugging Face MCP やローカルの ProteinMCP（BindCraft, BoltzGen, PXDesign）の軽量なコールドスタートと呼び出しをサポートします。
+- **適応型コンテキスト**：使用モデルの Token 制限値に基づき、実行時にコンテキストを自動圧縮し、長時間の実行タスクが中断するのを防ぎます。
+- **デュアルエンジンログ**：PyO3 + Maturin に基づく高性能なログ書き込み加速モジュールを搭載。ローカルに Rust コンパイル環境がない場合は、自動的かつ透過的にネイティブ Python 書き込みエンジンにフォールバックします。
 
 ## クイックスタート
 
 ### 必要環境
 
-- Python 3.11+、`uv`、Git。
-- PXDesign、BindCraft などをローカル実行する場合のみ Conda/Mamba と GPU
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) (高速 Python パッケージマネージャー)
+- Git (ソースコード管理用)
 
-### インストール (source から)
+### インストールと設定
+
+ターミナルで以下のコマンドを実行してインストールを行います：
 
 ```bash
 git clone https://github.com/setsu2420/aidd-intern.git
 cd aidd-intern
 uv sync --extra dev
 uv tool install -e .
-cp .env.example .env
 ```
 
-初回セットアップでは上の HTTPS URL を使ってください。SSH 形式の
-`git@github.com:setsu2420/aidd-intern.git` は、GitHub SSH key が設定済みで、
-そのアカウントにリポジトリ権限がある場合だけ動きます。`uv sync` と
-`uv tool install -e .` は `aidd-intern` ディレクトリ内で実行してください。
-どちらもその場所の `pyproject.toml` を読みます。
+> **注意**：必ず `cd aidd-intern` でディレクトリに移動してから `uv sync` および `uv tool install -e .` を実行してください。依存関係の解決とツールのインストールにそのディレクトリ下の `pyproject.toml` が必要となるためです。
 
-`git clone` が `GnuTLS recv error (-110)` などの GitHub HTTPS transport error
-で失敗する場合は、Git HTTP/1.1 を強制して再試行してください:
-
+ネットワークの理由により `git clone` 時に HTTPS 転送エラーが発生した場合は、HTTP/1.1 を強制してシャロークローンを実行してください：
 ```bash
-git -c http.version=HTTP/1.1 clone --depth 1 \
-  https://github.com/setsu2420/aidd-intern.git
+git -c http.version=HTTP/1.1 clone --depth 1 https://github.com/setsu2420/aidd-intern.git
 ```
-
-GitHub source archive fallback 付きの一括 bootstrap が必要な場合:
-
+または、Git エラー時に自動的にアーカイブをダウンロードしてインストールを行う自動復旧スクリプトを使用できます：
 ```bash
 curl -fsSL https://raw.githubusercontent.com/setsu2420/aidd-intern/main/scripts/bootstrap-source.sh | bash
 ```
 
-起動:
-
+インストール完了後、環境変数テンプレートから `.env` ファイルを作成します：
 ```bash
-aidd-intern
+cp .env.example .env
 ```
-
-最初の実 LLM 呼び出しの前に `.env` を編集し、選択したモデルに対応する API key
-を少なくとも 1 つ設定してください。たとえば `openrouter/openai/gpt-5.2` には
-`OPENROUTER_API_KEY`、`openai/gpt-5.5` には `OPENAI_API_KEY`、
-`anthropic/claude-opus-4-6` には `ANTHROPIC_API_KEY`、
-`siliconflow/deepseek-ai/DeepSeek-V4-Flash` には `SILICONFLOW_API_KEY` が必要です。
-ローカル vLLM を使わない場合は、`.env` の `AIDD_INTERN_DEFAULT_MODEL_ID` も
-リモートモデルに変更してください。
-
-チャットを開始せずにローカル環境だけ確認:
-
-```bash
-aidd-intern --doctor
-```
-
-GPU なしで調査だけ行う場合:
-
-```bash
-aidd-intern --model openrouter/openai/gpt-5.2 \
-  "Research recent protein binder design tools. Prefer Google Search and cite sources."
-```
-
-## ローカル更新
-
-既存の source checkout を最新バージョンに更新するには、リポジトリのルートディレクトリで次のスクリプトを実行します:
-
-```bash
-scripts/update-local.sh
-```
-
-このスクリプトは以下のステップを順番に実行します:
-
-1. `git pull --ff-only origin <current-branch>`
-2. `uv sync --extra dev`
-3. `uv tool install -e .`
-4. `command -v aidd-intern`
-
-`git pull --ff-only` はローカルブランチがリモートと分岐している場合に失敗し、自動的にマージコミットを作成しません。別のリモートやブランチから更新したい場合のみ、`AIDD_INTERN_UPDATE_REMOTE` または `AIDD_INTERN_UPDATE_BRANCH` を设定してください。
-
-## 高パフォーマンスRustコア（オプションの高速化）
-
-マルチエージェント環境において、大量のTraceセッションログを高頻度で保存する際のI/OボトルネックとPythonのGIL（グローバルインタプリタロック）競合を解消するため、AIDD-InternはPyO3 + Maturinを使用したRustベースのC拡張（`aidd_intern_core`）を`rust_core/`配下に統合しています。
-
-このライブラリは、書き込み処理中にPythonのGILを完全に解放し、OSレベルの原子的な`rename`操作（`tempfile`経由）を用いてJSONデータを永続化します。これにより、書き込みパフォーマンスが **22倍以上向上** し、高並行処理時の応答速度が大幅に改善され、カクつきを防ぎます。
-
-### ビルドとインストール
-
-システムにRustコンパイラツールチェーン（`cargo`）がインストールされている場合、ローカル更新スクリプト `scripts/update-local.sh` は更新の実行時にこのモジュールを**自動的に検出してシームレスにビルド・インストール**します。
-
-または、`rust_core/` ディレクトリで手動でビルドして仮想環境にインストールすることも可能です：
-
-```bash
-cd rust_core
-uv run maturin develop
-```
-
-### フォールバックセーフ（自動降級）設計
-
-システムにRustコンパイラがインストールされていない場合や、軽量な本番環境で実行する場合、システムは起動時に自動検出を行い、**ネイティブのPython書き込みエンジンにエレガントにフォールバック**します。このプロセスはユーザーに完全に透過的であり、100%の互換性と正常な動作を保証します。
+`.env` ファイルを編集し、使用するモデルに対応する API Key（`SILICONFLOW_API_KEY` や `OPENROUTER_API_KEY` など）および `AIDD_INTERN_DEFAULT_MODEL_ID` を設定します。
 
 ## ローカル診断
 
-インストール後、`.env` 変更後、更新後に実行できます:
-
+インストールや設定変更、アップデートを行った後は、診断コマンドを実行して環境を検証することを推奨します：
 ```bash
 aidd-intern --doctor
 ```
+このコマンドは読み取り専用で実行され、Python、Git、uv、設定ファイル、LLM API 認証情報、および ProteinMCP の設定を検証します。
 
-doctor コマンドは読み取り専用（read-only）です。Python 3.11+、`git`、`uv` のインストール状態、設定ファイルの読み込み、選択されたモデルに必要な LLM API キー、Google Search 認証情報、および ProteinMCP opt-in の設定を順番に検証します。
+## ローカル更新
 
-Hermes Agent と同じ実用的な流れを参考にしています。まず install、次に provider を
-1 つ設定し、doctor-style check を実行し、簡単な chat を確認してから重いツールを有効にします。
+ローカルのソースコードを最新バージョンに更新するには、レポジトリのルートディレクトリで以下のスクリプトを実行します：
+```bash
+scripts/update-local.sh
+```
+このスクリプトは `git pull --ff-only origin <current-branch>`、`uv sync --extra dev`、および `uv tool install -e .` を安全に実行し、依存関係とコマンドツールを更新します。
 
 ## AIDD 準備段階
 
-binder generation の前に、次の 4 つの準備タスクをローカルで完了できます:
+重い binder 科学計算生成タスクを実行する前に、以下の 4 つの準備タスクを完了させる必要があります：
+1. **文献調査**：標的、既知の binder、結合部位（エピトープ）、および実験的制約メタデータを収集します。
+2. **PDB 取得**：RCSB PDB データベースから指定の実験用三次元構造座標データを取得します。
+3. **構造 crop**：後続の設計ツールで必要となる、特定の標的チェーンやドメイン残基の範囲を切り出します。
+4. **Hotspot residue 決定**：標的チェーンとパートナーチェーンの非水素原子の接触に基づき、ホットスポット候補アミノ酸をランキングします。
 
-1. 文献調査: `literature_lookup` と `web_search` で paper、公式ページ、DOI、
-   PMID、preprint ID、既知 binder、epitope、assay 制約を集めます。
-2. PDB 取得: RCSB PDB から選択した実験構造をダウンロードします。
-3. 構造 crop: downstream design tool に渡す target chain/domain/residue range
-   だけを残します。
-4. Hotspot residue 決定: target/partner chain の atom contacts から候補 residue
-   を順位付けし、文献や mutagenesis 情報で確認します。
-
-インストール後、Python CLI で準備フローを実行できます:
-
+以下のコマンドを実行することで、すべての準備タスクを一括実行できます：
 ```bash
 aidd-intern --prepare-aidd \
   --target-name "PD-L1" \
@@ -185,228 +98,21 @@ aidd-intern --prepare-aidd \
   --residue-ranges A:19-134 \
   --prep-project-dir runs/pd-l1-prep
 ```
+このワークフローは、指定された出力ディレクトリに以下の構造化された成果ファイルを生成します：
+- `aidd_preparation_manifest.json` (プロジェクトメタデータ)
+- `literature/literature_sources.md` (文献調査結果)
+- `structures/raw/<PDB_ID>.pdb` (オリジナル構造)
+- `structures/cropped/<PDB_ID>_<chains>_crop.pdb` (クロップ後の構造)
+- `analysis/hotspots.json` (接触アミノ酸分析結果)
+- `aidd_preparation_summary.md` (準備報告書)
 
-出力:
+> **安全上の注意**：`aidd_prepare` によるホットスポットの選定は準備段階の入力候補に過ぎず、実験的 binding energy を証明するものではありません。
 
-- `aidd_preparation_manifest.json`
-- `literature/literature_sources.md`
-- `structures/raw/<PDB_ID>.pdb`
-- `structures/cropped/<PDB_ID>_<chains>_crop.pdb`
-- `analysis/hotspots.json`
-- `aidd_preparation_summary.md`
+## プロジェクト構成
 
-`aidd_prepare` は agent の内蔵 tool としても利用でき、`create_project`、
-`literature_research`、`download_pdb`、`crop_structure`、`identify_hotspots`、
-`run_preparation` をサポートします。Hotspot は非水素 atom contact から得た準備用
-候補であり、実験的 binding energy の証明ではありません。
-
-## モデル設定と切り替え
-
-共有モデルカタログは [configs/models.json](configs/models.json) です。CLI と Web UI
-の既定モデル、候補、alias、provider、tier を管理します。
-
-```bash
-AIDD_INTERN_DEFAULT_MODEL_ID=siliconflow/deepseek-ai/DeepSeek-V4-Flash
-AIDD_INTERN_MODELS_CONFIG=configs/models.json
-```
-
-起動時に指定:
-
-```bash
-aidd-intern --model openai/gpt-5.5 "your prompt"
-aidd-intern --model anthropic/claude-opus-4-6 "your prompt"
-aidd-intern --model openrouter/openai/gpt-5.2 "your prompt"
-aidd-intern --model siliconflow/deepseek-ai/DeepSeek-V4-Flash "your prompt"
-```
-
-対話モードのコマンド:
-
-```text
-/model list
-/model status
-/model 2
-/model flash
-/model openrouter/openai/gpt-5.2
-/model ollama/llama3.1:8b
-/model --global siliconflow/deepseek-ai/DeepSeek-V4-Flash
-```
-
-`/model <id|alias|number>` は現在のセッションだけを変更します。
-`/model --global <id|alias|number>` は `configs/models.json` の `default` も更新します。
-
-## API キーと検索
-
-`.env` または shell export で設定します。`.env`、token、重み、checkpoint、
-database、生成構造、trace は GitHub にコミットしないでください。
-
-テンプレートから始める場合:
-
-```bash
-cp .env.example .env
-```
-
-```bash
-# LLM providers. 選択したモデルに対応する key を設定します。
-OPENAI_API_KEY=<your-openai-api-key>
-ANTHROPIC_API_KEY=<your-anthropic-api-key>
-OPENROUTER_API_KEY=<your-openrouter-api-key>
-SILICONFLOW_API_KEY=<your-siliconflow-api-key>
-
-# 既定モデル。コマンドごとに --model でも上書きできます。
-AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
-AIDD_INTERN_MODELS_CONFIG=configs/models.json
-
-# Real Google Search. 両方が必要です。
-GOOGLE_SEARCH_API_KEY=<google-custom-search-json-api-key>
-GOOGLE_SEARCH_ENGINE_ID=<programmable-search-engine-id>
-
-# Optional aliases.
-GOOGLE_API_KEY=<google-custom-search-json-api-key>
-GOOGLE_CSE_ID=<programmable-search-engine-id>
-
-HF_TOKEN=<your-hugging-face-token>
-GITHUB_TOKEN=<github-personal-access-token>
-
-LOCAL_LLM_BASE_URL=http://localhost:8000
-LOCAL_LLM_API_KEY=<optional-local-api-key>
-AIDD_INTERN_ENABLE_PROTEINMCP=0
-```
-
-CLI 工具は provider-specific setup steps を表示できます。ファイルは変更しません:
-
-```bash
-aidd-intern configure-llm
-aidd-intern configure-llm openrouter
-aidd-intern configure-llm local
-```
-
-OpenClaw/Hermes Agent と同じ実用的な設定パターンを参考にしています。provider を
-1 つ選び、model id を設定し、provider API key または local base URL を `.env`
-に入れ、doctor/check command で確認してから full workflow に進みます。
-
-`web_search` は Google credentials がそろっている場合 Google Custom Search JSON
-API を使い、`recent_days` は `dateRestrict=dN`、`sort_by_date=true` は
-`sort=date` を送ります。credentials がない開発環境では HTML fallback を使います。
-Google の現在の文書では、Custom Search JSON API には Programmable Search
-Engine ID と API key の両方が必要です。また Google は、Custom Search JSON API
-利用者は 2027 年 1 月 1 日までに代替手段へ移行する必要があると発表しているため、
-この依存関係は `.env` で明示的に管理してください。
-
-## CLI
-
-```bash
-aidd-intern
-aidd-intern "Research current AlphaFold-style complex validation methods and cite sources."
-aidd-intern "research-only task"
-aidd-intern "plan a binder campaign"
-aidd-intern "run protein design tools"
-aidd-intern --sandbox-tools "test this script in an HF Space sandbox"
-```
-
-## Web App
-
-一括起動:
-
-```bash
-./scripts/dev.sh
-```
-
-既定 URL:
-
-- Backend health: `curl -g http://[::1]:7860/api`
-
-手動起動:
-
-```bash
-cd backend
-uv run python -m uvicorn main:app --host ::1 --port 7860
-```
-
-## Tools と MCP
-
-既定設定:
-
-- CLI: [configs/cli_agent_config.json](configs/cli_agent_config.json)
-
-MCP は cold start を軽くするため遅延接続します。
-
-- Hugging Face MCP は `https://hf.co/mcp` を使い、`HF_TOKEN` がない場合はスキップ。
-- ProteinMCP は `AIDD_INTERN_ENABLE_PROTEINMCP=1` の場合のみ接続。
-- OpenAPI/catalog のリモート取得は起動時ではなくツール呼び出し時に行います。
-- `AIDD_INTERN_DISABLE_UPDATE_CHECK=1` で起動時と `aidd-intern --doctor`
-  の read-only version check を抑制します。
-
-Binder と protein-design の機能は通常の内蔵ツールです。`binder_design`、
-`run_pxdesign`、`run_boltzgen`、`run_bindcraft`、
-`protein_design_ace_playbook` は別の selector なしで利用できます。
-
-ProteinMCP のインストール:
-
-```bash
-scripts/setup-proteinmcp-local.sh all
-scripts/setup-proteinmcp-local.sh bindcraft_mcp
-scripts/setup-proteinmcp-local.sh boltzgen_mcp
-scripts/setup-proteinmcp-local.sh pxdesign_mcp
-```
-
-## コンテキスト戦略
-
-- 既知のリモートモデルは provider/catalog の情報を使います。
-- 未知のローカルモデルは保守的に 65,536 token を使います。
-- リモート OpenAI-compatible モデルはローカル 65k 方針に固定されません。
-- context window に近づく前に compaction を行います。
-
-上書き例:
-
-```bash
-AIDD_INTERN_FORCE_MODEL_MAX_TOKENS=1000000
-AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS=131072
-SILICONFLOW_MODEL_MAX_TOKENS=1000000
-OPENROUTER_MODEL_MAX_TOKENS=1048576
-```
-
-## 起動性能
-
-CLI は banner/config の軽い段階と runtime の重い段階を分離しています。内蔵ツールは
-schema だけを登録し、実装 handler は呼び出し時に import します。通常のローカル
-起動では `whoosh` や `nbconvert` を cold-start path に載せません。
-
-import profiling:
-
-```bash
-PYTHONPROFILEIMPORTTIME=1 uv run python -X importtime -m agent.main \
-  --model siliconflow/deepseek-ai/DeepSeek-V4-Flash </dev/null
-```
-
-回帰テスト:
-
-```bash
-uv run pytest tests/unit/test_mcp_startup.py -q
-```
-
-## 開発とテスト
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
-```
-
-
-
-## セッショントレース
-
-CLI session は Claude Code JSONL 互換形式で保存し、Hugging Face private dataset
-へアップロードできます。
-
-```text
-/share-traces
-/share-traces public
-/share-traces private
-```
-
-既定 target:
-
-```text
-{your-hf-username}/aidd-intern-sessions
-```
+- `agent/`：Agent 実行環境、コンテキスト管理、CLI、および内蔵ツール。
+- `backend/`：FastAPI Web バックエンド、セッション管理および API ルーティング。
+- `configs/`：共有モデルカタログおよび MCP 設定ファイル。
+- `rust_core/`：PyO3 + Maturin に基づく高性能な Trace 書き込み高速化モジュール。
+- `scripts/`：ローカル開発起動スクリプト、科学計算ツール MCP インストールおよび一键設定ツール。
+- `tests/`：pytest ユニットテストおよび統合テストスイート。
