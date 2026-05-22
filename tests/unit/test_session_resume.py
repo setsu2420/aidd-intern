@@ -380,3 +380,64 @@ def test_resolve_session_log_arg_accepts_index_and_id_prefix(tmp_path):
     assert session_resume.resolve_session_log_arg("1", entries, log_dir) == newer
     assert session_resume.resolve_session_log_arg("abc", entries, log_dir) == older
     assert session_resume.resolve_session_log_arg("nope", entries, log_dir) is None
+
+
+def test_list_session_logs_backward_compatibility(tmp_path, monkeypatch):
+    # Set up global log directory and local directory
+    global_dir = tmp_path / "global_session_logs"
+    local_dir = tmp_path / "session_logs"
+    global_dir.mkdir()
+    local_dir.mkdir()
+
+    # Mock DEFAULT_SESSION_LOG_DIR to point to our global directory
+    monkeypatch.setattr(session_resume, "DEFAULT_SESSION_LOG_DIR", global_dir)
+    # Set working directory to tmp_path so Path("session_logs") points to our local_dir
+    monkeypatch.chdir(tmp_path)
+
+    # Write files
+    older_local = _write_session_log(
+        local_dir,
+        "older_local.json",
+        session_id="older-local",
+        content="local old content",
+        mtime=time.time() - 20,
+    )
+    newer_global = _write_session_log(
+        global_dir,
+        "newer_global.json",
+        session_id="newer-global",
+        content="global new content",
+        mtime=time.time() - 10,
+    )
+
+    # Calling list_session_logs without arguments uses DEFAULT_SESSION_LOG_DIR
+    entries = session_resume.list_session_logs()
+
+    assert len(entries) == 2
+    assert entries[0].path == newer_global
+    assert entries[1].path == older_local
+    assert entries[0].session_id == "newer-global"
+    assert entries[1].session_id == "older-local"
+
+
+def test_list_session_logs_deduplication(tmp_path, monkeypatch):
+    # Set both to the same directory
+    log_dir = tmp_path / "session_logs"
+    log_dir.mkdir()
+
+    monkeypatch.setattr(session_resume, "DEFAULT_SESSION_LOG_DIR", log_dir)
+    monkeypatch.chdir(tmp_path)
+
+    # Write a file
+    file_path = _write_session_log(
+        log_dir,
+        "session.json",
+        session_id="session-a",
+        content="some content",
+        mtime=time.time(),
+    )
+
+    # Should only return 1 entry despite both directories being scanned, due to resolution deduplication
+    entries = session_resume.list_session_logs()
+    assert len(entries) == 1
+    assert entries[0].path.resolve() == file_path.resolve()

@@ -41,7 +41,7 @@ _FORCE_MODEL_MAX_TOKENS_ENV = "AIDD_INTERN_FORCE_MODEL_MAX_TOKENS"
 _LOCAL_MODEL_MAX_TOKENS_ENV = "AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS"
 _TURN_COMPLETE_NOTIFICATION_CHARS = 39000
 
-DEFAULT_SESSION_LOG_DIR = Path("session_logs")
+DEFAULT_SESSION_LOG_DIR = Path("~/.aidd-intern/session_logs").expanduser()
 
 
 def _parse_positive_int(value: str) -> int | None:

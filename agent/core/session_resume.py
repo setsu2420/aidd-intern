@@ -66,41 +66,64 @@ def _first_user_preview(messages: list[Any]) -> str:
 
 
 def list_session_logs(
-    directory: Path = DEFAULT_SESSION_LOG_DIR,
+    directory: Path | None = None,
 ) -> list[SessionLogEntry]:
     """Return readable session logs under ``directory``, newest first."""
-    if not directory.exists():
-        return []
+    if directory is None:
+        directory = DEFAULT_SESSION_LOG_DIR
+    directories = [directory]
+
+    # 向后兼容：只有当检索全局默认目录时，且如果本地工程目录下的 session_logs 文件夹存在，才一并加入收集
+    if directory == DEFAULT_SESSION_LOG_DIR:
+        try:
+            local_dir = Path("session_logs").resolve()
+            if local_dir.exists() and local_dir != directory.resolve():
+                directories.append(local_dir)
+        except Exception:
+            pass
 
     entries: list[SessionLogEntry] = []
-    for path in directory.glob("*.json"):
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except Exception:
+    seen_paths = set()
+
+    for dir_path in directories:
+        if not dir_path.exists():
             continue
+        for path in dir_path.glob("*.json"):
+            try:
+                resolved = path.resolve()
+                if resolved in seen_paths:
+                    continue
+                seen_paths.add(resolved)
+            except Exception:
+                pass
 
-        messages = data.get("messages") or []
-        if not isinstance(messages, list):
-            continue
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                continue
 
-        session_id = data.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
-            session_id = path.stem
+            messages = data.get("messages") or []
+            if not isinstance(messages, list):
+                continue
 
-        stat = path.stat()
-        entries.append(
-            SessionLogEntry(
-                path=path,
-                session_id=session_id,
-                session_start_time=data.get("session_start_time"),
-                session_end_time=data.get("session_end_time"),
-                model_name=data.get("model_name"),
-                message_count=len(messages),
-                preview=_first_user_preview(messages),
-                mtime=stat.st_mtime,
+            session_id = data.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                session_id = path.stem
+
+            stat = path.stat()
+            entries.append(
+                SessionLogEntry(
+                    path=path,
+                    session_id=session_id,
+                    session_start_time=data.get("session_start_time"),
+                    session_end_time=data.get("session_end_time"),
+                    model_name=data.get("model_name"),
+                    message_count=len(messages),
+                    preview=_first_user_preview(messages),
+                    mtime=stat.st_mtime,
+                )
             )
-        )
 
     entries.sort(key=lambda item: item.mtime, reverse=True)
     return entries

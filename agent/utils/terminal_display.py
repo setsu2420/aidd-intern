@@ -671,7 +671,7 @@ HELP_ROWS: tuple[tuple[str, str, str], ...] = (
     ("/clear", "", "Clear terminal and start fresh"),
     ("/undo", "", "Undo last turn"),
     ("/compact", "", "Compact context window"),
-    ("/resume", "[index|id|path]", "Pick up from ./session_logs"),
+    ("/resume", "[index|id|path]", "Pick up from ~/.aidd-intern/session_logs"),
     ("/model", "[id]", "Show available models or switch"),
     (
         "/effort",
