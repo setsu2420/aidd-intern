@@ -248,27 +248,58 @@ def _validated_hf_token(token: str | None) -> tuple[str | None, str | None]:
     return token, username
 
 
-async def _prompt_and_save_hf_token(prompt_session: Any) -> str:
-    """Prompt user for HF token, validate it, save via huggingface_hub.login(). Loops until valid."""
+def _model_needs_hf_token(model_name: str) -> bool:
+    """Return True only when the model routes through HF Router and needs an HF token.
+
+    Models with their own API key (anthropic/, openai/, bedrock/, openrouter/,
+    siliconflow/) and local models (ollama/, vllm/, lm_studio/, llamacpp/) do
+    NOT require an HF token for LLM inference.
+    """
+    from agent.core.local_models import is_local_model_id
+    from agent.core.openai_compatible_models import is_openai_compatible_model_id
+
+    _NON_HF_PREFIXES = (
+        "anthropic/",
+        "openai/",
+        "bedrock/",
+        "openrouter/",
+        "gemini/",
+        "dashscope/",
+    )
+    if model_name.startswith(_NON_HF_PREFIXES):
+        return False
+    if is_local_model_id(model_name):
+        return False
+    if is_openai_compatible_model_id(model_name):
+        return False
+    return True
+
+
+async def _prompt_and_save_hf_token(prompt_session: Any) -> str | None:
+    """Prompt user for HF token, validate it, save via huggingface_hub.login().
+
+    Returns the validated token, or ``None`` if the user chose to skip.
+    """
     from prompt_toolkit.formatted_text import HTML
     from huggingface_hub import HfApi, login
 
-    print("\nA Hugging Face token is required.")
-    print("Get one at: https://huggingface.co/settings/tokens\n")
+    print("\nA Hugging Face token enables HF Hub features (MCP, sandbox, jobs).")
+    print("Get one at: https://huggingface.co/settings/tokens")
+    print("(Press Enter to skip — you can still use non-HF models and local tools.)\n")
 
     while True:
         try:
             token = await prompt_session.prompt_async(
-                HTML("<b>Paste your HF token: </b>")
+                HTML("<b>Paste your HF token (or press Enter to skip): </b>")
             )
         except (EOFError, KeyboardInterrupt):
-            print("\nToken is required to continue.")
-            continue
+            print("\nSkipping HF token. Continuing without HF features.")
+            return None
 
         token = token.strip()
         if not token:
-            print("Token cannot be empty.")
-            continue
+            print("Skipping HF token. Continuing without HF features.")
+            return None
 
         # Validate token against the API
         try:
@@ -277,7 +308,7 @@ async def _prompt_and_save_hf_token(prompt_session: Any) -> str:
             username = user_info.get("name", "unknown")
             print(f"Token valid (user: {username})")
         except Exception:
-            print("Invalid token. Please try again.")
+            print("Invalid token. Please try again, or press Enter to skip.")
             continue
 
         # Save for future sessions
@@ -1774,8 +1805,6 @@ async def main(
 ):
     """Interactive chat with the agent"""
     _configure_litellm_runtime()
-    from agent.core.local_models import is_local_model_id
-    from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
     # Clear screen
     _clear_terminal()
@@ -1830,9 +1859,7 @@ async def main(
     # HF token — required for Hub-backed models/tools and sandbox tools, but
     # not for non-HF LLMs using only local filesystem tools.
     hf_token = resolve_hf_token_fn()
-    non_hf_model = is_local_model_id(
-        config.model_name
-    ) or is_openai_compatible_model_id(config.model_name)
+    needs_hf = _model_needs_hf_token(config.model_name) and not local_mode
 
     # 启动时强反馈校验
     if hf_token:
@@ -1846,13 +1873,26 @@ async def main(
             hf_token = None
             hf_user = None
 
-    if not hf_token and (not non_hf_model or not local_mode):
+    if not hf_token and needs_hf:
         hf_token = await _prompt_and_save_hf_token(prompt_session)
 
     hf_token, hf_user = _validated_hf_token(hf_token)
-    if not hf_token and (not non_hf_model or not local_mode):
-        hf_token = await _prompt_and_save_hf_token(prompt_session)
-        hf_token, hf_user = _validated_hf_token(hf_token)
+    if not hf_token and needs_hf:
+        # User skipped or token invalid — warn but continue.
+        from rich.console import Console as _Console
+
+        _Console().print(
+            "\n[yellow]⚠ No valid HF token. HF-specific features (Hub MCP, sandbox, jobs) "
+            "will be unavailable.[/yellow]"
+        )
+        _Console().print(
+            "[dim]Use [bold]/hf-token <your_token>[/bold] to set one later, "
+            "or set HF_TOKEN in your environment.[/dim]\n"
+        )
+        hf_user = None
+    elif not hf_token and not needs_hf:
+        # Non-HF model with local tools — proceed without HF token.
+        hf_user = None
 
     td = _terminal_display()
     banner_fn(
@@ -2102,8 +2142,6 @@ async def headless_main(
 
     logging.basicConfig(level=logging.WARNING)
     _configure_runtime_logging()
-    from agent.core.local_models import is_local_model_id
-    from agent.core.openai_compatible_models import is_openai_compatible_model_id
 
     load_config_fn = _get_load_config()
     resolve_hf_token_fn = _get_resolve_hf_token()
@@ -2118,23 +2156,20 @@ async def headless_main(
     local_mode = _is_local_tool_runtime(config)
 
     hf_token = resolve_hf_token_fn()
-    non_hf_model = is_local_model_id(
-        config.model_name
-    ) or is_openai_compatible_model_id(config.model_name)
-    if not hf_token and (not non_hf_model or not local_mode):
+    needs_hf = _model_needs_hf_token(config.model_name) and not local_mode
+    if not hf_token and needs_hf:
         print(
-            "ERROR: No HF token found. Set HF_TOKEN or run `hf auth login`.",
+            "WARNING: No HF token found. HF-specific features (MCP, sandbox, jobs) will be unavailable. "
+            "Set HF_TOKEN or run `hf auth login` to enable them.",
             file=sys.stderr,
         )
-        sys.exit(1)
 
     hf_token, hf_user = _validated_hf_token(hf_token)
-    if not hf_token and (not non_hf_model or not local_mode):
+    if not hf_token and needs_hf:
         print(
-            "ERROR: HF token is missing or invalid. Set HF_TOKEN or run `hf auth login`.",
+            "WARNING: HF token is missing or invalid. Continuing without HF features.",
             file=sys.stderr,
         )
-        sys.exit(1)
 
     if hf_token:
         print("HF token loaded", file=sys.stderr)
