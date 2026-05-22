@@ -387,4 +387,56 @@ def test_binder_design_is_registered_for_llm():
         "export_skill"
         in specs["binder_design"].parameters["properties"]["operation"]["enum"]
     )
+    assert (
+        "setup_tools"
+        in specs["binder_design"].parameters["properties"]["operation"]["enum"]
+    )
+    assert (
+        "run_diagnostics"
+        in specs["binder_design"].parameters["properties"]["operation"]["enum"]
+    )
     assert "skill_name" in specs["binder_design"].parameters["properties"]
+
+
+@pytest.mark.asyncio
+async def test_binder_design_run_diagnostics():
+    text, ok = await binder_design_handler(
+        {
+            "operation": "run_diagnostics",
+        }
+    )
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] in ["healthy", "degraded"]
+    assert "report" in payload
+
+
+@pytest.mark.asyncio
+async def test_binder_design_setup_tools_mock(monkeypatch):
+    class FakeProcess:
+        def __init__(self):
+            self.returncode = 0
+
+        async def communicate(self):
+            return b"mocked stdout", b"mocked stderr"
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProcess()
+
+    import asyncio
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    text, ok = await binder_design_handler(
+        {
+            "operation": "setup_tools",
+            "tools": ["bindcraft", "pxdesign"],
+        }
+    )
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] == "completed"
+    assert len(payload["results"]) == 2
+    assert payload["results"][0]["tool"] == "bindcraft_mcp"
+    assert payload["results"][0]["exit_code"] == 0
+    assert payload["results"][0]["stdout"] == "mocked stdout"

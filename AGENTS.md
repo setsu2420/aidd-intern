@@ -7,22 +7,14 @@
   built-in tools.
 - `backend/`: FastAPI web backend. It owns hosted sessions, auth, quotas,
   dataset uploads, KPI scheduling, and the REST/SSE/WebSocket API used by the UI.
-- `frontend/`: Vite + React + TypeScript + MUI web app. It uses Zustand for
-  session/UI state and the AI SDK transport layer for chat streaming.
 - `scripts/`: local dev launcher, ProteinMCP launch/setup helpers, KPI/SFT
   utilities, sandbox cleanup, and backlog tooling.
 - `tests/`: pytest unit and integration tests.
 - `evals/protein_design/`: protein-design benchmark scaffold.
-- `src/`: TypeScript CLI source for the `aidd-intern` npm package. Install
-  globally via `npm install -g aidd-intern`. Three tiers: `aidd-intern smoke`
-  (no LLM), `aidd-intern integration` (needs LLM), `aidd-intern eval`
-  (benchmarks). Build with `npm run build`, link with `npm link`.
 - `fixtures/`: evaluation test prompts for the CLI harness.
 - `docs/`: architecture, context-management, multi-agent, and workflow
   design notes.
-- `configs/`: shared CLI/frontend defaults. Keep
-  `cli_agent_config.json` and `frontend_agent_config.json` aligned when the
-  shared model, MCP, or workflow defaults change.
+- `configs/`: shared CLI defaults. Keep `cli_agent_config.json` updated.
 - `agent/main.py` owns the CLI/TUI entrypoint; `agent/utils/terminal_display.py`
   owns terminal rendering; `agent/core/agent_loop.py` owns the runtime loop and
   session startup.
@@ -31,9 +23,6 @@
 
 - Python uses `uv`; install project dependencies with `uv sync --extra dev`.
 - Install the editable CLI when needed with `uv tool install -e .`.
-- Frontend dependencies live under `frontend/`; run `npm ci` if
-  `frontend/node_modules` is missing. Prefer `npm ci` over `npm install` to
-  avoid lockfile metadata churn.
 - Keep local secrets in root `.env` or shell exports. Common variables:
   `HF_TOKEN`, `GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `OPENROUTER_API_KEY`, `SILICONFLOW_API_KEY`,
@@ -45,27 +34,15 @@
 
 ## Local Dev Servers
 
-- Preferred all-in-one launcher: `./scripts/dev.sh`. It starts the backend and
-  frontend and installs frontend dependencies if missing.
-- Frontend only: from `frontend/`, run `npm ci` if needed, then `npm run dev`.
+- Preferred all-in-one launcher: `./scripts/dev.sh`. It starts the backend.
 - Backend only: from `backend/`, run
   `uv run python -m uvicorn main:app --host ::1 --port 7860`.
-- Frontend URL: `http://localhost:5173/`.
 - Backend health check: `curl -g http://[::1]:7860/api`.
-- Frontend proxy health check: `curl http://localhost:5173/api`.
 
 Notes:
 
-- Vite proxies `/api` and `/auth` to `http://[::1]:7860`; `/api` also proxies
-  WebSocket connections.
-- `scripts/dev.sh` defaults to backend `::1:7860` and frontend
-  `localhost:5173`. Override with `AIDD_INTERN_BACKEND_HOST`,
-  `AIDD_INTERN_BACKEND_PORT`, `AIDD_INTERN_FRONTEND_HOST`, or
-  `AIDD_INTERN_FRONTEND_PORT`.
-- Binding the backend to `::1` avoids conflicts when another process owns
-  `127.0.0.1:7860`, while still letting Vite resolve the backend cleanly.
-- Production/HF Space runs `backend/start.sh` and serves the built frontend
-  from `static/` when present.
+- `scripts/dev.sh` defaults to backend `::1:7860`. Override with `AIDD_INTERN_BACKEND_HOST`,
+  `AIDD_INTERN_BACKEND_PORT`.
 
 ## CLI And Runtime
 
@@ -112,12 +89,6 @@ uv run pytest
 ```
 
 - If formatting fails, run `uv run ruff format .`, then re-run Ruff and tests.
-- For frontend changes, also run from `frontend/`:
-
-```bash
-npm run lint
-npm run build
-```
 
 - For workflow changes, include focused tests such as:
 
@@ -137,18 +108,6 @@ uv run python evals/protein_design/runner.py \
 - CI runs `uv sync --locked --extra dev`, `uv run ruff check .`,
   `uv run ruff format --check .`, and `uv run pytest` on Python 3.12.
 
-- For harness/CLI changes, run from project root:
-
-```bash
-npm run build                # Build CLI with tsup
-npm run lint                 # TypeScript type check
-npm test                     # Unit tests (no backend needed)
-aidd-intern smoke            # Smoke tests (backend must be running)
-aidd-intern integration      # Integration tests (needs LLM API key)
-aidd-intern eval             # Evaluation benchmarks
-aidd-intern eval --judge     # With LLM-as-judge scoring
-```
-
 ## Code Boundaries
 
 - Generic agent runtime behavior belongs in `agent/core/`.
@@ -156,14 +115,9 @@ aidd-intern eval --judge     # With LLM-as-judge scoring
 - CLI behavior belongs in `agent/main.py`; web session orchestration belongs in
   `backend/session_manager.py`.
 - Backend route changes generally belong under `backend/routes/`.
-- Frontend chat transport/event mapping belongs in `frontend/src/lib/`; session
-  and UI state belong in `frontend/src/store/`; reusable UI belongs under
-  `frontend/src/components/`.
 - Long-running scientific/GPU work should remain behind subprocess, MCP,
   container, sandbox, or HF Jobs boundaries. Do not import heavy GPU stacks into
   the FastAPI process.
-- When adding or changing MCP server defaults, keep CLI and frontend config
-  files aligned unless there is an intentional surface-specific difference.
 - Environment substitutions like `${VAR}` are resolved from the environment and
   `.env` by the config loader.
 

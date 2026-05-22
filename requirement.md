@@ -71,7 +71,6 @@ planning.
 Required checks for Binder-related changes:
 
 ```bash
-npm test
 uv run pytest tests/unit/test_binder_design_tool.py
 uv run pytest tests/unit/test_mcp_startup.py
 uv run pytest tests/unit/test_config.py
@@ -80,8 +79,6 @@ uv run pytest tests/unit/test_config.py
 Run broader checks when prompts, docs, or startup behavior change:
 
 ```bash
-npm run lint
-npm run build
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest

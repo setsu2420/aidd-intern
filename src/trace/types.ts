@@ -1,5 +1,0 @@
-export interface Trace { sessionId: string; startTime: number; endTime: number; turns: Turn[]; toolCalls: ToolCallRecord[]; errors: ErrorRecord[]; metrics: TraceMetrics; }
-export interface Turn { index: number; userMessage: string; assistantResponse: string | null; toolCalls: ToolCallRecord[]; thinkingContent: string | null; firstEventLatency: number; totalDuration: number; eventCount: number; }
-export interface ToolCallRecord { toolCallId: string; toolName: string; arguments: Record<string, unknown>; output: string | null; success: boolean; approvalRequired: boolean; duration: number; timestamp: number; }
-export interface ErrorRecord { message: string; type: string; timestamp: number; turnIndex: number | null; }
-export interface TraceMetrics { totalTurns: number; totalDuration: number; avgTurnDuration: number; totalToolCalls: number; successfulToolCalls: number; toolSuccessRate: number; errorCount: number; doomLoopDetected: boolean; approvalRequests: number; compactionCount: number; avgFirstEventLatency: number; totalEvents: number; }

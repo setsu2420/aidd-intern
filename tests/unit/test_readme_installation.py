@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 from io import StringIO
 from pathlib import Path
@@ -9,11 +8,6 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_REPO_URL = "https://github.com/setsu2420/aidd-intern"
 PUBLIC_CLONE_URL = f"{PUBLIC_REPO_URL}.git"
-PUBLIC_NPM_REPO_URL = f"git+{PUBLIC_CLONE_URL}"
-NPM_GITHUB_INSTALL_SPEC = (
-    "https://github.com/setsu2420/aidd-intern/archive/refs/heads/"
-    "codex/aidd-prep-update-20260520.tar.gz"
-)
 LEGACY_REPO_URL = "https://github.com/huggingface/aidd-intern"
 LEGACY_SSH_CLONE_URL = "git@github.com:huggingface/aidd-intern.git"
 README_FILES = [
@@ -51,9 +45,6 @@ def test_readme_quick_start_uses_public_https_clone_url():
         print("STEP 3: Checking source install commands stay in the project directory")
         assert install_sequence in text
 
-        print("STEP 3b: Checking npm install uses the GitHub package source")
-        assert f"npm install -g {NPM_GITHUB_INSTALL_SPEC}" in text
-
         print("STEP 4: Checking the old SSH-only clone command is absent")
         assert LEGACY_SSH_CLONE_URL not in text
 
@@ -68,7 +59,6 @@ def test_readme_quick_start_uses_public_https_clone_url():
 def test_public_repository_links_are_aligned():
     paths = [
         *README_FILES,
-        PROJECT_ROOT / "package.json",
         PROJECT_ROOT / "agent" / "core" / "hub_artifacts.py",
         PROJECT_ROOT / "agent" / "core" / "session_uploader.py",
     ]
@@ -79,11 +69,7 @@ def test_public_repository_links_are_aligned():
         assert PUBLIC_REPO_URL in text
         assert LEGACY_REPO_URL not in text
 
-    print("STEP 2: Checking package metadata repository URL")
-    package_json = json.loads((PROJECT_ROOT / "package.json").read_text())
-    assert package_json["repository"]["url"] == PUBLIC_NPM_REPO_URL
-
-    print("STEP 3: Checking backlog tooling default GitHub repo")
+    print("STEP 2: Checking backlog tooling default GitHub repo")
     backlog_script = (PROJECT_ROOT / "scripts" / "prioritize_backlog.py").read_text(
         encoding="utf-8"
     )
@@ -100,13 +86,7 @@ def test_english_readme_documents_local_update_and_env_setup():
     print("STEP 3: Checking local updates use the non-destructive script")
     assert "## Local Updates" in text
     assert "scripts/update-local.sh" in text
-    assert f"npm install -g {NPM_GITHUB_INSTALL_SPEC}" in text
-    assert "npm install -g aidd-intern@latest" in text
-    assert "returns\n404" in text
-    assert "aidd-intern update --dry-run" in text
-    assert "npm run update:local" in text
     assert "git pull --ff-only origin <current-branch>" in text
-    assert "scripts/update-local.sh --with-frontend" in text
 
     print("STEP 4: Checking the post-install doctor command is documented")
     assert "aidd-intern --doctor" in text
@@ -116,15 +96,10 @@ def test_english_readme_documents_local_update_and_env_setup():
         "openrouter/openai/gpt-5.2": "OPENROUTER_API_KEY",
         "openai/gpt-5.5": "OPENAI_API_KEY",
         "anthropic/claude-opus-4-6": "ANTHROPIC_API_KEY",
-        "siliconflow/deepseek-ai/DeepSeek-V4-Flash": "SILICONFLOW_API_KEY",
     }
     for model_id, env_var in expected_pairs.items():
         assert model_id in text
         assert env_var in text
-
-    print("STEP 6: Checking npm LLM configuration guide is documented")
-    assert "aidd-intern configure-llm openrouter" in text
-    assert "aidd-intern configure-llm local" in text
 
 
 def test_readmes_document_aidd_preparation_stage():
@@ -199,18 +174,9 @@ def test_localized_readmes_document_env_template_update_and_doctor():
         print("STEP 3: Checking local update workflow is documented")
         assert update_heading in text
         assert "scripts/update-local.sh" in text
-        assert f"npm install -g {NPM_GITHUB_INSTALL_SPEC}" in text
-        assert "npm install -g aidd-intern@latest" in text
-        assert "aidd-intern update --dry-run" in text
-        assert "npm run update:local" in text
-        assert "scripts/update-local.sh --with-frontend" in text
 
         print("STEP 4: Checking doctor command is documented")
         assert "aidd-intern --doctor" in text
-
-        print("STEP 5: Checking npm LLM configuration guide is documented")
-        assert "aidd-intern configure-llm openrouter" in text
-        assert "aidd-intern configure-llm local" in text
 
 
 def test_env_example_has_real_configuration_keys_without_token_values():
@@ -256,10 +222,9 @@ def test_update_script_is_non_destructive_and_prints_steps():
     print("STEP 3: Checking dependency and CLI refresh commands")
     assert "uv sync --extra dev" in text
     assert "uv tool install -e ." in text
-    assert "npm ci" in text
 
     print("STEP 4: Checking the script prints diagnostic steps")
-    for step in range(1, 6):
+    for step in range(1, 5):
         assert f"STEP {step}:" in text
 
     print("STEP 5: Checking destructive git commands are absent")
@@ -284,12 +249,11 @@ def test_update_script_help_runs_without_side_effects():
     )
 
     print(f"STEP 2: stdout = {result.stdout.strip()}")
-    assert "Usage: scripts/update-local.sh [--with-frontend]" in result.stdout
+    assert "Usage: scripts/update-local.sh" in result.stdout
 
-    print("STEP 3: Checking help documents remote, branch, and frontend options")
+    print("STEP 3: Checking help documents remote and branch options")
     assert "AIDD_INTERN_UPDATE_REMOTE" in result.stdout
     assert "AIDD_INTERN_UPDATE_BRANCH" in result.stdout
-    assert "--with-frontend" in result.stdout
 
     print("STEP 4: Checking help does not emit errors")
     assert result.stderr == ""
@@ -333,28 +297,6 @@ def test_proteinmcp_setup_uses_http11_for_github_git_operations():
     assert "git -c http.version=HTTP/1.1 clone --depth 1" in text
 
 
-def test_package_json_exposes_npm_local_update_scripts():
-    print("STEP 1: Reading package.json")
-    package_json = json.loads((PROJECT_ROOT / "package.json").read_text())
-
-    print("STEP 2: Checking npm source checkout update scripts")
-    scripts = package_json["scripts"]
-    assert scripts["update:local"] == "bash scripts/update-local.sh"
-    assert scripts["update:local:frontend"] == (
-        "bash scripts/update-local.sh --with-frontend"
-    )
-    assert scripts["update:npm:dry-run"] == "node src/cli.ts update --dry-run"
-    assert scripts["prepack"] == "npm run build"
-    assert "prepare" not in scripts
-
-    print("STEP 3: Checking git installs use a minimal runtime dependency set")
-    assert package_json["dependencies"] == {"commander": "^13.1.0"}
-
-    cli_bundle = (PROJECT_ROOT / "dist" / "cli.js").read_text(encoding="utf-8")
-    for package_name in ["chalk", "dotenv", "zod"]:
-        assert f'from "{package_name}"' not in cli_bundle
-
-
 def test_doctor_module_documents_each_diagnostic_step():
     print("STEP 1: Reading agent/core/doctor.py")
     text = DOCTOR_MODULE.read_text(encoding="utf-8")
@@ -367,7 +309,6 @@ def test_doctor_module_documents_each_diagnostic_step():
         "Checking Google Search configuration",
         "Checking AIDD-Intern version",
         "Checking local update helper",
-        "Checking optional frontend dependencies",
         "Checking optional ProteinMCP setting",
     ]
 

@@ -690,6 +690,8 @@ BINDER_DESIGN_TOOL_SPEC = {
                     "inspect_outputs",
                     "rank_candidates",
                     "export_skill",
+                    "setup_tools",
+                    "run_diagnostics",
                 ],
                 "description": "Binder-design workflow operation to run.",
             },
@@ -907,6 +909,96 @@ async def binder_design_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
                 True,
             )
 
+        if operation == "setup_tools":
+            import asyncio
+
+            project_root = Path(__file__).resolve().parents[2]
+            script_path = project_root / "scripts" / "setup-proteinmcp-local.sh"
+            if not script_path.exists():
+                return (
+                    _format_result(
+                        {
+                            "status": "error",
+                            "message": f"Setup script not found at {script_path}",
+                        }
+                    ),
+                    False,
+                )
+
+            requested_tools = arguments.get("tools") or ["all"]
+            tool_mapping = {
+                "bindcraft": "bindcraft_mcp",
+                "bindcraft_mcp": "bindcraft_mcp",
+                "boltzgen": "boltzgen_mcp",
+                "boltzgen_mcp": "boltzgen_mcp",
+                "pxdesign": "pxdesign_mcp",
+                "pxdesign_mcp": "pxdesign_mcp",
+                "all": "all",
+            }
+
+            targets = []
+            for t in requested_tools:
+                mapped = tool_mapping.get(t.lower())
+                if mapped:
+                    targets.append(mapped)
+                else:
+                    targets.append(t)
+
+            targets = list(dict.fromkeys(targets))
+
+            results = []
+            success = True
+            for target in targets:
+                proc = await asyncio.create_subprocess_exec(
+                    "bash",
+                    str(script_path),
+                    target,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(project_root),
+                )
+                stdout, stderr = await proc.communicate()
+                ret = proc.returncode
+
+                results.append(
+                    {
+                        "tool": target,
+                        "exit_code": ret,
+                        "stdout": stdout.decode("utf-8", errors="replace"),
+                        "stderr": stderr.decode("utf-8", errors="replace"),
+                    }
+                )
+                if ret != 0:
+                    success = False
+
+            return (
+                _format_result(
+                    {
+                        "status": "completed" if success else "failed",
+                        "results": results,
+                    }
+                ),
+                success,
+            )
+
+        if operation == "run_diagnostics":
+            import io
+            from agent.core.doctor import run_doctor
+
+            buf = io.StringIO()
+            exit_code = run_doctor(output=buf)
+            report = buf.getvalue()
+            return (
+                _format_result(
+                    {
+                        "status": "healthy" if exit_code == 0 else "degraded",
+                        "exit_code": exit_code,
+                        "report": report,
+                    }
+                ),
+                True,
+            )
+
         return (
             _format_result(
                 {
@@ -914,7 +1006,7 @@ async def binder_design_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
                     "message": (
                         "Unknown or missing operation. Use plan_campaign, "
                         "create_project, inspect_outputs, rank_candidates, "
-                        "or export_skill."
+                        "export_skill, setup_tools, or run_diagnostics."
                     ),
                 }
             ),

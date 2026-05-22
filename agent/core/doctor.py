@@ -70,10 +70,7 @@ def run_doctor(*, output: TextIO | None = None) -> int:
     _print_step(stream, 7, "Checking local update helper")
     checks.append(_check_update_helper())
 
-    _print_step(stream, 8, "Checking optional frontend dependencies")
-    checks.append(_check_frontend_dependencies())
-
-    _print_step(stream, 9, "Checking optional ProteinMCP setting")
+    _print_step(stream, 8, "Checking optional ProteinMCP setting")
     checks.append(_check_proteinmcp_setting())
 
     print("\nDoctor summary:", file=stream)
@@ -121,7 +118,6 @@ def _check_commands() -> list[DoctorCheck]:
     checks = [
         _command_check("git", required=True),
         _command_check("uv", required=True),
-        _command_check("npm", required=False),
     ]
     return checks
 
@@ -132,8 +128,6 @@ def _command_check(command: str, *, required: bool) -> DoctorCheck:
         status: CheckStatus = "fail" if required else "warn"
         detail = "not found in PATH"
         fix = f"Install {command} and reopen your shell."
-        if command == "npm":
-            fix = "Install Node.js 22+ only if you work on the frontend or npm harness."
         return DoctorCheck(status, command, detail, fix)
 
     version = _command_version(command)
@@ -310,21 +304,6 @@ def _check_version() -> DoctorCheck:
         "version",
         result.detail,
         "Run scripts/update-local.sh from a source checkout when you want to update.",
-    )
-
-
-def _check_frontend_dependencies() -> DoctorCheck:
-    package_json = PROJECT_ROOT / "frontend" / "package.json"
-    node_modules = PROJECT_ROOT / "frontend" / "node_modules"
-    if not package_json.exists():
-        return DoctorCheck("ok", "frontend", "frontend package is not present")
-    if node_modules.exists():
-        return DoctorCheck("ok", "frontend", "frontend/node_modules exists")
-    return DoctorCheck(
-        "warn",
-        "frontend",
-        "frontend dependencies are not installed",
-        "Run scripts/update-local.sh --with-frontend or cd frontend && npm ci.",
     )
 
 

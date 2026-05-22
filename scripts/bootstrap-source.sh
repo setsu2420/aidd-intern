@@ -4,7 +4,6 @@ set -Eeuo pipefail
 repo_url="https://github.com/setsu2420/aidd-intern.git"
 target_dir="aidd-intern"
 ref="${AIDD_INTERN_BOOTSTRAP_REF:-main}"
-with_frontend=0
 install_runtime=1
 
 usage() {
@@ -16,7 +15,6 @@ Clone or download AIDD-Intern and install the editable Python CLI.
 Options:
   --dir DIR         Target checkout directory (default: aidd-intern)
   --ref REF         Branch or tag to clone/download (default: main)
-  --with-frontend   Also run npm ci in frontend/
   --no-install      Only create the source checkout
   -h, --help        Show this help
 
@@ -43,10 +41,6 @@ while [[ $# -gt 0 ]]; do
         exit 2
       fi
       shift 2
-      ;;
-    --with-frontend)
-      with_frontend=1
-      shift
       ;;
     --no-install)
       install_runtime=0
@@ -96,9 +90,6 @@ fi
 
 if [[ "$install_runtime" == "1" ]]; then
   require_command uv
-fi
-if [[ "$with_frontend" == "1" ]]; then
-  require_command npm
 fi
 
 tmp_dir="$(mktemp -d)"
@@ -160,14 +151,7 @@ else
   cp .env.example .env
 fi
 
-if [[ "$with_frontend" == "1" ]]; then
-  echo "STEP 5: Syncing frontend dependencies"
-  (cd frontend && npm ci)
-else
-  echo "STEP 5: Skipping frontend dependencies; pass --with-frontend to run npm ci"
-fi
-
-echo "STEP 6: Verifying the installed CLI is on PATH"
+echo "STEP 5: Verifying the installed CLI is on PATH"
 if ! command -v aidd-intern >/dev/null 2>&1; then
   echo "warning: aidd-intern is not on PATH after installation" >&2
   echo "hint: add uv's tool bin directory to PATH: uv tool dir --bin" >&2

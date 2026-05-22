@@ -398,10 +398,26 @@ def print_tool_call(tool_name: str, args_preview: str) -> None:
     f.flush()
 
 
-def print_tool_output(output: str, success: bool, truncate: bool = True) -> None:
+def print_tool_duration(tool_name: str, success: bool, duration_s: float) -> None:
+    if duration_s <= 0:
+        return
+    style = "tool.ok" if success else "tool.fail"
+    icon = "✔" if success else "✖"
+    _console.print(
+        f"{_I}  [{style}]{icon} {tool_name} completed in {duration_s:.2f}s[/{style}]"
+    )
+
+
+def print_tool_output(
+    output: str, success: bool, truncate: bool = True, duration_s: float = 0.0
+) -> None:
     if truncate:
         output = _truncate(output, max_lines=10)
     style = "tool.ok" if success else "tool.fail"
+
+    if duration_s > 0:
+        _console.print(f"[{style}]{_I}  [took {duration_s:.2f}s][/{style}]")
+
     # Indent each line of tool output
     indented = "\n".join(f"{_I}  {line}" for line in output.split("\n"))
     _console.print(f"[{style}]{indented}[/{style}]")

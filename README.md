@@ -70,8 +70,7 @@ Hugging Face Jobs.
   Foldseek, and campaign memory tools are registered by default. Heavy local MCP
   launchers still require explicit setup and opt-in.
 - Local CLI and web UI: the Python CLI runs interactive or headless sessions;
-  the FastAPI + React app provides hosted browser sessions; the Node.js package
-  contains smoke, integration, and evaluation harnesses.
+  the FastAPI web app provides hosted browser sessions.
 - Session tracing: sessions can be saved as Claude Code compatible JSONL and
   uploaded to a private Hugging Face dataset for review.
 
@@ -81,7 +80,6 @@ Hugging Face Jobs.
 
 -   Python 3.11+
 -   [uv](https://github.com/astral-sh/uv) (Fast Python package manager)
--   Node.js 22+ (Optional: only if you work on the frontend or Node harness)
 -   Git (For source checkout)
 
 ### Installation
@@ -134,20 +132,12 @@ Before your first real LLM call, you must configure your API keys. Edit `.env` a
 - `anthropic/claude-opus-4-6` requires `ANTHROPIC_API_KEY`
 - `siliconflow/deepseek-ai/DeepSeek-V4-Flash` requires `SILICONFLOW_API_KEY`
 
-The Node package harness can help configure provider settings interactively without manually editing files:
-
-```bash
-aidd-intern configure-llm
-aidd-intern configure-llm openrouter
-aidd-intern configure-llm local
-```
-
 The config setup follows the pattern of modern developer assistants: select a provider, set a default model, configure its specific credentials in `.env`, and check the status using a doctor command before your first session.
 
 Run the diagnostic to verify your setup:
 
 ```bash
-aidd-intern doctor
+aidd-intern --doctor
 ```
 
 ### Usage
@@ -173,30 +163,10 @@ aidd-intern configure-llm openrouter
 
 ## Local Updates
 
-If you installed the Node package globally via GitHub, update it using:
-
-```bash
-npm install -g https://github.com/setsu2420/aidd-intern/archive/refs/heads/codex/aidd-prep-update-20260520.tar.gz
-```
-
-Note: Trying to run `npm install -g aidd-intern@latest` currently returns
-404 because the package is not yet published to the public npm registry.
-
-The Node CLI also provides interactive update entries that print progress step-by-step:
-
-```bash
-aidd-intern update
-aidd-intern update --check
-aidd-intern update --dry-run
-```
-
-`aidd-intern update` only refreshes the globally installed Node harness package; it does not touch your source checkout, nor does it update your Python runtime managed via `uv tool install -e .`. If your `aidd-intern` command currently points to the Python CLI, use the `npm run update:local` source-checkout update path below instead.
-
 For a source checkout update, run in your repository root:
 
 ```bash
 scripts/update-local.sh
-npm run update:local
 ```
 
 This script will print and execute:
@@ -204,18 +174,30 @@ This script will print and execute:
 1. `git pull --ff-only origin <current-branch>`
 2. `uv sync --extra dev`
 3. `uv tool install -e .`
-4. Optional frontend dependency refresh with `npm ci` in `frontend/`
-5. `command -v aidd-intern`
-
-To sync frontend dependencies as well, run:
-
-```bash
-scripts/update-local.sh --with-frontend
-npm run update:local:frontend
-node src/cli.ts update --checkout --with-frontend
-```
+4. `command -v aidd-intern`
 
 `git pull --ff-only` will fail if your local branch has diverged from the remote, rather than silently creating a merge commit. Set `AIDD_INTERN_UPDATE_REMOTE` or `AIDD_INTERN_UPDATE_BRANCH` only if you explicitly need to update from a different remote or branch.
+
+## High-Performance Rust Core (Optional Acceleration)
+
+To address performance bottlenecks and Python GIL (Global Interpreter Lock) contention when saving large Trace logs at high frequency in multi-agent environments, AIDD-Intern integrates an optional Rust-based C extension (`aidd_intern_core`) under `rust_core/` using **PyO3 + Maturin**.
+
+This library releases the Python GIL during writing and utilizes operation-system-level atomic `rename` operations (via `tempfile`) to persist JSON data. It delivers a **22x+ write performance boost**, significantly improving multi-agent concurrency responsiveness.
+
+### Compile and Install
+
+If your system has a Rust compiler toolchain (`cargo`), the local update script `scripts/update-local.sh` will **automatically detect and compile** this module during the update.
+
+Alternatively, you can manually build and install it into your virtual environment:
+
+```bash
+cd rust_core
+uv run maturin develop
+```
+
+### Fallback-Safe Design
+
+If a Rust compiler is not installed or when running in lean production environments, the runtime will **automatically fall back to the native Python engine** seamlessly. This process is fully transparent, ensuring 100% backward compatibility and normal operation.
 
 ## Local Diagnostics
 
@@ -227,9 +209,9 @@ aidd-intern --doctor
 ```
 
 The diagnostic is read-only. It prints each step, checks Python, `git`, `uv`,
-optional `npm`, config loading, the selected model's expected API key, Google
-Search credentials, the GitHub version status, the update helper, optional
-frontend dependencies, and the ProteinMCP opt-in flag.
+config loading, the selected model's expected API key, Google Search
+credentials, the GitHub version status, the update helper, and the
+ProteinMCP opt-in flag.
 
 This follows the same practical setup pattern used by Hermes Agent: install,
 configure one provider, run a doctor-style check, then verify a simple chat
@@ -292,7 +274,7 @@ AIDD_INTERN_DEFAULT_MODEL_ID=openrouter/openai/gpt-5.2
 AIDD_INTERN_MODELS_CONFIG=configs/models.json
 ```
 
-The npm harness can print provider-specific setup steps without editing files:
+The CLI tool can print provider-specific setup steps without editing files:
 
 ```bash
 aidd-intern configure-llm
@@ -475,7 +457,7 @@ aidd-intern --no-stream "disable streaming"
 
 ## Web App
 
-Start backend and frontend together:
+Start the backend service:
 
 ```bash
 ./scripts/dev.sh
@@ -483,21 +465,13 @@ Start backend and frontend together:
 
 Default URLs:
 
-- Frontend: `http://localhost:5173/`
 - Backend health: `curl -g http://[::1]:7860/api`
-- Frontend proxy health: `curl http://localhost:5173/api`
 
-Start them separately:
+Or start separately:
 
 ```bash
 cd backend
 uv run python -m uvicorn main:app --host ::1 --port 7860
-```
-
-```bash
-cd frontend
-npm ci
-npm run dev
 ```
 
 ## Tools And MCP
@@ -505,7 +479,6 @@ npm run dev
 Default config files:
 
 - CLI: [configs/cli_agent_config.json](configs/cli_agent_config.json)
-- Web: [configs/frontend_agent_config.json](configs/frontend_agent_config.json)
 
 User-level CLI config:
 
@@ -598,13 +571,11 @@ uv run pytest tests/unit/test_mcp_startup.py -q
   switching, tool routing, session persistence, and built-in tools.
 - `backend/`: FastAPI backend for hosted sessions, auth, quotas, uploads, KPI
   scheduling, and REST/SSE/WebSocket APIs.
-- `frontend/`: Vite + React + TypeScript + MUI web app.
-- `configs/`: shared CLI/frontend defaults, model catalog, and MCP settings.
+- `configs/`: shared CLI defaults, model catalog, and MCP settings.
 - `scripts/`: local dev launcher, ProteinMCP setup/run helpers, KPI/SFT tools,
   sandbox cleanup, and backlog utilities.
-- `src/`: Node.js CLI package for smoke, integration, and evaluation harnesses.
-- `fixtures/`: evaluation prompts for the Node CLI.
-- `tests/`: Python and Node tests.
+- `fixtures/`: evaluation test prompts for the CLI harness.
+- `tests/`: Python pytest unit and integration tests.
 - `evals/protein_design/`: protein-design benchmark scaffold.
 - `docs/`: architecture, context management, multi-agent, binder workflow, and
   protein-design guides.
@@ -625,23 +596,6 @@ Format when needed:
 uv run ruff format .
 uv run ruff check .
 uv run ruff format --check .
-```
-
-Frontend checks:
-
-```bash
-cd frontend
-npm run lint
-npm run build
-```
-
-Node CLI harness:
-
-```bash
-npm run build
-npm run lint
-npm test
-npm pack --dry-run
 ```
 
 Focused checks:

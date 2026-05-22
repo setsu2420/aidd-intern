@@ -11,6 +11,13 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+try:
+    import aidd_intern_core
+
+    RUST_AVAILABLE = True
+except ImportError:
+    RUST_AVAILABLE = False
+
 import litellm
 from litellm import Message
 
@@ -649,10 +656,25 @@ class Session:
 
             # Atomic-ish write: stage to .tmp then rename so a crash mid-write
             # doesn't leave a truncated JSON that breaks the retry scanner.
-            tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
-            with open(tmp_path, "w") as f:
-                json.dump(trajectory, f, indent=2)
-            tmp_path.replace(filepath)
+            if RUST_AVAILABLE:
+                try:
+                    # Offload the atomic file write and flush to Rust to release GIL
+                    content_bytes = json.dumps(trajectory, indent=2).encode("utf-8")
+                    aidd_intern_core.save_json_atomic(str(filepath), content_bytes)
+                except Exception as rust_err:
+                    logger.warning(
+                        "Rust atomic write failed, falling back to python: %s",
+                        rust_err,
+                    )
+                    tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
+                    with open(tmp_path, "w") as f:
+                        json.dump(trajectory, f, indent=2)
+                    tmp_path.replace(filepath)
+            else:
+                tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
+                with open(tmp_path, "w") as f:
+                    json.dump(trajectory, f, indent=2)
+                tmp_path.replace(filepath)
 
             return str(filepath)
         except Exception as e:

@@ -100,6 +100,22 @@ PROVIDER_GUIDES = {
             "Start the local inference server first; AIDD-Intern does not load model weights itself."
         ],
     },
+    "google": {
+        "name": "Google Gemini",
+        "models": ["gemini/gemini-2.5-pro", "gemini/gemini-2.5-flash"],
+        "requiredEnv": ["GEMINI_API_KEY"],
+        "notes": [
+            "Use gemini/<model> ids to access Google's Gemini endpoint directly."
+        ],
+    },
+    "aliyun": {
+        "name": "Aliyun DashScope",
+        "models": ["dashscope/qwen-max", "dashscope/qwen-plus"],
+        "requiredEnv": ["DASHSCOPE_API_KEY"],
+        "notes": [
+            "Use dashscope/<model> ids to access Aliyun DashScope (Qwen) models."
+        ],
+    },
 }
 
 
@@ -175,6 +191,8 @@ def needs_interactive_setup(args) -> bool:
         "ANTHROPIC_API_KEY",
         "SILICONFLOW_API_KEY",
         "LOCAL_LLM_API_KEY",
+        "GEMINI_API_KEY",
+        "DASHSCOPE_API_KEY",
     ]
 
     has_env_key = any(os.environ.get(k) for k in common_keys)
@@ -223,10 +241,12 @@ def run_interactive_first_run_setup() -> None:
     print("  [3] OpenAI      - Directly use official GPT-4o / gpt-4o-mini models")
     print("  [4] Anthropic   - Directly use official Claude 3.5 Sonnet / Haiku")
     print("  [5] Local/Custom - Use local models via Ollama, vLLM, or custom servers")
+    print("  [6] Google      - Directly use Google's Gemini 2.5 Pro / Flash models")
+    print("  [7] Aliyun      - Directly use Aliyun DashScope (Qwen Max / Plus) models")
     print("")
 
     choice = ""
-    while choice not in {"1", "2", "3", "4", "5"}:
+    while choice not in {"1", "2", "3", "4", "5", "6", "7"}:
         try:
             choice = input("Select your provider (1-5, default 1): ").strip()
             if choice == "":
@@ -273,6 +293,20 @@ def run_interactive_first_run_setup() -> None:
             "api_key_name": "LOCAL_LLM_API_KEY",
             "prompt_msg": "Enter your local/custom API Key (or press Enter if none): ",
             "note": "(Tip: Specify your local model ID; endpoint URL can be configured in .env later)",
+        },
+        "6": {
+            "name": "Google",
+            "default_model": "gemini/gemini-2.5-pro",
+            "api_key_name": "GEMINI_API_KEY",
+            "prompt_msg": "Enter your Google Gemini API Key (AIzaSy...): ",
+            "note": "(Tip: You can obtain your key at https://aistudio.google.com)",
+        },
+        "7": {
+            "name": "Aliyun (DashScope)",
+            "default_model": "dashscope/qwen-max",
+            "api_key_name": "DASHSCOPE_API_KEY",
+            "prompt_msg": "Enter your Aliyun DashScope API Key (sk-...): ",
+            "note": "(Tip: You can obtain your key at https://dashscope.aliyun.com)",
         },
     }
 

@@ -526,9 +526,13 @@ async def event_listener(
             elif event.event_type == "tool_output":
                 output = event.data.get("output", "") if event.data else ""
                 success = event.data.get("success", False) if event.data else False
+                duration_s = event.data.get("duration_s", 0.0) if event.data else 0.0
+                td.print_tool_duration(last_tool_name[0], success, duration_s)
                 # Only show output for plan_tool — everything else is noise
                 if last_tool_name[0] == "plan_tool" and output:
-                    td.print_tool_output(output, success, truncate=False)
+                    td.print_tool_output(
+                        output, success, truncate=False, duration_s=0.0
+                    )
                 shimmer.start()
             elif event.event_type == "turn_complete":
                 shimmer.stop()
@@ -1736,8 +1740,14 @@ async def headless_main(
         elif event.event_type == "tool_output":
             output = event.data.get("output", "") if event.data else ""
             success = event.data.get("success", False) if event.data else False
+            duration_s = event.data.get("duration_s", 0.0) if event.data else 0.0
+            _terminal_display().print_tool_duration(
+                _hl_last_tool[0], success, duration_s
+            )
             if _hl_last_tool[0] == "plan_tool" and output:
-                _terminal_display().print_tool_output(output, success, truncate=False)
+                _terminal_display().print_tool_output(
+                    output, success, truncate=False, duration_s=0.0
+                )
         elif event.event_type == "tool_log":
             tool = event.data.get("tool", "") if event.data else ""
             log = event.data.get("log", "") if event.data else ""

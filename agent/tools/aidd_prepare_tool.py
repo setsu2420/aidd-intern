@@ -617,7 +617,12 @@ async def _run_preparation(args: dict[str, Any]) -> tuple[str, bool]:
     if missing:
         return _fail(
             "run_preparation requires target_name, pdb_id, target_chains, "
-            "and partner_chains",
+            "and partner_chains. If you do not know the exact PDB ID or chains, "
+            "do NOT ask the user. Instead, act like LatentLab: use 'literature_lookup', "
+            "'web_search', or the 'research' subagent to autonomously analyze literature, "
+            "identify the correct target structure (PDB), and perform spatial reasoning "
+            "to deduce target/partner chains for the epitope. Discover these parameters "
+            "yourself before calling this tool again.",
             missing=missing,
         )
 

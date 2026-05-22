@@ -8,24 +8,21 @@ AIDD-Intern is an asynchronous agent runtime for AI drug discovery research and 
 -   **Architecture:**
     -   **Agent Runtime (Python):** Core logic, tool routing, and session management (`agent/`).
     -   **Web Backend (FastAPI):** Orchestrates sessions, authentication, and data persistence (`backend/`).
-    -   **Frontend (React/TypeScript):** Interactive web interface (`frontend/`).
-    -   **Node CLI (TypeScript):** Harness for smoke, integration, and evaluation tests (`src/`).
     -   **MCP Integration:** Connects heavy scientific tools (PXDesign, BindCraft, BoltzGen) via the Model Context Protocol.
 
 ## Tech Stack
 
--   **Languages:** Python 3.11+, TypeScript (Node.js 22+).
--   **Frameworks:** FastAPI (Backend), React + Vite (Frontend), Commander (Node CLI).
--   **Dependency Management:** `uv` (Python), `npm` (Node.js).
+-   **Languages:** Python 3.11+.
+-   **Frameworks:** FastAPI (Backend).
+-   **Dependency Management:** `uv` (Python).
 -   **AI/ML:** LiteLLM (Model routing), Hugging Face Hub/Jobs integration, Trackio (Monitoring).
--   **Testing:** `pytest` (Python), `vitest` (TypeScript), Ruff (Linting/Formatting).
+-   **Testing:** `pytest` (Python), Ruff (Linting/Formatting).
 
 ## Getting Started
 
 ### Prerequisites
 
 -   Python 3.11+ and `uv`.
--   Node.js 22+ and `npm`.
 -   API keys for models (OpenRouter, OpenAI, Anthropic, or SiliconFlow).
 
 ### Installation (Source)
@@ -61,14 +58,13 @@ The primary workflow for protein binder design:
 3. **Analysis:** Collect metrics, rank candidates, and export results.
 
 ### 3. Development Commands
-- **Run Full Stack:** `./scripts/dev.sh` (Starts backend and frontend).
+- **Run Full Stack:** `./scripts/dev.sh` (Starts backend).
 - **Run Python CLI:** `aidd-intern`.
 - **Diagnostics:** `aidd-intern --doctor`.
-- **Update (Source):** `scripts/update-local.sh` and `npm run update:local`.
+- **Update (Source):** `scripts/update-local.sh`.
 - **Tests:**
   - Python: `uv run pytest`.
-  - Node: `npm test`.
-  - Linting: `uv run ruff check .` and `npm run lint` (in frontend).
+  - Linting: `uv run ruff check .`
 
 ## Project Structure
 
@@ -76,8 +72,6 @@ The primary workflow for protein binder design:
   - `core/`: Core loop, session, and tool routing.
   - `workflows/`: Domain-specific prompts and tools (e.g., `aidd_binder`).
 - `backend/`: FastAPI backend routes and session management.
-- `frontend/`: React frontend application.
-- `src/`: TypeScript source for the Node CLI harness.
 - `configs/`: Model catalog and agent configurations.
 - `scripts/`: Utility scripts for dev, setup, and maintenance.
 - `docs/`: Architecture guides and workflow documentation.
@@ -86,7 +80,7 @@ The primary workflow for protein binder design:
 ## Engineering Standards
 
 -   **Modularity:** Keep code modular to facilitate extension and maintenance.
--   **Type Safety:** Use Pydantic for Python and TypeScript/Zod for Node.js.
+-   **Type Safety:** Use Pydantic for Python.
 -   **Documentation:** Maintain up-to-date documentation in `docs/` and `README.md`.
 -   **Security:** Never commit secrets, API keys, or large binary artifacts (model weights).
 -   **Testing:** New features and bug fixes MUST be accompanied by tests.

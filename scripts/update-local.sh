@@ -15,11 +15,10 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 remote="${AIDD_INTERN_UPDATE_REMOTE:-origin}"
 branch="${AIDD_INTERN_UPDATE_BRANCH:-}"
-with_frontend=0
 
 usage() {
   cat <<EOF
-Usage: scripts/update-local.sh [--with-frontend]
+Usage: scripts/update-local.sh
 
 Update a local AIDD-Intern checkout without overwriting local work.
 
@@ -28,17 +27,12 @@ Environment:
   AIDD_INTERN_UPDATE_BRANCH   Branch to pull (default: current branch)
 
 Options:
-  --with-frontend             Also run npm ci in frontend/
   -h, --help                  Show this help
 EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --with-frontend)
-      with_frontend=1
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -61,9 +55,6 @@ require_command() {
 
 require_command git
 require_command uv
-if [[ "$with_frontend" == "1" ]]; then
-  require_command npm
-fi
 
 cd "$repo_root"
 
@@ -86,17 +77,34 @@ git pull --ff-only "$remote" "$branch"
 echo "STEP 2: Syncing Python dependencies"
 uv sync --extra dev
 
+echo "STEP 2.5: Compile High-Performance Rust Core (Optional Acceleration)"
+CARGO_BIN=""
+if command -v cargo >/dev/null 2>&1; then
+  CARGO_BIN="cargo"
+elif [[ -f "$HOME/.cargo/bin/cargo" ]]; then
+  CARGO_BIN="$HOME/.cargo/bin/cargo"
+fi
+
+if [[ -n "$CARGO_BIN" ]]; then
+  echo "Found Rust compiler. Compiling aidd_intern_core module..."
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    . "$HOME/.cargo/env"
+  fi
+  (
+    cd rust_core
+    unset CONDA_PREFIX || true
+    uv run maturin develop
+  )
+  echo "aidd_intern_core successfully compiled and installed."
+else
+  echo "Rust compiler not found. Skipping optional high-performance Rust core acceleration compilation."
+  echo "AIDD-Intern will safely fall back to the native Python engine for Trace writing."
+fi
+
 echo "STEP 3: Reinstalling the editable Python CLI"
 uv tool install -e .
 
-if [[ "$with_frontend" == "1" ]]; then
-  echo "STEP 4: Syncing frontend dependencies"
-  (cd "$repo_root/frontend" && npm ci)
-else
-  echo "STEP 4: Skipping frontend dependencies; pass --with-frontend to run npm ci"
-fi
-
-echo "STEP 5: Verifying the installed CLI is on PATH"
+echo "STEP 4: Verifying the installed CLI is on PATH"
 if ! command -v aidd-intern >/dev/null 2>&1; then
   echo "warning: aidd-intern is not on PATH after installation" >&2
   echo "hint: add uv's tool bin directory to PATH: uv tool dir --bin" >&2

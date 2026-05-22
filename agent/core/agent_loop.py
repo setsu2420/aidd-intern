@@ -1890,15 +1890,17 @@ class Handlers:
                         decision: ApprovalDecision,
                         valid: bool,
                         err: str,
-                    ) -> tuple[ToolCall, str, dict, str, bool]:
+                    ) -> tuple[ToolCall, str, dict, str, bool, float]:
                         if not valid:
-                            return (tc, name, args, err, False)
+                            return (tc, name, args, err, False, 0.0)
                         if decision.billable:
                             _record_estimated_spend(session, decision)
+                        start_time = time.monotonic()
                         out, ok = await session.tool_router.call_tool(
                             name, args, session=session, tool_call_id=tc.id
                         )
-                        return (tc, name, args, out, ok)
+                        duration_s = time.monotonic() - start_time
+                        return (tc, name, args, out, ok, duration_s)
 
                     gather_task = asyncio.ensure_future(
                         asyncio.gather(
@@ -1941,7 +1943,14 @@ class Handlers:
                     results = gather_task.result()
 
                     # 4. Record results and send outputs (order preserved)
-                    for tc, tool_name, tool_args, output, success in results:
+                    for (
+                        tc,
+                        tool_name,
+                        tool_args,
+                        output,
+                        success,
+                        duration_s,
+                    ) in results:
                         tool_msg = Message(
                             role="tool",
                             content=output,
@@ -1958,6 +1967,7 @@ class Handlers:
                                     "tool_call_id": tc.id,
                                     "output": output,
                                     "success": success,
+                                    "duration_s": duration_s,
                                 },
                             )
                         )
@@ -2247,11 +2257,13 @@ class Handlers:
 
             await _record_manual_approved_spend_if_needed(session, tool_name, tool_args)
 
+            start_time = time.monotonic()
             output, success = await session.tool_router.call_tool(
                 tool_name, tool_args, session=session, tool_call_id=tc.id
             )
+            duration_s = time.monotonic() - start_time
 
-            return (tc, tool_name, output, success, was_edited)
+            return (tc, tool_name, output, success, was_edited, duration_s)
 
         # Execute all approved tools concurrently (cancellable)
         if approved_tasks:
@@ -2305,7 +2317,7 @@ class Handlers:
                     logger.error(f"Tool execution error: {result}")
                     continue
 
-                tc, tool_name, output, success, was_edited = result
+                tc, tool_name, output, success, was_edited, duration_s = result
 
                 if was_edited:
                     output = f"[Note: The user edited the script before execution. The output below reflects the user-modified version, not your original script.]\n\n{output}"
@@ -2327,6 +2339,7 @@ class Handlers:
                             "tool_call_id": tc.id,
                             "output": output,
                             "success": success,
+                            "duration_s": duration_s,
                         },
                     )
                 )

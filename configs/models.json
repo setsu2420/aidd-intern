@@ -65,6 +65,20 @@
       "tier": "external",
       "aliases": ["siliconflow", "deepseek-flash"],
       "recommended": true
+    },
+    {
+      "id": "gemini/gemini-2.5-pro",
+      "label": "Gemini 2.5 Pro",
+      "provider": "google",
+      "tier": "pro",
+      "aliases": ["gemini", "gemini-pro"]
+    },
+    {
+      "id": "dashscope/qwen-max",
+      "label": "Qwen Max via DashScope",
+      "provider": "aliyun",
+      "tier": "pro",
+      "aliases": ["qwen", "qwen-max", "dashscope"]
     }
   ]
 }

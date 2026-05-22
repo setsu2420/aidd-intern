@@ -408,9 +408,7 @@ UID 1000 user `user`, setting `PORT`/`7860`, and serving the static frontend.
 
 Local development notes from `AGENTS.md`:
 
-- Frontend: `cd frontend && npm ci && npm run dev`.
 - Backend: `cd backend && uv run uvicorn main:app --host ::1 --port 7860`.
-- Vite proxies `/api` and `/auth` to backend.
 
 ## How AIDD-Intern Compares to Agent Frameworks
 
