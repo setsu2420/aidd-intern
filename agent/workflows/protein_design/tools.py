@@ -101,22 +101,60 @@ def _gpu_plan(
         "can_run": True,
         "reason": None,
     }
+    force_run = os.environ.get("AIDD_INTERN_FORCE_GPU_RUN", "").lower() in ("1", "true")
+    cpu_fallback = os.environ.get("AIDD_INTERN_CPU_FALLBACK", "").lower() in (
+        "1",
+        "true",
+    )
+
     if best_free is None:
-        plan["reason"] = (
-            "GPU free memory unavailable; proceeding with conservative defaults."
-        )
+        if cpu_fallback:
+            plan.update(
+                {
+                    "reason": "GPU free memory unavailable; falling back to CPU mode.",
+                    "cpu_fallback": True,
+                }
+            )
+        else:
+            plan["reason"] = (
+                "GPU free memory unavailable; proceeding with conservative defaults."
+            )
         return plan
+
     if best_free < MIN_SAFE_GPU_FREE_MB:
-        plan.update(
-            {
-                "can_run": False,
-                "reason": (
-                    f"Insufficient free GPU memory: {best_free} MiB available, "
-                    f"minimum safe threshold is {MIN_SAFE_GPU_FREE_MB} MiB."
-                ),
-            }
-        )
-        return plan
+        if force_run:
+            plan.update(
+                {
+                    "can_run": True,
+                    "reason": (
+                        f"WARNING: Insufficient free GPU memory ({best_free} MiB < {MIN_SAFE_GPU_FREE_MB} MiB). "
+                        "Force-run enabled; proceeding at risk of potential CUDA OOM."
+                    ),
+                }
+            )
+        elif cpu_fallback:
+            plan.update(
+                {
+                    "can_run": True,
+                    "reason": (
+                        f"Insufficient free GPU memory ({best_free} MiB < {MIN_SAFE_GPU_FREE_MB} MiB). "
+                        "CPU-fallback enabled; executing on CPU backend."
+                    ),
+                    "cpu_fallback": True,
+                }
+            )
+        else:
+            plan.update(
+                {
+                    "can_run": False,
+                    "reason": (
+                        f"Insufficient free GPU memory: {best_free} MiB available, "
+                        f"minimum safe threshold is {MIN_SAFE_GPU_FREE_MB} MiB. "
+                        "To force run, set AIDD_INTERN_FORCE_GPU_RUN=1. To run on CPU, set AIDD_INTERN_CPU_FALLBACK=1."
+                    ),
+                }
+            )
+            return plan
 
     base = TOOL_BASE_GPU_MB.get(tool, MIN_SAFE_GPU_FREE_MB)
     available = max(0, best_free - base)
@@ -259,19 +297,48 @@ def _runtime_prefix(tool_name: str, tool_runtime: str) -> list[str]:
             f"PROTEIN_DESIGN_{tool_name.upper()}_IMAGE",
             f"aidd-intern/protein-design-{tool_name}:latest",
         )
-        return [
-            "docker",
-            "run",
-            "--rm",
-            "--gpus",
-            "all",
-            "-v",
-            f"{Path.cwd()}:/workspace",
-            "-w",
-            "/workspace",
-            image,
-            tool_name,
-        ]
+        engine = os.environ.get("PROTEIN_DESIGN_CONTAINER_ENGINE")
+        if not engine:
+            import shutil
+
+            if shutil.which("apptainer"):
+                engine = "apptainer"
+            elif shutil.which("singularity"):
+                engine = "singularity"
+            else:
+                engine = "docker"
+
+        if engine in ("apptainer", "singularity"):
+            container_ref = image
+            if not Path(container_ref).exists() and not container_ref.startswith(
+                ("docker://", "oras://", "shub://")
+            ):
+                container_ref = f"docker://{container_ref}"
+            return [
+                engine,
+                "exec",
+                "--nv",
+                "-B",
+                f"{Path.cwd()}:/workspace",
+                container_ref,
+                tool_name,
+            ]
+        else:
+            gpu_args = ["--gpus", "all"]
+            if os.environ.get("AIDD_INTERN_CPU_FALLBACK", "").lower() in ("1", "true"):
+                gpu_args = []
+            return [
+                "docker",
+                "run",
+                "--rm",
+                *gpu_args,
+                "-v",
+                f"{Path.cwd()}:/workspace",
+                "-w",
+                "/workspace",
+                image,
+                tool_name,
+            ]
     return [tool_name]
 
 
@@ -579,6 +646,26 @@ async def _bindcraft_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return _format_result(result), result["returncode"] == 0
 
 
+async def _chai1_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    from agent.workflows.protein_design.validation import evaluate_with_chai1
+
+    try:
+        metrics = await evaluate_with_chai1(complex_pdb=arguments["complex_pdb"])
+        return _format_result({"status": "completed", "metrics": metrics}), True
+    except Exception as exc:
+        return _format_result({"status": "failed", "error": str(exc)}), False
+
+
+async def _protenix_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    from agent.workflows.protein_design.validation import evaluate_with_protenix
+
+    try:
+        metrics = await evaluate_with_protenix(complex_pdb=arguments["complex_pdb"])
+        return _format_result({"status": "completed", "metrics": metrics}), True
+    except Exception as exc:
+        return _format_result({"status": "failed", "error": str(exc)}), False
+
+
 def create_protein_design_tools(tool_spec_cls: type | None = None) -> list[Any]:
     """Create ToolSpec instances for protein-design workflows."""
     if tool_spec_cls is None:
@@ -697,5 +784,41 @@ def create_protein_design_tools(tool_spec_cls: type | None = None) -> list[Any]:
                 "required": ["target_pdb", "binder_length"],
             },
             handler=_bindcraft_tool,
+        ),
+        tool_spec_cls(
+            name="run_chai1",
+            description=(
+                "Evaluate a protein-binder complex structure using Chai-1. "
+                "Calculates orthogonal validation metrics: ipTM, pLDDT, and pAE."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "complex_pdb": {
+                        "type": "string",
+                        "description": "Path to the complex PDB file to evaluate.",
+                    }
+                },
+                "required": ["complex_pdb"],
+            },
+            handler=_chai1_tool,
+        ),
+        tool_spec_cls(
+            name="run_protenix",
+            description=(
+                "Evaluate a protein-binder complex structure using Protenix as an "
+                "orthogonal validation model. Calculates ipTM, pLDDT, and pAE."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "complex_pdb": {
+                        "type": "string",
+                        "description": "Path to the complex PDB file to evaluate.",
+                    }
+                },
+                "required": ["complex_pdb"],
+            },
+            handler=_protenix_tool,
         ),
     ]

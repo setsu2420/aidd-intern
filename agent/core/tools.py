@@ -223,6 +223,44 @@ _PROTEIN_DESIGN_TOOL_SPECS = [
         "module": "agent.workflows.protein_design.tools",
         "handler": "_rfd3_tool",
     },
+    {
+        "name": "run_chai1",
+        "description": (
+            "Evaluate a protein-binder complex structure using Chai-1. "
+            "Calculates orthogonal validation metrics: ipTM, pLDDT, and pAE."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "complex_pdb": {
+                    "type": "string",
+                    "description": "Path to the complex PDB file to evaluate.",
+                }
+            },
+            "required": ["complex_pdb"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_chai1_tool",
+    },
+    {
+        "name": "run_protenix",
+        "description": (
+            "Evaluate a protein-binder complex structure using Protenix as an "
+            "orthogonal validation model. Calculates ipTM, pLDDT, and pAE."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "complex_pdb": {
+                    "type": "string",
+                    "description": "Path to the complex PDB file to evaluate.",
+                }
+            },
+            "required": ["complex_pdb"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_protenix_tool",
+    },
 ]
 
 

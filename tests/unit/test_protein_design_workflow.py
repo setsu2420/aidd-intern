@@ -31,9 +31,13 @@ def test_protein_design_tools_are_registered_for_llm():
     assert "run_boltzgen" in specs
     assert "run_bindcraft" in specs
     assert "run_rfd3" in specs
+    assert "run_chai1" in specs
+    assert "run_protenix" in specs
     assert "protein_design_ace_playbook" in specs
     assert "target_pdb" in specs["run_pxdesign"].parameters["required"]
     assert "target_pdb" in specs["run_rfd3"].parameters["required"]
+    assert "complex_pdb" in specs["run_chai1"].parameters["required"]
+    assert "complex_pdb" in specs["run_protenix"].parameters["required"]
 
 
 def test_protein_design_oom_parser_detects_cuda_oom():
@@ -299,3 +303,74 @@ async def test_protein_design_eval_runner_blocks_missing_environment():
     assert result["harness_ready"] is False
     assert result["status"] == "skipped_missing_target"
     assert "environment" in result["feedback_delta_items"][0]["content"]
+
+
+def test_protein_design_gpu_plan_force_run(monkeypatch):
+    monkeypatch.setenv("PROTEIN_DESIGN_GPU_FREE_MB", "4000")
+    monkeypatch.setenv("AIDD_INTERN_FORCE_GPU_RUN", "True")
+
+    plan = _gpu_plan("boltzgen", num_samples=1)
+
+    assert plan["can_run"] is True
+    assert "Force-run enabled" in plan["reason"]
+
+
+def test_protein_design_gpu_plan_cpu_fallback(monkeypatch):
+    monkeypatch.setenv("PROTEIN_DESIGN_GPU_FREE_MB", "4000")
+    monkeypatch.setenv("AIDD_INTERN_CPU_FALLBACK", "True")
+
+    plan = _gpu_plan("boltzgen", num_samples=1)
+
+    assert plan["can_run"] is True
+    assert "CPU-fallback enabled" in plan["reason"]
+    assert plan.get("cpu_fallback") is True
+
+
+def test_apptainer_runtime_prefix_generation(monkeypatch):
+    from agent.workflows.protein_design.tools import _runtime_prefix
+
+    monkeypatch.setenv("PROTEIN_DESIGN_CONTAINER_ENGINE", "apptainer")
+
+    prefix = _runtime_prefix("boltzgen", "sandbox")
+
+    assert prefix[0] == "apptainer"
+    assert prefix[1] == "exec"
+    assert "--nv" in prefix
+    assert "docker://aidd-intern/protein-design-boltzgen:latest" in prefix
+
+
+@pytest.mark.asyncio
+async def test_chai1_protenix_tools_execution(monkeypatch, tmp_path):
+    from agent.workflows.protein_design.tools import _chai1_tool, _protenix_tool
+
+    complex_pdb = tmp_path / "complex.pdb"
+    complex_pdb.write_text("HEADER COMPLEX\n", encoding="utf-8")
+
+    async def mock_evaluate_with_chai1(complex_pdb):
+        return {"iptm": 0.85, "plddt": 88.0, "pae": 2.5}
+
+    async def mock_evaluate_with_protenix(complex_pdb):
+        return {"iptm": 0.82, "plddt": 85.0, "pae": 2.7}
+
+    monkeypatch.setattr(
+        "agent.workflows.protein_design.validation.evaluate_with_chai1",
+        mock_evaluate_with_chai1,
+    )
+    monkeypatch.setattr(
+        "agent.workflows.protein_design.validation.evaluate_with_protenix",
+        mock_evaluate_with_protenix,
+    )
+
+    chai1_res, chai1_ok = await _chai1_tool({"complex_pdb": str(complex_pdb)})
+    protenix_res, protenix_ok = await _protenix_tool({"complex_pdb": str(complex_pdb)})
+
+    assert chai1_ok is True
+    assert protenix_ok is True
+
+    chai1_json = json.loads(chai1_res)
+    protenix_json = json.loads(protenix_res)
+
+    assert chai1_json["status"] == "completed"
+    assert chai1_json["metrics"]["iptm"] == 0.85
+    assert protenix_json["status"] == "completed"
+    assert protenix_json["metrics"]["iptm"] == 0.82

@@ -39,19 +39,48 @@ def _runtime_prefix(name: str) -> list[str]:
         f"PROTEIN_DESIGN_{name.upper()}_IMAGE",
         f"aidd-intern/protein-design-{name}:latest",
     )
-    return [
-        "docker",
-        "run",
-        "--rm",
-        "--gpus",
-        "all",
-        "-v",
-        f"{Path.cwd()}:/workspace",
-        "-w",
-        "/workspace",
-        image,
-        name,
-    ]
+    engine = os.environ.get("PROTEIN_DESIGN_CONTAINER_ENGINE")
+    if not engine:
+        import shutil
+
+        if shutil.which("apptainer"):
+            engine = "apptainer"
+        elif shutil.which("singularity"):
+            engine = "singularity"
+        else:
+            engine = "docker"
+
+    if engine in ("apptainer", "singularity"):
+        container_ref = image
+        if not Path(container_ref).exists() and not container_ref.startswith(
+            ("docker://", "oras://", "shub://")
+        ):
+            container_ref = f"docker://{container_ref}"
+        return [
+            engine,
+            "exec",
+            "--nv",
+            "-B",
+            f"{Path.cwd()}:/workspace",
+            container_ref,
+            name,
+        ]
+    else:
+        gpu_args = ["--gpus", "all"]
+        if os.environ.get("AIDD_INTERN_CPU_FALLBACK", "").lower() in ("1", "true"):
+            gpu_args = []
+        return [
+            "docker",
+            "run",
+            "--rm",
+            *gpu_args,
+            "-v",
+            f"{Path.cwd()}:/workspace",
+            "-w",
+            "/workspace",
+            image,
+            name,
+        ]
 
 
 def _parse_metrics(stdout: str, metrics_file: Path | None = None) -> dict[str, float]:
