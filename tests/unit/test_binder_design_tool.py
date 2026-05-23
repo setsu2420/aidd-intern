@@ -440,3 +440,196 @@ async def test_binder_design_setup_tools_mock(monkeypatch):
     assert payload["results"][0]["tool"] == "bindcraft_mcp"
     assert payload["results"][0]["exit_code"] == 0
     assert payload["results"][0]["stdout"] == "mocked stdout"
+
+
+@pytest.mark.asyncio
+async def test_optimize_next_round_success(tmp_path):
+    # Set up project dir and manifest
+    project_dir = tmp_path / "pd_success_project"
+    project_dir.mkdir(parents=True)
+    manifest_path = project_dir / "binder_project.json"
+    manifest = {
+        "target_name": "Target_A",
+        "target_structure": "5IUS",
+        "tools": ["pxdesign"],
+        "requirements": {"binder_length": 80, "num_samples": 100},
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    # Set up outputs with outstanding candidates
+    outputs_dir = project_dir / "outputs"
+    outputs_dir.mkdir()
+    metrics_path = outputs_dir / "design_stats.csv"
+    metrics_path.write_text(
+        "\n".join(
+            [
+                "Design,Average_pLDDT,Average_i_pTM,Average_i_pAE,Clashes,Sequence,Buried_SASA",
+                "binder_1,92.0,0.88,3.2,0,AAAAA,1400.0",
+                "binder_2,90.0,0.86,3.4,0,BBBBB,1350.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    text, ok = await binder_design_handler(
+        {
+            "operation": "optimize_next_round",
+            "project_dir": str(project_dir),
+            "outputs_dir": str(outputs_dir),
+            "previous_round_tool": "pxdesign",
+            "previous_round_parameters": {"binder_length": 80, "num_samples": 100},
+            "filters": {"plddt": 80, "iptm": 0.75, "clashes": 0},
+        }
+    )
+
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] == "optimized"
+    assert payload["transition_status"] == "success_escalate_or_scale"
+    assert payload["previous_candidate_count"] == 2
+    # Escalates to bindcraft
+    assert payload["next_round_tool"] == "bindcraft"
+    assert payload["next_round_parameters"]["iterations"] == 50
+    assert payload["next_round_parameters"]["num_designs"] == 5
+
+    # Check next_round_plan.md and manifest update
+    plan_path = project_dir / "next_round_plan.md"
+    assert plan_path.exists()
+    plan_content = plan_path.read_text(encoding="utf-8")
+    assert "AI-DLC Inception Artifact" in plan_content
+    assert "SUCCESS_ESCALATE_OR_SCALE" in plan_content
+
+    updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "next_round_optimization" in updated_manifest
+    assert updated_manifest["next_round_optimization"]["tool"] == "bindcraft"
+    assert "campaign_history" in updated_manifest
+    assert len(updated_manifest["campaign_history"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_optimize_next_round_poor_interface(tmp_path):
+    project_dir = tmp_path / "pd_poor_project"
+    project_dir.mkdir(parents=True)
+    manifest_path = project_dir / "binder_project.json"
+    manifest = {
+        "target_name": "Target_B",
+        "target_structure": "5IUS",
+        "tools": ["pxdesign"],
+        "requirements": {"binder_length": 80, "num_samples": 100},
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    # Set up outputs with very low affinity candidates
+    outputs_dir = project_dir / "outputs"
+    outputs_dir.mkdir()
+    metrics_path = outputs_dir / "design_stats.csv"
+    metrics_path.write_text(
+        "\n".join(
+            [
+                "Design,Average_pLDDT,Average_i_pTM,Average_i_pAE,Clashes,Sequence,Buried_SASA",
+                "binder_1,82.0,0.55,6.8,0,AAAAA,900.0",
+                "binder_2,85.0,0.58,6.2,0,BBBBB,950.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    text, ok = await binder_design_handler(
+        {
+            "operation": "optimize_next_round",
+            "project_dir": str(project_dir),
+            "outputs_dir": str(outputs_dir),
+            "previous_round_tool": "pxdesign",
+            "previous_round_parameters": {"binder_length": 80, "num_samples": 100},
+        }
+    )
+
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] == "optimized"
+    assert payload["transition_status"] == "poor_interface_switch_tool"
+    # Switches pxdesign to rfd3 for atom-precision hotspots
+    assert payload["next_round_tool"] == "rfd3"
+    # Increases binder length from 80 to 95 because mean buried SASA < 1100
+    assert payload["next_round_parameters"]["binder_length"] == 95
+
+
+@pytest.mark.asyncio
+async def test_optimize_next_round_oom_crashed(tmp_path):
+    project_dir = tmp_path / "pd_oom_project"
+    project_dir.mkdir(parents=True)
+    manifest_path = project_dir / "binder_project.json"
+    manifest = {
+        "target_name": "Target_C",
+        "target_structure": "5IUS",
+        "tools": ["bindcraft"],
+        "requirements": {"binder_length": 120, "num_samples": 100},
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    # Set up outputs with empty candidate list, but write a log containing CUDA OOM
+    outputs_dir = project_dir / "outputs"
+    outputs_dir.mkdir()
+    log_path = outputs_dir / "bindcraft.log"
+    log_path.write_text(
+        "Loading AlphaFold weights...\n"
+        "Starting design trajectory 1...\n"
+        "ERROR: RuntimeError: CUDA out of memory. Tried to allocate 4.2 GiB...\n",
+        encoding="utf-8",
+    )
+
+    text, ok = await binder_design_handler(
+        {
+            "operation": "optimize_next_round",
+            "project_dir": str(project_dir),
+            "outputs_dir": str(outputs_dir),
+            "previous_round_tool": "bindcraft",
+            "previous_round_parameters": {
+                "binder_length": 120,
+                "num_samples": 100,
+                "iterations": 50,
+            },
+        }
+    )
+
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] == "optimized"
+    assert payload["transition_status"] == "failed_hardware_oom"
+    # Stays with bindcraft but downscales
+    assert payload["next_round_tool"] == "bindcraft"
+    assert payload["next_round_parameters"]["num_samples"] == 50
+    assert payload["next_round_parameters"]["iterations"] == 25
+    assert payload["next_round_parameters"]["mixed_precision"] is True
+
+
+@pytest.mark.asyncio
+async def test_optimize_next_round_timeout(tmp_path):
+    project_dir = tmp_path / "pd_timeout_project"
+    project_dir.mkdir(parents=True)
+
+    outputs_dir = project_dir / "outputs"
+    outputs_dir.mkdir()
+    log_path = outputs_dir / "run.log"
+    log_path.write_text(
+        "Running BindCraft...\nJob elapsed limit. Timed out after 3600 seconds.\n",
+        encoding="utf-8",
+    )
+
+    text, ok = await binder_design_handler(
+        {
+            "operation": "optimize_next_round",
+            "project_dir": str(project_dir),
+            "outputs_dir": str(outputs_dir),
+            "previous_round_tool": "bindcraft",
+            "previous_round_parameters": {"num_samples": 100},
+        }
+    )
+
+    assert ok is True
+    payload = json.loads(text)
+    assert payload["status"] == "optimized"
+    assert payload["transition_status"] == "failed_timeout"
+    # Switches to a lighter tool, e.g. pxdesign
+    assert payload["next_round_tool"] == "pxdesign"
+    assert payload["next_round_parameters"]["num_samples"] == 50

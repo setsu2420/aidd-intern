@@ -1165,6 +1165,24 @@ def print_plan() -> None:
 # ── Formatting for plan_tool output (used by plan_tool handler) ────────
 
 
+def _deduplicate_stage_prefix(item_id: str, content: str) -> str:
+    """Strip a redundant 'Stage N:' prefix from *content* when *item_id*
+    already carries the same stage number (e.g. id='stage-1', content='Stage 1: ...').
+    """
+    import re
+
+    # Extract the numeric part from the id (e.g. "stage-1" -> "1")
+    id_match = re.search(r"(\d+)", item_id)
+    if not id_match:
+        return content
+    id_num = id_match.group(1)
+
+    # Match leading "Stage N:" (case-insensitive, optional whitespace)
+    prefix_pattern = re.compile(rf"^\s*[Ss]tage\s*{re.escape(id_num)}\s*[:：]\s*")
+    stripped = prefix_pattern.sub("", content)
+    return stripped if stripped else content
+
+
 def format_plan_tool_output(todos: list) -> str:
     if not todos:
         return "Plan is empty."
@@ -1175,11 +1193,14 @@ def format_plan_tool_output(todos: list) -> str:
     pending = [t for t in todos if t["status"] == "pending"]
 
     for t in completed:
-        lines.append(f"  [x] {t['id']}. {t['content']}")
+        content = _deduplicate_stage_prefix(t["id"], t["content"])
+        lines.append(f"  [x] {t['id']}. {content}")
     for t in in_progress:
-        lines.append(f"  [~] {t['id']}. {t['content']}")
+        content = _deduplicate_stage_prefix(t["id"], t["content"])
+        lines.append(f"  [~] {t['id']}. {content}")
     for t in pending:
-        lines.append(f"  [ ] {t['id']}. {t['content']}")
+        content = _deduplicate_stage_prefix(t["id"], t["content"])
+        lines.append(f"  [ ] {t['id']}. {content}")
 
     lines.append(f"\n{len(completed)}/{len(todos)} done")
     return "\n".join(lines)

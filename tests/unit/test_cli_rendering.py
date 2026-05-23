@@ -670,6 +670,51 @@ def test_print_plan_active_plan(monkeypatch):
     assert "1/3 done" in rendered
 
 
+def test_deduplicate_stage_prefix():
+    from agent.utils.terminal_display import (
+        _deduplicate_stage_prefix,
+        format_plan_tool_output,
+    )
+
+    # Basic dedup: id carries stage number, content starts with "Stage N:"
+    assert _deduplicate_stage_prefix("stage-1", "Stage 1: 文献调研") == "文献调研"
+    assert _deduplicate_stage_prefix("stage-2", "Stage 2: 结构检索") == "结构检索"
+    # Chinese colon
+    assert _deduplicate_stage_prefix("stage-3", "Stage 3：靶点评估") == "靶点评估"
+    # No redundancy — content should be unchanged
+    assert (
+        _deduplicate_stage_prefix("stage-1", "Do something else") == "Do something else"
+    )
+    # id without number — content unchanged
+    assert _deduplicate_stage_prefix("abc", "Stage 1: foo") == "Stage 1: foo"
+    # Mismatched numbers — content unchanged
+    assert _deduplicate_stage_prefix("stage-1", "Stage 2: bar") == "Stage 2: bar"
+
+    # End-to-end via format_plan_tool_output
+    todos = [
+        {
+            "id": "stage-1",
+            "content": "Stage 1: 文献调研 - 搜索 Sas6 相关论文",
+            "status": "in_progress",
+        },
+        {
+            "id": "stage-2",
+            "content": "Stage 2: 结构检索 - 查询 PDB",
+            "status": "pending",
+        },
+        {"id": "step-x", "content": "No stage prefix here", "status": "completed"},
+    ]
+    output = format_plan_tool_output(todos)
+    # Stage prefix should be stripped
+    assert "stage-1. 文献调研" in output
+    assert "stage-2. 结构检索" in output
+    # Non-stage content unchanged
+    assert "step-x. No stage prefix here" in output
+    # Redundant prefix should NOT appear
+    assert "stage-1. Stage 1:" not in output
+    assert "stage-2. Stage 2:" not in output
+
+
 @pytest.mark.asyncio
 async def test_slash_command_usage_and_plan(monkeypatch):
     printed_usage = False

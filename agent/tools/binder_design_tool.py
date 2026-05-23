@@ -212,6 +212,50 @@ def _discover_metric_files(root: Path) -> list[Path]:
     return files
 
 
+def _scan_for_oom_or_failures(root: Path) -> dict[str, Any]:
+    import re
+
+    oom_pattern = re.compile(
+        r"(cuda out of memory|out-of-memory|oom|cublas.*alloc|cudnn.*alloc)",
+        re.IGNORECASE,
+    )
+    timeout_pattern = re.compile(
+        r"(timed out|timeout|time limit exceeded)", re.IGNORECASE
+    )
+    status = {"oom": False, "timeout": False, "details": None}
+    if not root.exists():
+        return status
+    for log_file in sorted(root.rglob("*.log")):
+        try:
+            content = log_file.read_text(encoding="utf-8", errors="replace")
+            if oom_pattern.search(content):
+                status["oom"] = True
+                status["details"] = (
+                    f"Detected CUDA Out Of Memory in log: {log_file.name}"
+                )
+                return status
+            if timeout_pattern.search(content):
+                status["timeout"] = True
+                status["details"] = (
+                    f"Detected execution Timeout in log: {log_file.name}"
+                )
+                return status
+        except Exception:
+            continue
+    for err_file in sorted(root.rglob("*.txt")):
+        try:
+            content = err_file.read_text(encoding="utf-8", errors="replace")
+            if oom_pattern.search(content):
+                status["oom"] = True
+                status["details"] = (
+                    f"Detected CUDA Out Of Memory in text file: {err_file.name}"
+                )
+                return status
+        except Exception:
+            continue
+    return status
+
+
 def _read_candidates(
     root: Path, metric_files: list[str] | None = None
 ) -> list[dict[str, Any]]:
@@ -689,6 +733,7 @@ BINDER_DESIGN_TOOL_SPEC = {
                     "create_project",
                     "inspect_outputs",
                     "rank_candidates",
+                    "optimize_next_round",
                     "export_skill",
                     "setup_tools",
                     "run_diagnostics",
@@ -748,6 +793,14 @@ BINDER_DESIGN_TOOL_SPEC = {
                 "type": "string",
                 "description": "Reusable skill name used when exporting a skill card.",
                 "default": "binder_campaign",
+            },
+            "previous_round_tool": {
+                "type": "string",
+                "description": "The generator tool used in the previous round.",
+            },
+            "previous_round_parameters": {
+                "type": "object",
+                "description": "The parameter settings used in the previous round.",
             },
         },
         "required": ["operation"],
@@ -861,6 +914,308 @@ async def binder_design_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
                         "diversity_representatives": _diversity_representatives(ranked)[
                             :top_k
                         ],
+                    }
+                ),
+                True,
+            )
+
+        if operation == "optimize_next_round":
+            root = _safe_path(
+                arguments.get("outputs_dir") or arguments.get("project_dir")
+            )
+            project_dir = None
+            if arguments.get("project_dir"):
+                try:
+                    project_dir = _safe_path(arguments.get("project_dir"))
+                except Exception:
+                    pass
+
+            manifest = None
+            if project_dir and (project_dir / "binder_project.json").exists():
+                try:
+                    manifest_path = project_dir / "binder_project.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+            prev_tool = arguments.get("previous_round_tool")
+            if not prev_tool and manifest:
+                tools = manifest.get("tools")
+                if tools and isinstance(tools, list):
+                    prev_tool = tools[0]
+            if not prev_tool:
+                path_str = str(root).lower()
+                if "bindcraft" in path_str:
+                    prev_tool = "bindcraft"
+                elif "boltzgen" in path_str:
+                    prev_tool = "boltzgen"
+                elif "pxdesign" in path_str:
+                    prev_tool = "pxdesign"
+                else:
+                    prev_tool = "pxdesign"
+
+            prev_params = arguments.get("previous_round_parameters") or {}
+            if manifest and not prev_params:
+                prev_params = manifest.get("requirements") or {}
+
+            candidates = _read_candidates(root, arguments.get("metric_files"))
+
+            status_summary = "unknown"
+            next_tool = prev_tool
+            next_params = dict(prev_params)
+            rationale = ""
+
+            candidate_count = len(candidates)
+
+            if candidate_count == 0:
+                failure_info = _scan_for_oom_or_failures(root)
+                if failure_info["oom"]:
+                    status_summary = "failed_hardware_oom"
+                    rationale = f"Previous run failed due to GPU resource constraints. {failure_info['details']}."
+                    next_params["num_samples"] = max(
+                        1, int(prev_params.get("num_samples", 100) // 2)
+                    )
+                    if "iterations" in next_params:
+                        next_params["iterations"] = max(
+                            5, int(prev_params.get("iterations", 50) // 2)
+                        )
+                    next_params["mixed_precision"] = True
+                elif failure_info["timeout"]:
+                    status_summary = "failed_timeout"
+                    rationale = f"Previous run timed out. {failure_info['details']}. Switching to a faster, lighter backend."
+                    if prev_tool == "bindcraft":
+                        next_tool = "pxdesign"
+                        next_params["num_samples"] = 50
+                    else:
+                        next_params["num_samples"] = max(
+                            10, int(prev_params.get("num_samples", 100) // 2)
+                        )
+                else:
+                    status_summary = "failed_execution_error"
+                    rationale = "No design candidates or metric files were discovered, and no explicit OOM or Timeout logs were detected. This indicates an execution setup failure. Recommending tool verification and standard PXdesign fallback."
+                    next_tool = "pxdesign"
+                    next_params["num_samples"] = 20
+            else:
+                iptms = [c["iptm"] for c in candidates if c.get("iptm") is not None]
+                plddts = [c["plddt"] for c in candidates if c.get("plddt") is not None]
+                clashes_list = [
+                    c["clashes"] for c in candidates if c.get("clashes") is not None
+                ]
+                rmsds = [c["rmsd"] for c in candidates if c.get("rmsd") is not None]
+                sasas = [
+                    c["buried_sasa"]
+                    for c in candidates
+                    if c.get("buried_sasa") is not None
+                ]
+                contacts_list = [
+                    c["interface_contacts"]
+                    for c in candidates
+                    if c.get("interface_contacts") is not None
+                ]
+
+                max_iptm = max(iptms) if iptms else 0.0
+                mean_iptm = sum(iptms) / len(iptms) if iptms else 0.0
+                max_plddt = max(plddts) if plddts else 0.0
+                mean_plddt = sum(plddts) / len(plddts) if plddts else 0.0
+                mean_clashes = (
+                    sum(clashes_list) / len(clashes_list) if clashes_list else 0.0
+                )
+                mean_rmsd = sum(rmsds) / len(rmsds) if rmsds else 0.0
+                mean_sasa = sum(sasas) / len(sasas) if sasas else 0.0
+                mean_contacts = (
+                    sum(contacts_list) / len(contacts_list) if contacts_list else 0.0
+                )
+
+                filters = arguments.get("filters") or DEFAULT_FILTERS
+                passed_count = sum(
+                    1 for c in candidates if _passes_filters(c, filters)[0]
+                )
+
+                if passed_count > 0 and max_iptm >= 0.85:
+                    status_summary = "success_escalate_or_scale"
+                    if prev_tool in ("pxdesign", "rfd3", "boltzgen"):
+                        next_tool = "bindcraft"
+                        rationale = (
+                            f"Outstanding results! We found {passed_count} validated candidates passing filters, "
+                            f"with a maximum interface confidence (ipTM) of {max_iptm:.2f} and high pLDDT ({max_plddt:.1f}). "
+                            f"Escalating the design campaign to BindCraft for deep multi-round structural refinement "
+                            "and PyRosetta interface minimization to secure wet-lab grade candidates."
+                        )
+                        next_params["iterations"] = 50
+                        next_params["num_designs"] = 5
+                    else:
+                        next_tool = "bindcraft"
+                        rationale = (
+                            f"Outstanding BindCraft results! {passed_count} candidates passed strict filters with max ipTM = {max_iptm:.2f}. "
+                            "Recommending staying with BindCraft to run a larger design pool (increasing target designs/trajectories) "
+                            "and running Foldseek clustering for wet-lab representative selection."
+                        )
+                        next_params["num_designs"] = int(
+                            prev_params.get("num_designs", 1) + 2
+                        )
+
+                elif passed_count > 0 and max_iptm >= 0.75:
+                    status_summary = "moderate_success_local_search"
+                    next_tool = prev_tool
+                    rationale = (
+                        f"Moderate campaign success. {passed_count} candidates passed filters, with a solid max ipTM of {max_iptm:.2f}. "
+                        "Staying with the current tool but executing a fine-grained local search. "
+                        "Adjusting binder length and hotspot focus to improve affinity."
+                    )
+                    length = int(
+                        _as_float(prev_params.get("binder_length", 100)) or 100
+                    )
+                    next_params["binder_length"] = length + 5
+
+                elif mean_plddt < 70 and plddts:
+                    status_summary = "poor_stability_restructure"
+                    next_tool = "bindcraft"
+                    rationale = (
+                        f"Previous candidates exhibited poor structural stability (mean pLDDT = {mean_plddt:.1f} < 70). "
+                        "Switching generator to BindCraft, which enforces strict structural folding, secondary structure preservation, "
+                        "and PyRosetta-based steric energy filters during generation."
+                    )
+                    next_params["iterations"] = 60
+
+                elif max_iptm < 0.70:
+                    status_summary = "poor_interface_switch_tool"
+                    if prev_tool in ("pxdesign", "boltzgen"):
+                        next_tool = "rfd3"
+                        rationale = (
+                            f"The previous round yielded extremely weak interface affinity (max ipTM = {max_iptm:.2f} < 0.70). "
+                            "Switching generator to RFdiffusion3 to support atom-level hotspot precision and "
+                            "strong structural complementarity. Also recommending increasing the target binder length to expand contact area."
+                        )
+                    else:
+                        next_tool = "bindcraft"
+                        rationale = (
+                            f"Weak interface confidence (max ipTM = {max_iptm:.2f}). Escalating to BindCraft "
+                            "to leverage deep AlphaFold-multimer recycles and localized structural optimization."
+                        )
+                    length = int(
+                        _as_float(prev_params.get("binder_length", 100)) or 100
+                    )
+                    if mean_sasa < 1100:
+                        next_params["binder_length"] = length + 15
+                    else:
+                        next_params["binder_length"] = length + 5
+
+                elif mean_clashes > 5 or mean_rmsd > 3.0:
+                    status_summary = "high_clashes_increase_refinement"
+                    next_tool = "bindcraft"
+                    rationale = (
+                        f"High physical clashes (mean clashes = {mean_clashes:.1f}) or conformation drift (mean RMSD = {mean_rmsd:.1f} > 3.0) "
+                        "were detected in the candidates. Switching to or staying with BindCraft, and increasing refinement/recycle iterations "
+                        "to perform full relaxation of steric clashes."
+                    )
+                    next_params["iterations"] = 75
+                    next_params["refine_clashes"] = True
+                else:
+                    status_summary = "tweak_parameters"
+                    next_tool = prev_tool
+                    rationale = (
+                        f"No dominant failure mode detected (max ipTM = {max_iptm:.2f}, mean pLDDT = {mean_plddt:.1f}). "
+                        "Tweak parameters (e.g., increase sample size to explore more conformational spaces)."
+                    )
+                    next_params["num_samples"] = int(
+                        prev_params.get("num_samples", 100) * 1.5
+                    )
+
+            next_params_str = "\n".join(
+                f"- **{k}:** {v}" for k, v in next_params.items()
+            )
+
+            plan_path = None
+            if project_dir:
+                plan_path = project_dir / "next_round_plan.md"
+
+                prev_tool_val = prev_tool or "Unknown"
+                prev_params_val = json.dumps(prev_params)
+                cand_count_val = candidate_count
+
+                if candidate_count > 0:
+                    retrospect_lines = (
+                        f"- **Max / Mean ipTM:** {max_iptm:.2f} / {mean_iptm:.2f}\n"
+                        f"- **Max / Mean pLDDT:** {max_plddt:.1f} / {mean_plddt:.1f}\n"
+                        f"- **Mean Clashes:** {mean_clashes:.1f}\n"
+                        f"- **Mean RMSD:** {mean_rmsd:.1f} Å\n"
+                        f"- **Buried SASA:** {mean_sasa:.1f} Å²\n"
+                        f"- **Mean Contacts:** {mean_contacts:.1f}\n"
+                    )
+                else:
+                    retrospect_lines = "- **Performance Summary:** No candidates were generated (OOM, Timeout, or Execution Error).\n"
+
+                report_content = (
+                    "# AI-DLC Inception Artifact: Next Round Design Plan\n\n"
+                    "## 1. Previous Round Retrospective\n"
+                    f"- **Generator Tool:** {prev_tool_val}\n"
+                    f"- **Parameters:** {prev_params_val}\n"
+                    f"- **Candidate Count:** {cand_count_val}\n"
+                    f"{retrospect_lines}\n"
+                    "## 2. Adaptive Optimization Decisions\n"
+                    f"- **Transition Status:** {status_summary.upper()}\n"
+                    f"- **Recommended Next Tool:** {next_tool}\n"
+                    "## 3. Recommended Parameters\n"
+                    f"{next_params_str}\n\n"
+                    "### Rationale & Heuristics\n"
+                    f"{rationale}\n\n"
+                    "## 4. Step-by-Step Next Action Checklist (AI-DLC Construction)\n"
+                    f"- [ ] 1. Initialize the new run directory under `outputs/` using `{next_tool}`\n"
+                    f"- [ ] 2. Execute the recommended tool `{next_tool}` with the optimized parameters\n"
+                    "- [ ] 3. Run orthogonal validation (Chai-1 and Protenix) on the new candidates\n"
+                    "- [ ] 4. Cluster candidates and compare with the previous round's representatives\n"
+                )
+                try:
+                    plan_path.write_text(report_content, encoding="utf-8")
+                except Exception as exc:
+                    return _format_result(
+                        {
+                            "status": "error",
+                            "message": f"Failed to write next_round_plan.md: {exc}",
+                        }
+                    ), False
+
+            if manifest and project_dir:
+                manifest_path = project_dir / "binder_project.json"
+                manifest.setdefault("campaign_history", []).append(
+                    {
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "tool_used": prev_tool,
+                        "parameters_used": prev_params,
+                        "candidate_count": candidate_count,
+                        "status": status_summary,
+                    }
+                )
+                manifest["next_round_optimization"] = {
+                    "tool": next_tool,
+                    "parameters": next_params,
+                    "rationale": rationale,
+                    "audit_plan": str(plan_path) if plan_path else None,
+                }
+                if next_tool not in manifest.get("tools", []):
+                    manifest.setdefault("tools", []).append(next_tool)
+                try:
+                    manifest_path.write_text(
+                        _format_result(manifest) + "\n", encoding="utf-8"
+                    )
+                except Exception as exc:
+                    return _format_result(
+                        {
+                            "status": "error",
+                            "message": f"Failed to update binder_project.json: {exc}",
+                        }
+                    ), False
+
+            return (
+                _format_result(
+                    {
+                        "status": "optimized",
+                        "transition_status": status_summary,
+                        "previous_candidate_count": candidate_count,
+                        "next_round_tool": next_tool,
+                        "next_round_parameters": next_params,
+                        "optimization_reason": rationale,
+                        "audit_plan_path": str(plan_path) if plan_path else None,
                     }
                 ),
                 True,
