@@ -261,6 +261,150 @@ _PROTEIN_DESIGN_TOOL_SPECS = [
         "module": "agent.workflows.protein_design.tools",
         "handler": "_protenix_tool",
     },
+    {
+        "name": "run_proteinmpnn",
+        "description": (
+            "Design amino acid sequences for a given protein backbone using ProteinMPNN. "
+            "Useful for sequence optimization of designed binders."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "backbone_pdb": {
+                    "type": "string",
+                    "description": "Path to backbone PDB file.",
+                },
+                "num_sequences": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Number of sequences to generate per backbone.",
+                },
+                "temperature": {
+                    "type": "number",
+                    "default": 0.1,
+                    "description": "Sampling temperature (lower = more conservative).",
+                },
+                "chain_id": {
+                    "type": "string",
+                    "default": "A",
+                    "description": "Chain ID to design.",
+                },
+                "seed": {
+                    "type": "integer",
+                    "description": "Random seed for reproducibility.",
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Output directory for designed sequences.",
+                },
+                "timeout_s": {
+                    "type": "integer",
+                    "description": "Command timeout in seconds.",
+                },
+            },
+            "required": ["backbone_pdb"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_proteinmpnn_tool",
+    },
+    {
+        "name": "run_esmfold",
+        "description": (
+            "Predict 3D structure from amino acid sequence using ESMFold. "
+            "Fast single-sequence structure prediction without MSA."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sequence": {
+                    "type": "string",
+                    "description": "Amino acid sequence (single-letter code).",
+                },
+                "output_pdb": {
+                    "type": "string",
+                    "description": "Output PDB file path.",
+                },
+                "timeout_s": {
+                    "type": "integer",
+                    "description": "Command timeout in seconds.",
+                },
+            },
+            "required": ["sequence"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_esmfold_tool",
+    },
+    {
+        "name": "run_foldseek",
+        "description": (
+            "Cluster or search protein structures using Foldseek. "
+            "Modes: 'cluster' for structure clustering, 'search' for structure search, "
+            "'createdb' for creating a Foldseek database."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "input_path": {
+                    "type": "string",
+                    "description": "Path to input PDB file(s) or directory.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["cluster", "search", "createdb"],
+                    "default": "cluster",
+                    "description": "Foldseek operation mode.",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Output path for results.",
+                },
+                "min_seq_id": {
+                    "type": "number",
+                    "default": 0.3,
+                    "description": "Minimum sequence identity for clustering.",
+                },
+                "db_path": {
+                    "type": "string",
+                    "description": "Database path (required for search mode).",
+                },
+                "timeout_s": {
+                    "type": "integer",
+                    "description": "Command timeout in seconds.",
+                },
+            },
+            "required": ["input_path"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_foldseek_tool",
+    },
+    {
+        "name": "run_sequence_analysis",
+        "description": (
+            "Analyse protein sequence properties including hydrophobicity (GRAVY), "
+            "net charge at pH 7, aggregation propensity, and ESM2 pseudo-log-likelihood (PLL). "
+            "Use for quality assessment of designed sequences."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "sequence": {
+                    "type": "string",
+                    "description": "Amino acid sequence (single-letter code).",
+                },
+                "analyses": {
+                    "type": "string",
+                    "description": (
+                        "Comma-separated list of analyses to run. "
+                        "Options: hydrophobicity, charge, aggregation, esm2_pll. "
+                        "Default: all."
+                    ),
+                },
+            },
+            "required": ["sequence"],
+        },
+        "module": "agent.workflows.protein_design.tools",
+        "handler": "_sequence_analysis_tool",
+    },
 ]
 
 
@@ -431,6 +575,83 @@ async def update_task_canvas_handler(
         f"Successfully updated task canvas node '{node}' to state '{status}'.\n\nCurrent Canvas:\n{rendered}",
         True,
     )
+
+
+_KNOWLEDGE_WIKI_TOOL_SPECS = [
+    {
+        "name": "knowledge_wiki_search",
+        "description": (
+            "Search the Binder Design Knowledge Wiki for historical experience, "
+            "successful strategies, hyperparameter recommendations, and lessons "
+            "learned from past design campaigns. Use this to leverage accumulated "
+            "experience when planning new binder design workflows."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query describing what experience or strategy to find. "
+                        "Examples: 'PD-L1 binder design', 'BindCraft optimization', 'high ipTM strategies'."
+                    ),
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Optional target protein name to filter results.",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": [
+                        "target",
+                        "tool_chain",
+                        "strategy",
+                        "failure_mode",
+                        "benchmark",
+                    ],
+                    "description": "Optional category filter.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Maximum number of results to return.",
+                },
+            },
+            "required": ["query"],
+        },
+        "handler": "knowledge_wiki_search_handler",
+    },
+]
+
+
+async def knowledge_wiki_search_handler(
+    arguments: dict[str, Any], session: Any = None
+) -> tuple[str, bool]:
+    """Tool handler: search the knowledge wiki and return formatted results."""
+    from agent.core.knowledge_wiki import KnowledgeWiki
+
+    query = arguments["query"]
+    target = arguments.get("target")
+    category_filter = arguments.get("category")
+    top_k = arguments.get("top_k", 3)
+
+    try:
+        wiki = KnowledgeWiki()
+        if wiki.entry_count == 0:
+            return (
+                "Knowledge Wiki is empty. No historical experience recorded yet. "
+                "Complete a successful binder design session to start accumulating knowledge.",
+                True,
+            )
+
+        prompt = wiki.get_context_prompt(
+            query, target=target, top_k=top_k, category=category_filter
+        )
+        if not prompt:
+            return f"No matching entries found for query: '{query}'", True
+        return prompt, True
+    except Exception as e:
+        return f"Error searching knowledge wiki: {e}", False
 
 
 async def memu_memorize_handler(arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -1020,6 +1241,16 @@ def create_builtin_tools(local_mode: bool = False) -> list[ToolSpec]:
             handler=globals()[spec["handler"]],
         )
         for spec in _MEMU_TOOL_SPECS
+    )
+
+    tools.extend(
+        ToolSpec(
+            name=spec["name"],
+            description=spec["description"],
+            parameters=spec["parameters"],
+            handler=globals()[spec["handler"]],
+        )
+        for spec in _KNOWLEDGE_WIKI_TOOL_SPECS
     )
 
     # Sandbox or local tools (highest priority)

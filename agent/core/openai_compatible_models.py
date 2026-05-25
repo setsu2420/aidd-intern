@@ -24,6 +24,72 @@ OPENAI_COMPATIBLE_MODEL_PROVIDERS: dict[str, dict[str, str | int]] = {
             "deepseek-ai/DeepSeek-V4-Flash": 1_000_000,
         },
     },
+    "novita/": {
+        "base_url_env": "NOVITA_BASE_URL",
+        "base_url_default": "https://api.novita.ai/v3/openai",
+        "api_key_env": "NOVITA_API_KEY",
+        "max_tokens_env": "NOVITA_MODEL_MAX_TOKENS",
+    },
+    "nvidia/": {
+        "base_url_env": "NVIDIA_BASE_URL",
+        "base_url_default": "https://integrate.api.nvidia.com/v1",
+        "api_key_env": "NVIDIA_API_KEY",
+        "max_tokens_env": "NVIDIA_MODEL_MAX_TOKENS",
+    },
+    "kimi/": {
+        "base_url_env": "KIMI_BASE_URL",
+        "base_url_default": "https://api.moonshot.cn/v1",
+        "api_key_env": "KIMI_API_KEY",
+        "max_tokens_env": "KIMI_MODEL_MAX_TOKENS",
+    },
+    "minimax/": {
+        "base_url_env": "MINIMAX_BASE_URL",
+        "base_url_default": "https://api.minimax.chat/v1",
+        "api_key_env": "MINIMAX_API_KEY",
+        "max_tokens_env": "MINIMAX_MODEL_MAX_TOKENS",
+    },
+    "xai/": {
+        "base_url_env": "XAI_BASE_URL",
+        "base_url_default": "https://api.x.ai/v1",
+        "api_key_env": "XAI_API_KEY",
+        "max_tokens_env": "XAI_MODEL_MAX_TOKENS",
+    },
+    "deepseek/": {
+        "base_url_env": "DEEPSEEK_BASE_URL",
+        "base_url_default": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "max_tokens_env": "DEEPSEEK_MODEL_MAX_TOKENS",
+    },
+    "gemini/": {
+        "base_url_env": "GEMINI_BASE_URL",
+        "base_url_default": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key_env": "GEMINI_API_KEY",
+        "max_tokens_env": "GEMINI_MODEL_MAX_TOKENS",
+    },
+    "dashscope/": {
+        "base_url_env": "DASHSCOPE_BASE_URL",
+        "base_url_default": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "max_tokens_env": "DASHSCOPE_MODEL_MAX_TOKENS",
+    },
+    "tencent/": {
+        "base_url_env": "TENCENT_BASE_URL",
+        "base_url_default": "https://api.lkeap.cloud.tencent.com/v1",
+        "api_key_env": "TENCENT_API_KEY",
+        "max_tokens_env": "TENCENT_MODEL_MAX_TOKENS",
+    },
+    "xiaomi/": {
+        "base_url_env": "XIAOMI_BASE_URL",
+        "base_url_default": "https://api.xiaomimimo.com/v1",
+        "api_key_env": "XIAOMI_API_KEY",
+        "max_tokens_env": "XIAOMI_MODEL_MAX_TOKENS",
+    },
+    "arcee/": {
+        "base_url_env": "ARCEE_BASE_URL",
+        "base_url_default": "https://api.arcee.ai/v1",
+        "api_key_env": "ARCEE_API_KEY",
+        "max_tokens_env": "ARCEE_MODEL_MAX_TOKENS",
+    },
 }
 
 OPENAI_COMPATIBLE_MODEL_PREFIXES = tuple(OPENAI_COMPATIBLE_MODEL_PROVIDERS)

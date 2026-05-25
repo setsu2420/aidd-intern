@@ -633,3 +633,54 @@ async def test_optimize_next_round_timeout(tmp_path):
     # Switches to a lighter tool, e.g. pxdesign
     assert payload["next_round_tool"] == "pxdesign"
     assert payload["next_round_parameters"]["num_samples"] == 50
+
+
+@pytest.mark.asyncio
+async def test_binder_design_latent_y_campaign_modalities_and_steering():
+    # Test case 1: design_from_publication
+    text1, ok1 = await binder_design_handler({
+        "operation": "plan_campaign",
+        "target_name": "hTFR1",
+        "target_structure": "3FU2",
+        "requirements": {
+            "publication": "A paper on BBB crossing using transferrin receptors",
+            "binder_length": "100-120"
+        }
+    })
+    assert ok1 is True
+    res1 = json.loads(text1)
+    plan1 = res1["campaign_plan"]
+    assert plan1["campaign_modality"] == "design_from_publication"
+    assert len(plan1["hitl_steering_options"]) > 0
+    assert plan1["hitl_steering_options"][0]["option_id"] == "publication_direct_extract"
+
+    # Test case 2: cross_species_design
+    text2, ok2 = await binder_design_handler({
+        "operation": "plan_campaign",
+        "target_name": "PD-L1",
+        "target_structure": "4ZQK",
+        "requirements": {
+            "species_cross_reactivity": ["human", "cynomolgus"]
+        }
+    })
+    assert ok2 is True
+    res2 = json.loads(text2)
+    plan2 = res2["campaign_plan"]
+    assert plan2["campaign_modality"] == "cross_species_design"
+    assert any(opt["option_id"] == "cross_species_dual_optimization" for opt in plan2["hitl_steering_options"])
+
+    # Test case 3: epitope_discovery
+    text3, ok3 = await binder_design_handler({
+        "operation": "plan_campaign",
+        "target_name": "SARS-CoV-2 Spike",
+        "target_structure": "6VSB",
+        "requirements": {
+            "epitope": "RBD pocket residues",
+            "functional_blockade": True
+        }
+    })
+    assert ok3 is True
+    res3 = json.loads(text3)
+    plan3 = res3["campaign_plan"]
+    assert plan3["campaign_modality"] == "epitope_discovery"
+

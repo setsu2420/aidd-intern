@@ -66,6 +66,43 @@ async def teardown_session_sandbox(session: Session) -> None:
     await _teardown(session)
 
 
+async def _run_self_evolution_on_shutdown(session: Session) -> None:
+    """
+    Hermes-inspired self-evolution loop: extract skills and ingest knowledge
+    from the completed session.  Runs as fire-and-forget during shutdown so
+    it never blocks the user.
+    """
+    try:
+        from agent.core.skill_extractor import SkillExtractor
+        from agent.core.knowledge_wiki import KnowledgeWiki
+
+        messages = getattr(session, "messages", None) or []
+        if len(messages) < 6:
+            return
+
+        # 1. Extract skills
+        extractor = SkillExtractor()
+        saved_skills = extractor.extract_and_save(
+            messages, session_id=getattr(session, "session_id", None)
+        )
+        if saved_skills:
+            logger.info(
+                "Self-evolution: extracted %d skill(s) from session", len(saved_skills)
+            )
+
+        # 2. Ingest into knowledge wiki
+        wiki = KnowledgeWiki()
+        entries = wiki.ingest_from_session(
+            messages, session_id=getattr(session, "session_id", None)
+        )
+        if entries:
+            logger.info(
+                "Self-evolution: ingested %d knowledge entries", len(entries)
+            )
+    except Exception as exc:
+        logger.warning("Self-evolution loop failed (non-fatal): %s", exc)
+
+
 class LocalLLMConnectionError(ConnectionError):
     """Raised when a configured local OpenAI-compatible server is unreachable."""
 
@@ -1494,6 +1531,40 @@ class Handlers:
         # Clear any stale cancellation flag from a previous run
         session.reset_cancel()
 
+        # Check if we should auto-load layered long-term memories from MemU
+        if (
+            getattr(session.config, "memory", None)
+            and getattr(session.config.memory, "long_term_layered", False)
+            and not getattr(session, "_long_term_memory_loaded", False)
+        ):
+            from agent.core.memu import MemUClient
+            client = MemUClient()
+            if client.is_configured():
+                try:
+                    user_id = session.user_id or "default_user"
+                    agent_id = session.config.model_name or "default_agent"
+                    user_name = session.hf_username or "User"
+                    query = text or "general user profile, preferences and context"
+                    
+                    from agent.core.memory import LayeredMemoryPipeline
+                    pipeline = LayeredMemoryPipeline(client=client)
+                    
+                    # We fetch memories semantically using our asynchronous method
+                    res = await pipeline.aretrieve_layered(
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        query=query,
+                        user_name=user_name
+                    )
+                    
+                    session.layered_long_term_memory_prompt = res.get("formatted_prompt", "")
+                    session._long_term_memory_loaded = True
+                    logger.info("Successfully pre-loaded layered long-term memories from MemU.")
+                except Exception as e:
+                    logger.warning("Failed to auto-retrieve MemU long-term memories: %s", e)
+                    # Mark loaded to avoid repeat failed calls in the same turn
+                    session._long_term_memory_loaded = True
+
         # If there's a pending approval and the user sent a new message,
         # abandon the pending tools so the LLM context stays valid.
         if text and session.pending_approval:
@@ -1563,7 +1634,55 @@ class Handlers:
                     )
                 )
 
-            messages = session.context_manager.get_messages()
+            messages = list(session.context_manager.get_messages())
+
+            # 🧠 Layered Long-Term Memory (MemU 4-Tier Pipeline) Context Injection
+            if (
+                getattr(session.config, "memory", None)
+                and getattr(session.config.memory, "long_term_layered", False)
+                and getattr(session, "layered_long_term_memory_prompt", None)
+            ):
+                inserted = False
+                for idx, msg in enumerate(messages):
+                    if getattr(msg, "role", None) == "system":
+                        # Create a fresh Message object to avoid in-memory object mutation
+                        orig_content = getattr(msg, "content", "")
+                        messages[idx] = Message(
+                            role="system",
+                            content=f"{orig_content}\n\n{session.layered_long_term_memory_prompt}"
+                        )
+                        inserted = True
+                        break
+                
+                if not inserted:
+                    messages.insert(
+                        0,
+                        Message(
+                            role="system",
+                            content=session.layered_long_term_memory_prompt
+                        )
+                    )
+
+            # 🧠 Symbolic Short-Term Memory (Mermaid Task Canvas) Context Injection
+            if (
+                getattr(session.config, "memory", None)
+                and getattr(session.config.memory, "short_term_symbolic", False)
+                and getattr(session, "task_canvas", None)
+                and session.task_canvas.nodes
+            ):
+                mermaid_str = session.task_canvas.render_mermaid()
+                messages.append(
+                    Message(
+                        role="system",
+                        content=(
+                            "[🧠 SYMBOLIC SHORT-TERM MEMORY CANVAS]\n"
+                            "Below is a Mermaid flowchart reflecting the execution history and current status of your tool calls "
+                            "for this task. Use this visual representation to avoid repeating failed actions, maintain "
+                            "direction, and track dependencies:\n\n"
+                            f"{mermaid_str}\n"
+                        )
+                    )
+                )
             tools = session.tool_router.get_tool_specs_for_llm()
             try:
                 # ── Call the LLM (streaming or non-streaming) ──
@@ -2094,6 +2213,50 @@ class Handlers:
         session.increment_turn()
         await session.auto_save_if_needed()
 
+        # 🧠 Background Non-blocking Memory Synthesis (MemU)
+        if (
+            getattr(session.config, "memory", None)
+            and getattr(session.config.memory, "long_term_layered", False)
+            and not errored
+            and final_response
+        ):
+            from agent.core.memu import MemUClient
+            client = MemUClient()
+            if client.is_configured():
+                async def _save_memory_bg():
+                    try:
+                        user_id = session.user_id or "default_user"
+                        agent_id = session.config.model_name or "default_agent"
+                        
+                        last_convo = []
+                        all_items = session.context_manager.items
+                        # Extract the last few messages to satisfy the 3-message minimum required by MemU API
+                        for item in all_items[-6:]:
+                            try:
+                                content = getattr(item, "content", "")
+                                role = getattr(item, "role", "user")
+                                if content and role in ("user", "assistant"):
+                                    last_convo.append({"role": role, "content": content})
+                            except Exception:
+                                pass
+                        
+                        if len(last_convo) >= 3:
+                            user_name = session.hf_username or "User"
+                            agent_name = session.config.model_name or "AIDD-Intern"
+                            
+                            await client.amemorize(
+                                conversation=last_convo,
+                                user_id=user_id,
+                                agent_id=agent_id,
+                                user_name=user_name,
+                                agent_name=agent_name
+                            )
+                            logger.info("Successfully registered background memorization task with MemU.")
+                    except Exception as ex:
+                        logger.debug("Background memorization task failed: %s", ex)
+                
+                asyncio.create_task(_save_memory_bg())
+
         return final_response
 
     @staticmethod
@@ -2406,6 +2569,12 @@ class Handlers:
             repo_id = session.config.session_dataset_repo
             _ = session.save_and_upload_detached(repo_id)
 
+        # Hermes self-evolution: extract skills + ingest knowledge wiki
+        try:
+            await _run_self_evolution_on_shutdown(session)
+        except Exception as exc:
+            logger.warning("Self-evolution during shutdown failed: %s", exc)
+
         session.is_running = False
         if not getattr(session, "local_mode", False):
             await teardown_session_sandbox(session)
@@ -2500,6 +2669,49 @@ async def submission_loop(
     if not local_mode:
         start_cpu_sandbox_preload(session)
     logger.info("Agent loop started")
+
+    # --- Hermes self-evolution: inject historical knowledge at session start ---
+    try:
+        from agent.core.knowledge_wiki import KnowledgeWiki
+
+        _wiki = KnowledgeWiki()
+        if _wiki.entry_count > 0:
+            _wiki_ctx = _wiki.get_context_prompt(
+                "binder design protein strategy",
+                top_k=3,
+            )
+            if _wiki_ctx:
+                session.context_manager.add_message(
+                    Message(role="user", content=f"[SYSTEM: KNOWLEDGE WIKI CONTEXT]\n{_wiki_ctx}")
+                )
+                logger.info(
+                    "Injected %d wiki entries into session context",
+                    min(_wiki.entry_count, 3),
+                )
+    except Exception as exc:
+        logger.debug("Knowledge wiki injection skipped: %s", exc)
+
+    # --- Hermes self-evolution: inject learned skills at session start ---
+    try:
+        from agent.core.skill_extractor import SkillExtractor
+
+        _skill_ext = SkillExtractor()
+        _skill_paths = _skill_ext.list_skills()
+        if _skill_paths:
+            _skills_ctx = _skill_ext.get_skills_context_prompt(
+                "binder design protein strategy",
+                top_k=3,
+            )
+            if _skills_ctx:
+                session.context_manager.add_message(
+                    Message(role="user", content=f"[SYSTEM: SKILLS MEMORY]\n{_skills_ctx}")
+                )
+                logger.info(
+                    "Injected %d skill files into session context",
+                    min(len(_skill_paths), 3),
+                )
+    except Exception as exc:
+        logger.debug("Skills injection skipped: %s", exc)
 
     # Retry any failed uploads from previous sessions (fire-and-forget).
     # Includes the personal trace repo when enabled so a session that failed

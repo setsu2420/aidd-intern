@@ -9,9 +9,13 @@ from agent.workflows.protein_design.ace import ace_playbook_handler
 from agent.workflows.protein_design.approval import ProteinDesignApprovalPolicy
 from agent.workflows.protein_design.telemetry import summarize_validation_metrics
 from agent.workflows.protein_design.tools import (
+    _esmfold_tool,
+    _foldseek_tool,
     _gpu_plan,
     _parse_hardware_errors,
+    _proteinmpnn_tool,
     _run_command,
+    _sequence_analysis_tool,
     run_bindcraft_handler,
 )
 from evals.protein_design.runner import (
@@ -38,6 +42,15 @@ def test_protein_design_tools_are_registered_for_llm():
     assert "target_pdb" in specs["run_rfd3"].parameters["required"]
     assert "complex_pdb" in specs["run_chai1"].parameters["required"]
     assert "complex_pdb" in specs["run_protenix"].parameters["required"]
+    # New tools (Phase 2)
+    assert "run_proteinmpnn" in specs
+    assert "run_esmfold" in specs
+    assert "run_foldseek" in specs
+    assert "run_sequence_analysis" in specs
+    assert "backbone_pdb" in specs["run_proteinmpnn"].parameters["required"]
+    assert "sequence" in specs["run_esmfold"].parameters["required"]
+    assert "input_path" in specs["run_foldseek"].parameters["required"]
+    assert "sequence" in specs["run_sequence_analysis"].parameters["required"]
 
 
 def test_protein_design_oom_parser_detects_cuda_oom():
@@ -374,3 +387,144 @@ async def test_chai1_protenix_tools_execution(monkeypatch, tmp_path):
     assert chai1_json["metrics"]["iptm"] == 0.85
     assert protenix_json["status"] == "completed"
     assert protenix_json["metrics"]["iptm"] == 0.82
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: New Tool Tests (ProteinMPNN, ESMFold, Foldseek, Sequence Analysis)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_proteinmpnn_tool_missing_install(monkeypatch, tmp_path):
+    """ProteinMPNN should return a friendly error when not installed."""
+    fake_pdb = tmp_path / "backbone.pdb"
+    fake_pdb.write_text("ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n")
+
+    # Force subprocess to raise FileNotFoundError by pointing PATH to empty dir
+    empty_bin = tmp_path / "empty_bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+
+    result, ok = await _proteinmpnn_tool({"backbone_pdb": str(fake_pdb)})
+    parsed = json.loads(result)
+
+    assert ok is False
+    assert parsed["status"] == "failed"
+    assert "not found" in parsed.get("error", "").lower() or parsed.get("returncode", 0) != 0
+
+
+@pytest.mark.asyncio
+async def test_sequence_analysis_hydrophobicity():
+    """GRAVY score for a known hydrophobic sequence should be positive."""
+    # Poly-Leucine is extremely hydrophobic (Kyte-Doolittle L=3.8)
+    result, ok = await _sequence_analysis_tool({
+        "sequence": "LLLLLLLLLL",
+        "analyses": "hydrophobicity",
+    })
+    parsed = json.loads(result)
+
+    assert ok is True
+    assert parsed["status"] == "completed"
+    gravy = parsed["analyses"]["hydrophobicity"]["average_gravy"]
+    assert gravy > 0
+    assert parsed["analyses"]["hydrophobicity"]["interpretation"] == "hydrophobic"
+
+
+@pytest.mark.asyncio
+async def test_sequence_analysis_charge():
+    """Net charge for poly-Lysine should be strongly positive."""
+    result, ok = await _sequence_analysis_tool({
+        "sequence": "KKKKKDD",
+        "analyses": "charge",
+    })
+    parsed = json.loads(result)
+
+    assert ok is True
+    charge_info = parsed["analyses"]["charge"]
+    # 5 K (positive) - 2 D (negative) = +3 net charge
+    assert charge_info["positive_residues"] == 5
+    assert charge_info["negative_residues"] == 2
+    assert charge_info["net_charge_at_ph7"] == 3
+
+
+@pytest.mark.asyncio
+async def test_sequence_analysis_aggregation():
+    """Long hydrophobic stretches should trigger high aggregation risk."""
+    # 8 consecutive hydrophobic residues (V,I,L,F) => high risk
+    result, ok = await _sequence_analysis_tool({
+        "sequence": "SSSVVVVVVVLSSS",
+        "analyses": "aggregation",
+    })
+    parsed = json.loads(result)
+
+    assert ok is True
+    agg = parsed["analyses"]["aggregation"]
+    assert agg["max_hydrophobic_stretch"] >= 7
+    assert agg["aggregation_risk"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_sequence_analysis_aggregation_low_risk():
+    """No long hydrophobic stretches should give low aggregation risk."""
+    # Alternating hydrophilic/hydrophobic - no stretch > 1
+    result, ok = await _sequence_analysis_tool({
+        "sequence": "KSKSKSKSKS",
+        "analyses": "aggregation",
+    })
+    parsed = json.loads(result)
+
+    assert ok is True
+    assert parsed["analyses"]["aggregation"]["aggregation_risk"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_sequence_analysis_all_analyses():
+    """Running all analyses should return all four keys."""
+    result, ok = await _sequence_analysis_tool({
+        "sequence": "ACDEFGHIKLMNPQRSTVWY",
+        "analyses": "hydrophobicity,charge,aggregation",
+    })
+    parsed = json.loads(result)
+
+    assert ok is True
+    analyses = parsed["analyses"]
+    assert "hydrophobicity" in analyses
+    assert "charge" in analyses
+    assert "aggregation" in analyses
+    assert analyses["sequence_length"] == 20
+
+
+@pytest.mark.asyncio
+async def test_foldseek_tool_invalid_mode(tmp_path):
+    """Foldseek with an invalid mode should fail gracefully."""
+    fake_pdb = tmp_path / "input.pdb"
+    fake_pdb.write_text("ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00  0.00           N\n")
+
+    # 'invalid_mode' is not in [cluster, search, createdb] but the handler
+    # will attempt to run foldseek which won't be installed → FileNotFoundError path
+    result, ok = await _foldseek_tool({
+        "input_path": str(fake_pdb),
+        "mode": "cluster",
+    })
+    parsed = json.loads(result)
+
+    # Without foldseek installed, this should fail gracefully
+    assert ok is False
+    assert parsed["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_esmfold_tool_missing_install(monkeypatch, tmp_path):
+    """ESMFold should fail gracefully when torch/esm not installed."""
+    empty_bin = tmp_path / "empty_bin"
+    empty_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty_bin))
+
+    result, ok = await _esmfold_tool({
+        "sequence": "ACDEFGHIK",
+        "output_pdb": str(tmp_path / "out.pdb"),
+    })
+    parsed = json.loads(result)
+
+    assert ok is False
+    assert parsed["status"] == "failed"

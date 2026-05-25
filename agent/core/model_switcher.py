@@ -42,14 +42,26 @@ _FALLBACK_SUGGESTED_MODELS = [
         "id": "bedrock/us.anthropic.claude-opus-4-6-v1",
         "label": "Claude Opus 4.6 via Bedrock",
     },
+    {"id": "gemini/gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+    {"id": "xai/grok-3", "label": "Grok 3"},
+    {"id": "deepseek/deepseek-chat", "label": "DeepSeek Chat"},
+    {"id": "deepseek/deepseek-reasoner", "label": "DeepSeek Reasoner (R1)"},
+    {"id": "kimi/moonshot-v1-128k", "label": "Kimi Moonshot 128K"},
     {"id": "MiniMaxAI/MiniMax-M2.7", "label": "MiniMax M2.7"},
-    {"id": "moonshotai/Kimi-K2.6", "label": "Kimi K2.6"},
+    {"id": "minimax/MiniMax-M1", "label": "MiniMax M1"},
     {"id": "zai-org/GLM-5.1", "label": "GLM 5.1"},
+    {"id": "xiaomi/MiMo-7B-RL", "label": "Xiaomi MiMo 7B"},
+    {"id": "tencent/hunyuan-turbo", "label": "HunYuan Turbo"},
     {"id": "deepseek-ai/DeepSeek-V4-Pro:deepinfra", "label": "DeepSeek V4 Pro"},
     {"id": "openrouter/openai/gpt-5.2", "label": "GPT-5.2 via OpenRouter"},
     {
         "id": "siliconflow/deepseek-ai/DeepSeek-V4-Flash",
         "label": "DeepSeek V4 Flash via SiliconFlow",
+    },
+    {"id": "novita/deepseek-ai/deepseek-r1", "label": "DeepSeek R1 via NovitaAI"},
+    {
+        "id": "nvidia/nvidia/nemotron-4-340b-instruct",
+        "label": "Nemotron 4 340B via NVIDIA NIM",
     },
 ]
 SUGGESTED_MODELS = _FALLBACK_SUGGESTED_MODELS
@@ -59,6 +71,17 @@ _ROUTING_POLICIES = {"fastest", "cheapest", "preferred"}
 _DIRECT_PREFIXES = (
     "anthropic/",
     "openai/",
+    "novita/",
+    "nvidia/",
+    "kimi/",
+    "minimax/",
+    "xai/",
+    "deepseek/",
+    "gemini/",
+    "dashscope/",
+    "tencent/",
+    "xiaomi/",
+    "arcee/",
     *LOCAL_MODEL_PREFIXES,
     *OPENAI_COMPATIBLE_MODEL_PREFIXES,
 )
@@ -193,8 +216,11 @@ def print_model_listing(config, console) -> None:
         "Use 'anthropic/<model>' or 'openai/<model>' for direct API access.\n"
         "Use 'ollama/<model>', 'vllm/<model>', 'lm_studio/<model>', or "
         "'llamacpp/<model>' for local OpenAI-compatible endpoints.\n"
-        "Use 'openrouter/<model>' or 'siliconflow/<model>' for remote "
-        "OpenAI-compatible endpoints.[/dim]"
+        "Use 'openrouter/<model>', 'siliconflow/<model>', 'novita/<model>', "
+        "'nvidia/<model>', 'kimi/<model>', 'minimax/<model>', 'xai/<model>', "
+        "'deepseek/<model>', 'gemini/<model>', 'dashscope/<model>', "
+        "'tencent/<model>', 'xiaomi/<model>', or 'arcee/<model>' for "
+        "remote OpenAI-compatible endpoints.[/dim]"
     )
 
 
@@ -206,7 +232,10 @@ def print_invalid_id(arg: str, console) -> None:
         "  • anthropic/<model>\n"
         "  • openai/<model>\n"
         "  • ollama/<model> | vllm/<model> | lm_studio/<model> | llamacpp/<model>\n"
-        "  • openrouter/<model> | siliconflow/<model>[/dim]"
+        "  • openrouter/<model> | siliconflow/<model> | novita/<model>\n"
+        "  • nvidia/<model> | kimi/<model> | minimax/<model> | xai/<model>\n"
+        "  • deepseek/<model> | gemini/<model> | dashscope/<model>\n"
+        "  • tencent/<model> | xiaomi/<model> | arcee/<model>[/dim]"
     )
 
 

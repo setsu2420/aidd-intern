@@ -360,6 +360,83 @@ def _difficulty(requirements: dict[str, Any]) -> str:
     return "standard"
 
 
+def _campaign_modality(requirements: dict[str, Any]) -> str:
+    """Identify the campaign type (modality) matching the Latent-Y architecture."""
+    if requirements.get("publication") or requirements.get("paper") or requirements.get("doi"):
+        return "design_from_publication"
+    if requirements.get("species_cross_reactivity") or requirements.get("cross_species"):
+        return "cross_species_design"
+    if requirements.get("epitope") or requirements.get("functional_blockade") or requirements.get("indication"):
+        return "epitope_discovery"
+    return "standard_design"
+
+
+def _hitl_steering_options(requirements: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generates strategic design options for Human-in-the-Loop (HITL) steering, modeled after Latent-Y."""
+    options = []
+    modality = _campaign_modality(requirements)
+    
+    if modality == "design_from_publication":
+        options.append({
+            "option_id": "publication_direct_extract",
+            "name": "Auto-Extract from Scientific Paper",
+            "gpu_cost": "low",
+            "success_probability": "85%",
+            "pros": "Highly autonomous; directly parses published hotspot constraints and active residue IDs.",
+            "cons": "Highly dependent on OCR accuracy and target UniProt residue numbering consistency.",
+            "steering_command": "Run direct extraction on the provided literature to auto-fill binder hotspots."
+        })
+        options.append({
+            "option_id": "publication_manual_hotspot",
+            "name": "Hybrid Alignment & Manual Hotspot Input",
+            "gpu_cost": "low",
+            "success_probability": "95%",
+            "pros": "Guarantees highly precise docking vector and eliminates any numbering drift.",
+            "cons": "Requires the researcher to verify residue indexes in PyMOL first.",
+            "steering_command": "Use the paper for biological context, but override hotspots manually with residues: [list]."
+        })
+    elif modality == "cross_species_design":
+        options.append({
+            "option_id": "cross_species_conserved_only",
+            "name": "Conserved Epitope Targeting Only",
+            "gpu_cost": "moderate",
+            "success_probability": "70%",
+            "pros": "Designs bind both orthologs with identical geometric binding mode.",
+            "cons": "Limits sampling search space to highly conserved target surface blocks.",
+            "steering_command": "Filter all hotspots to only residues sharing 100% homology across target species."
+        })
+        options.append({
+            "option_id": "cross_species_dual_optimization",
+            "name": "Dual-Homolog Co-evolution (BindCraft)",
+            "gpu_cost": "high",
+            "success_probability": "90%",
+            "pros": "Achieves high affinity designs by co-optimizing and folding binders against both species structures.",
+            "cons": "Increases AlphaFold recycling time and compute costs by 2.5x.",
+            "steering_command": "Run BindCraft campaign co-evolving the binder against both Human and Cyno PDB structures."
+        })
+    else:  # epitope_discovery or standard_design
+        options.append({
+            "option_id": "epitope_boltzgen_constraint",
+            "name": "Microenvironment Constrained Sampling (BoltzGen)",
+            "gpu_cost": "moderate",
+            "success_probability": "80%",
+            "pros": "Extremely fast generation localized specifically to the functional binding pocket.",
+            "cons": "May miss novel highly-stable folding topologies outside the constraint box.",
+            "steering_command": "Constrain generation to pocket residues using BoltzGen with force-field boundary calibration."
+        })
+        options.append({
+            "option_id": "epitope_rfd3_de_novo",
+            "name": "Atom-Level complementary All-Atom Sampling (RFD3)",
+            "gpu_cost": "high",
+            "success_probability": "85%",
+            "pros": "Designs novel highly-stable folding topologies with robust physical complementarity.",
+            "cons": "Requires longer post-generation screening and orthogonal AlphaFold filtering batches.",
+            "steering_command": "Execute RFD3 all-atom de novo campaign targeting the functional surface."
+        })
+        
+    return options
+
+
 def _risk_register(requirements: dict[str, Any]) -> list[dict[str, str]]:
     risks = [
         {
@@ -464,10 +541,12 @@ def _campaign_plan(requirements: dict[str, Any]) -> dict[str, Any]:
     strict = bool(requirements.get("strict_validation"))
     return {
         "difficulty": _difficulty(requirements),
+        "campaign_modality": _campaign_modality(requirements),
         "stages": CAMPAIGN_STAGES,
         "tool_strategy": _tool_strategy(requirements),
         "acceptance_criteria": _acceptance_criteria(strict),
         "risk_register": _risk_register(requirements),
+        "hitl_steering_options": _hitl_steering_options(requirements),
         "open_questions": _open_questions(requirements),
     }
 
@@ -595,6 +674,28 @@ def _render_open_questions(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
+def _render_steering_options(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "- none"
+    lines = []
+    for item in items:
+        name = str(item.get("name") or "Option")
+        prob = str(item.get("success_probability") or "unknown")
+        cost = str(item.get("gpu_cost") or "unknown")
+        pros = str(item.get("pros") or "")
+        cons = str(item.get("cons") or "")
+        cmd = str(item.get("steering_command") or "")
+        lines.append(
+            f"### {name}\n"
+            f"- **Success Probability:** {prob}\n"
+            f"- **GPU Cost:** {cost}\n"
+            f"- **Pros:** {pros}\n"
+            f"- **Cons:** {cons}\n"
+            f"- **Steering Command:** `{cmd}`\n"
+        )
+    return "\n".join(lines)
+
+
 def _render_skill_card(
     *,
     manifest: dict[str, Any],
@@ -608,6 +709,7 @@ def _render_skill_card(
     primary_filters = dict(acceptance_criteria.get("primary_filters") or {})
     risk_register = list(campaign_plan.get("risk_register") or [])
     open_questions = list(campaign_plan.get("open_questions") or [])
+    steering_options = list(campaign_plan.get("hitl_steering_options") or [])
     workflow = list(manifest.get("workflow") or CAMPAIGN_STAGES)
     tools = list(manifest.get("tools") or [])
     constraints = [
@@ -649,6 +751,7 @@ def _render_skill_card(
                 f"Target: {manifest.get('target_name') or 'unknown'}",
                 f"Structure: {manifest.get('target_structure') or 'unknown'}",
                 f"Campaign difficulty: {campaign_plan.get('difficulty') or 'unknown'}",
+                f"Campaign modality: {campaign_plan.get('campaign_modality') or 'unknown'}",
                 f"Tools: {', '.join(tools) if tools else 'none'}",
             ]
         ),
@@ -700,6 +803,9 @@ def _render_skill_card(
         "",
         "## Open Questions",
         _render_open_questions(open_questions),
+        "",
+        "## Latent-Y HITL Steering Options",
+        _render_steering_options(steering_options),
         "",
         "## Historical Notes",
         _render_bullet_list(

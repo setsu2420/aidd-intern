@@ -666,6 +666,283 @@ async def _protenix_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         return _format_result({"status": "failed", "error": str(exc)}), False
 
 
+# ---------------------------------------------------------------------------
+# New tools: ProteinMPNN, ESMFold, Foldseek, Sequence Analysis
+# (Adaptyv Bio competition inspired tool-chain expansion)
+# ---------------------------------------------------------------------------
+
+
+async def _proteinmpnn_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Design sequences for a backbone using ProteinMPNN."""
+    backbone_pdb = arguments["backbone_pdb"]
+    num_sequences = int(arguments.get("num_sequences") or 10)
+    temperature = float(arguments.get("temperature") or 0.1)
+    output_dir = arguments.get("output_dir") or os.path.dirname(backbone_pdb)
+    chain_id = arguments.get("chain_id") or "A"
+    seed = arguments.get("seed")
+
+    cmd = [
+        "python",
+        "-m",
+        "proteinmpnn",
+        "--pdb_path",
+        backbone_pdb,
+        "--out_folder",
+        output_dir,
+        "--num_seq_per_target",
+        str(num_sequences),
+        "--sampling_temp",
+        str(temperature),
+        "--chain_list",
+        chain_id,
+    ]
+    if seed is not None:
+        cmd.extend(["--seed", str(seed)])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=int(arguments.get("timeout_s") or 600),
+        )
+        output = stdout.decode(errors="replace")
+        errors = stderr.decode(errors="replace")
+        combined = f"{output}\n{errors}".strip()
+        if proc.returncode != 0:
+            hw = _parse_hardware_errors(combined)
+            return _format_result({
+                "status": "failed",
+                "returncode": proc.returncode,
+                "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+                "hardware_errors": hw,
+            }), False
+        return _format_result({
+            "status": "completed",
+            "output_dir": output_dir,
+            "num_sequences": num_sequences,
+            "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+        }), True
+    except asyncio.TimeoutError:
+        return _format_result({"status": "timeout", "timeout_s": arguments.get("timeout_s")}), False
+    except FileNotFoundError:
+        return _format_result({
+            "status": "failed",
+            "error": "ProteinMPNN not found. Install with: pip install proteinmpnn",
+        }), False
+    except Exception as exc:
+        return _format_result({"status": "failed", "error": str(exc)}), False
+
+
+async def _esmfold_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Predict structure from sequence using ESMFold."""
+    sequence = arguments["sequence"]
+    output_pdb = arguments.get("output_pdb") or "esmfold_output.pdb"
+
+    try:
+        # Use ESMFold via Python API (preferred over CLI for single sequences)
+        script = (
+            "import torch\n"
+            "from esm import pretrained\n"
+            f"model, alphabet = pretrained.load_model_and_alphabet('esmfold_v1')\n"
+            "model = model.eval().cuda()\n"
+            f"sequence = '{sequence}'\n"
+            "with torch.no_grad():\n"
+            "    output = model.infer_pdb(sequence)\n"
+            f"with open('{output_pdb}', 'w') as f:\n"
+            "    f.write(output['pdb_string'][0])\n"
+            "print('ESMFold prediction completed')\n"
+            "print(f'pLDDT: {output[\"plddt\"].mean().item():.2f}')\n"
+            "print(f'pTM: {output[\"ptm\"].item():.2f}')\n"
+        )
+        proc = await asyncio.create_subprocess_exec(
+            "python", "-c", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=int(arguments.get("timeout_s") or 600),
+        )
+        output = stdout.decode(errors="replace")
+        errors = stderr.decode(errors="replace")
+        combined = f"{output}\n{errors}".strip()
+        if proc.returncode != 0:
+            hw = _parse_hardware_errors(combined)
+            return _format_result({
+                "status": "failed",
+                "returncode": proc.returncode,
+                "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+                "hardware_errors": hw,
+            }), False
+        return _format_result({
+            "status": "completed",
+            "output_pdb": output_pdb,
+            "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+        }), True
+    except asyncio.TimeoutError:
+        return _format_result({"status": "timeout", "timeout_s": arguments.get("timeout_s")}), False
+    except Exception as exc:
+        return _format_result({"status": "failed", "error": str(exc)}), False
+
+
+async def _foldseek_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Cluster or search protein structures using Foldseek."""
+    mode = arguments.get("mode") or "cluster"
+    input_path = arguments["input_path"]
+    output_path = arguments.get("output_path") or "foldseek_output"
+    min_seq_id = float(arguments.get("min_seq_id") or 0.3)
+
+    if mode == "cluster":
+        cmd = [
+            "foldseek", "easy-cluster",
+            input_path, output_path, "tmp",
+            "--min-seq-id", str(min_seq_id),
+            "-e", "0.001",
+            "--alignment-type", "1",  # 3Di alignment
+        ]
+    elif mode == "search":
+        db_path = arguments.get("db_path")
+        if not db_path:
+            return _format_result({"status": "failed", "error": "db_path required for search mode"}), False
+        cmd = [
+            "foldseek", "easy-search",
+            input_path, db_path, output_path, "tmp",
+            "-e", "0.001",
+            "--alignment-type", "1",
+        ]
+    elif mode == "createdb":
+        cmd = ["foldseek", "createdb", input_path, output_path]
+    else:
+        return _format_result({"status": "failed", "error": f"Unknown mode: {mode}"}), False
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=int(arguments.get("timeout_s") or 300),
+        )
+        output = stdout.decode(errors="replace")
+        errors = stderr.decode(errors="replace")
+        combined = f"{output}\n{errors}".strip()
+        if proc.returncode != 0:
+            return _format_result({
+                "status": "failed",
+                "returncode": proc.returncode,
+                "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+            }), False
+        return _format_result({
+            "status": "completed",
+            "mode": mode,
+            "output_path": output_path,
+            "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+        }), True
+    except asyncio.TimeoutError:
+        return _format_result({"status": "timeout", "timeout_s": arguments.get("timeout_s")}), False
+    except FileNotFoundError:
+        return _format_result({
+            "status": "failed",
+            "error": "Foldseek not found. Install: https://github.com/steineggerlab/foldseek",
+        }), False
+    except Exception as exc:
+        return _format_result({"status": "failed", "error": str(exc)}), False
+
+
+async def _sequence_analysis_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+    """Analyse protein sequence properties: hydrophobicity, charge, aggregation, ESM2 PLL."""
+    sequence = arguments["sequence"]
+    analyses = arguments.get("analyses") or ["hydrophobicity", "charge", "aggregation", "esm2_pll"]
+    if isinstance(analyses, str):
+        analyses = [a.strip() for a in analyses.split(",")]
+
+    results: dict[str, Any] = {"sequence_length": len(sequence)}
+
+    # Hydrophobicity (Kyte-Doolittle scale)
+    if "hydrophobicity" in analyses:
+        kd_scale = {
+            "A": 1.8, "R": -4.5, "N": -3.5, "D": -3.5, "C": 2.5,
+            "Q": -3.5, "E": -3.5, "G": -0.4, "H": -3.2, "I": 4.5,
+            "L": 3.8, "K": -3.9, "M": 1.9, "F": 2.8, "P": -1.6,
+            "S": -0.8, "T": -0.7, "W": -0.9, "Y": -1.3, "V": 4.2,
+        }
+        scores = [kd_scale.get(aa.upper(), 0.0) for aa in sequence if aa.upper() in kd_scale]
+        avg_hydro = sum(scores) / len(scores) if scores else 0.0
+        results["hydrophobicity"] = {
+            "average_gravy": round(avg_hydro, 3),
+            "interpretation": "hydrophobic" if avg_hydro > 0 else "hydrophilic",
+        }
+
+    # Charge at pH 7.0
+    if "charge" in analyses:
+        pos = sum(1 for aa in sequence.upper() if aa in ("K", "R", "H"))
+        neg = sum(1 for aa in sequence.upper() if aa in ("D", "E"))
+        net_charge = pos - neg
+        results["charge"] = {
+            "positive_residues": pos,
+            "negative_residues": neg,
+            "net_charge_at_ph7": net_charge,
+            "charge_density": round(net_charge / len(sequence), 3) if sequence else 0,
+        }
+
+    # Aggregation propensity (simplified Tango-like heuristic)
+    if "aggregation" in analyses:
+        hydro_stretch = 0
+        max_stretch = 0
+        for aa in sequence.upper():
+            if aa in ("V", "I", "L", "F", "W", "Y", "A"):
+                hydro_stretch += 1
+                max_stretch = max(max_stretch, hydro_stretch)
+            else:
+                hydro_stretch = 0
+        results["aggregation"] = {
+            "max_hydrophobic_stretch": max_stretch,
+            "aggregation_risk": "high" if max_stretch >= 7 else "moderate" if max_stretch >= 5 else "low",
+        }
+
+    # ESM2 pseudo-log-likelihood (PLL)
+    if "esm2_pll" in analyses:
+        try:
+            script = (
+                "import torch\n"
+                "from esm import pretrained\n"
+                "model, alphabet = pretrained.load_model_and_alphabet('esm2_t33_650M_UR50D')\n"
+                "model = model.eval()\n"
+                f"seq = '{sequence}'\n"
+                "batch_converter = alphabet.get_batch_converter()\n"
+                "data = [('seq', seq)]\n"
+                "_, _, batch_tokens = batch_converter(data)\n"
+                "with torch.no_grad():\n"
+                "    logits = model(batch_tokens)['logits']\n"
+                "    log_probs = logits.log_softmax(-1)\n"
+                "    token_probs = log_probs.gather(-1, batch_tokens.unsqueeze(-1)).squeeze(-1)\n"
+                "    pll = token_probs[0, 1:-1].sum().item()\n"
+                f"print(f'PLL:{{pll:.4f}}')\n"
+            )
+            proc = await asyncio.create_subprocess_exec(
+                "python", "-c", script,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            import re as _re
+            pll_match = _re.search(r"PLL:([-0-9.]+)", stdout.decode())
+            if pll_match:
+                results["esm2_pll"] = {"pll": float(pll_match.group(1))}
+            else:
+                results["esm2_pll"] = {"error": "Could not parse PLL output"}
+        except Exception as exc:
+            results["esm2_pll"] = {"error": str(exc)}
+
+    return _format_result({"status": "completed", "analyses": results}), True
+
+
 def create_protein_design_tools(tool_spec_cls: type | None = None) -> list[Any]:
     """Create ToolSpec instances for protein-design workflows."""
     if tool_spec_cls is None:
@@ -820,5 +1097,145 @@ def create_protein_design_tools(tool_spec_cls: type | None = None) -> list[Any]:
                 "required": ["complex_pdb"],
             },
             handler=_protenix_tool,
+        ),
+        tool_spec_cls(
+            name="run_proteinmpnn",
+            description=(
+                "Design amino acid sequences for a given protein backbone using ProteinMPNN. "
+                "Useful for sequence optimization of designed binders."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "backbone_pdb": {
+                        "type": "string",
+                        "description": "Path to backbone PDB file.",
+                    },
+                    "num_sequences": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Number of sequences to generate per backbone.",
+                    },
+                    "temperature": {
+                        "type": "number",
+                        "default": 0.1,
+                        "description": "Sampling temperature (lower = more conservative).",
+                    },
+                    "chain_id": {
+                        "type": "string",
+                        "default": "A",
+                        "description": "Chain ID to design.",
+                    },
+                    "seed": {
+                        "type": "integer",
+                        "description": "Random seed for reproducibility.",
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Output directory for designed sequences.",
+                    },
+                    "timeout_s": {
+                        "type": "integer",
+                        "description": "Command timeout in seconds.",
+                    },
+                },
+                "required": ["backbone_pdb"],
+            },
+            handler=_proteinmpnn_tool,
+        ),
+        tool_spec_cls(
+            name="run_esmfold",
+            description=(
+                "Predict 3D structure from amino acid sequence using ESMFold. "
+                "Fast single-sequence structure prediction without MSA."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "sequence": {
+                        "type": "string",
+                        "description": "Amino acid sequence (single-letter code).",
+                    },
+                    "output_pdb": {
+                        "type": "string",
+                        "description": "Output PDB file path.",
+                    },
+                    "timeout_s": {
+                        "type": "integer",
+                        "description": "Command timeout in seconds.",
+                    },
+                },
+                "required": ["sequence"],
+            },
+            handler=_esmfold_tool,
+        ),
+        tool_spec_cls(
+            name="run_foldseek",
+            description=(
+                "Cluster or search protein structures using Foldseek. "
+                "Modes: 'cluster' for structure clustering, 'search' for structure search, "
+                "'createdb' for creating a Foldseek database."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "input_path": {
+                        "type": "string",
+                        "description": "Path to input PDB file(s) or directory.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["cluster", "search", "createdb"],
+                        "default": "cluster",
+                        "description": "Foldseek operation mode.",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Output path for results.",
+                    },
+                    "min_seq_id": {
+                        "type": "number",
+                        "default": 0.3,
+                        "description": "Minimum sequence identity for clustering.",
+                    },
+                    "db_path": {
+                        "type": "string",
+                        "description": "Database path (required for search mode).",
+                    },
+                    "timeout_s": {
+                        "type": "integer",
+                        "description": "Command timeout in seconds.",
+                    },
+                },
+                "required": ["input_path"],
+            },
+            handler=_foldseek_tool,
+        ),
+        tool_spec_cls(
+            name="run_sequence_analysis",
+            description=(
+                "Analyse protein sequence properties including hydrophobicity (GRAVY), "
+                "net charge at pH 7, aggregation propensity, and ESM2 pseudo-log-likelihood (PLL). "
+                "Use for quality assessment of designed sequences."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "sequence": {
+                        "type": "string",
+                        "description": "Amino acid sequence (single-letter code).",
+                    },
+                    "analyses": {
+                        "type": "string",
+                        "description": (
+                            "Comma-separated list of analyses to run. "
+                            "Options: hydrophobicity, charge, aggregation, esm2_pll. "
+                            "Default: all."
+                        ),
+                    },
+                },
+                "required": ["sequence"],
+            },
+            handler=_sequence_analysis_tool,
         ),
     ]

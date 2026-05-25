@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIDD-Intern | 科学家 3D 分子全息工作站</title>
+    
+    <!-- Premium Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- PDBe-molstar CSS -->
+    <link rel="stylesheet" type="text/css" href="https://www.ebi.ac.uk/pdbe/pdb-component-library/css/pdbe-molstar-3.1.2.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Background sci-fi nebula effect -->
+        <div class="nebula-bg"></div>
+        
+        <!-- Header bar -->
+        <header class="glass-header">
+            <div class="logo-container">
+                <span class="pulse-dot"></span>
+                <h1 class="logo-text">AIDD-Intern <span class="badge">3D Hologram</span></h1>
+            </div>
+            <div class="header-status">
+                <span class="status-label">核心引擎已联接</span>
+                <span class="status-indicator"></span>
+            </div>
+        </header>
+
+        <!-- Main workspace layout -->
+        <main class="workspace-main">
+            <!-- Left Control Panel -->
+            <section class="glass-panel left-panel">
+                <div class="panel-header">
+                    <h2>🔬 分子操控终端</h2>
+                    <p class="panel-subtitle">3D 可视化控制与属性剖析</p>
+                </div>
+                
+                <div class="control-group">
+                    <label for="pdb-input">输入 PDB 编号</label>
+                    <div class="input-row">
+                        <input type="text" id="pdb-input" value="4ZQK" placeholder="例如: 4ZQK" maxlength="4">
+                        <button id="load-btn" class="glow-button">载入结构</button>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="control-group">
+                    <label>渲染表现模式</label>
+                    <div class="button-grid">
+                        <button id="style-cartoon" class="mode-btn active">二级结构 (Cartoon)</button>
+                        <button id="style-spacefill" class="mode-btn">空间填充 (Spacefill)</button>
+                        <button id="style-ballstick" class="mode-btn">球棍模型 (Ball/Stick)</button>
+                        <button id="style-surface" class="mode-btn">表面静电势 (Surface)</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>着色方案选择</label>
+                    <div class="button-grid">
+                        <button id="color-chain" class="color-btn active">链着色 (Chain)</button>
+                        <button id="color-quality" class="color-btn">pLDDT 置信度 (Quality)</button>
+                        <button id="color-hydro" class="color-btn">亲水性 (Hydrophobicity)</button>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Live pocket analyzer panel -->
+                <div class="pocket-analyser-card">
+                    <h3>💡 智能体结合热点捕捉</h3>
+                    <div class="pocket-info">
+                        <div class="pocket-row">
+                            <span class="info-lbl">受体结合口袋:</span>
+                            <span class="info-val" id="pocket-count">Pocket #1 (ASP-52, GLU-108)</span>
+                        </div>
+                        <div class="pocket-row">
+                            <span class="info-lbl">预测结合强度 (Kd):</span>
+                            <span class="info-val highlight" id="affinity-val">12.4 nM</span>
+                        </div>
+                    </div>
+                    <button id="focus-pocket-btn" class="action-button-glow">🎯 平滑对焦口袋结合残基</button>
+                </div>
+
+                <div class="panel-footer">
+                    <p>Powered by Molstar Engine & AIDD APIs</p>
+                </div>
+            </section>
+
+            <!-- Right 3D Viewport -->
+            <section class="glass-panel viewport-panel">
+                <div id="pdb-viewer" class="viewer-container"></div>
+                
+                <!-- On-screen 3D overlay tools -->
+                <div class="viewport-overlay">
+                    <div class="fps-counter">渲染帧率: <span id="fps-val">60</span> FPS</div>
+                    <div class="control-tips">按住鼠标左键旋转 · 右键平移 · 滚轮缩放</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- PDBe-molstar JS Library -->
+    <script type="text/javascript" src="https://www.ebi.ac.uk/pdbe/pdb-component-library/js/pdbe-molstar-plugin-3.1.2.js"></script>
+    <!-- Custom JS -->
+    <script src="app.js"></script>
+</body>
+</html>

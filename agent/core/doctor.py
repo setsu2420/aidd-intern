@@ -315,19 +315,59 @@ def _check_proteinmcp_setting() -> DoctorCheck:
             "proteinmcp",
             "local ProteinMCP launchers are disabled by default",
         )
+    
     launcher = PROJECT_ROOT / "scripts" / "run-proteinmcp-local.sh"
-    if launcher.exists():
+    if not launcher.exists():
         return DoctorCheck(
-            "ok",
+            "fail",
             "proteinmcp",
-            "local ProteinMCP is enabled and launcher script exists",
+            "AIDD_INTERN_ENABLE_PROTEINMCP=1 but launcher script is missing",
+            "Restore scripts/run-proteinmcp-local.sh or disable ProteinMCP.",
         )
-    return DoctorCheck(
-        "fail",
-        "proteinmcp",
-        "AIDD_INTERN_ENABLE_PROTEINMCP=1 but launcher script is missing",
-        "Restore scripts/run-proteinmcp-local.sh or disable ProteinMCP.",
+
+    # 深度检验各工具链的实质安装情况
+    base_dir = os.environ.get("AIDD_INTERN_PROTEINMCP_HOME") or os.path.expanduser(
+        "~/.cache/aidd-intern/proteinmcp"
     )
+    base_path = Path(base_dir)
+
+    missing_tools = []
+    
+    # 1. bindcraft_mcp
+    bindcraft_dir = base_path / "bindcraft_mcp"
+    bindcraft_python = bindcraft_dir / "env" / "bin" / "python"
+    bindcraft_py = bindcraft_dir / "src" / "bindcraft_mcp.py"
+    if not (bindcraft_dir.exists() and bindcraft_python.exists() and bindcraft_py.exists()):
+        missing_tools.append("bindcraft_mcp")
+
+    # 2. boltzgen_mcp
+    boltzgen_dir = base_path / "boltzgen_mcp"
+    boltzgen_python = boltzgen_dir / "env" / "bin" / "python"
+    boltzgen_py = boltzgen_dir / "src" / "server.py"
+    if not (boltzgen_dir.exists() and boltzgen_python.exists() and boltzgen_py.exists()):
+        missing_tools.append("boltzgen_mcp")
+
+    # 3. pxdesign_mcp
+    pxdesign_dir = base_path / "PXDesign"
+    pxdesign_py = PROJECT_ROOT / "scripts" / "pxdesign_mcp_server.py"
+    if not (pxdesign_dir.exists() and pxdesign_py.exists()):
+        missing_tools.append("pxdesign_mcp")
+
+    if missing_tools:
+        tools_str = ", ".join(missing_tools)
+        return DoctorCheck(
+            "warn",
+            "proteinmcp",
+            f"local ProteinMCP is enabled, but some toolchains are not fully installed: {tools_str}",
+            "Run 'scripts/setup-proteinmcp-local.sh all' to install missing scientific toolchains.",
+        )
+
+    return DoctorCheck(
+        "ok",
+        "proteinmcp",
+        "local ProteinMCP is enabled and all scientific toolchains (bindcraft, boltzgen, pxdesign) are fully configured",
+    )
+
 
 
 if __name__ == "__main__":

@@ -64,6 +64,15 @@ _EXPORTS = {
     "hf_jobs_handler": ("agent.tools.jobs_tool", "hf_jobs_handler"),
     "WEB_SEARCH_TOOL_SPEC": ("agent.tools.web_search_tool", "WEB_SEARCH_TOOL_SPEC"),
     "web_search_handler": ("agent.tools.web_search_tool", "web_search_handler"),
+    # Self-evolution: Knowledge Wiki search tool
+    "KNOWLEDGE_WIKI_TOOL_SPEC": (
+        "agent.core.knowledge_wiki",
+        "KNOWLEDGE_WIKI_TOOL_SPEC",
+    ),
+    "knowledge_wiki_search_handler": (
+        "agent.core.knowledge_wiki",
+        "knowledge_wiki_search_handler",
+    ),
 }
 
 __all__ = list(_EXPORTS)

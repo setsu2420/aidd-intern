@@ -69,16 +69,86 @@
     {
       "id": "gemini/gemini-2.5-pro",
       "label": "Gemini 2.5 Pro",
-      "provider": "google",
+      "provider": "gemini",
       "tier": "pro",
       "aliases": ["gemini", "gemini-pro"]
     },
     {
       "id": "dashscope/qwen-max",
       "label": "Qwen Max via DashScope",
-      "provider": "aliyun",
+      "provider": "dashscope",
       "tier": "pro",
       "aliases": ["qwen", "qwen-max", "dashscope"]
+    },
+    {
+      "id": "kimi/moonshot-v1-128k",
+      "label": "Kimi Moonshot 128K",
+      "provider": "kimi",
+      "tier": "external",
+      "aliases": ["kimi-direct", "moonshot"]
+    },
+    {
+      "id": "deepseek/deepseek-chat",
+      "label": "DeepSeek Chat",
+      "provider": "deepseek",
+      "tier": "external",
+      "aliases": ["deepseek-direct"]
+    },
+    {
+      "id": "deepseek/deepseek-reasoner",
+      "label": "DeepSeek Reasoner (R1)",
+      "provider": "deepseek",
+      "tier": "external",
+      "aliases": ["deepseek-r1", "r1"]
+    },
+    {
+      "id": "xai/grok-3",
+      "label": "Grok 3",
+      "provider": "xai",
+      "tier": "external",
+      "aliases": ["grok", "grok3"]
+    },
+    {
+      "id": "minimax/MiniMax-M1",
+      "label": "MiniMax M1",
+      "provider": "minimax",
+      "tier": "external",
+      "aliases": ["minimax-direct", "minimax-m1"]
+    },
+    {
+      "id": "nvidia/nvidia/nemotron-4-340b-instruct",
+      "label": "Nemotron 4 340B via NVIDIA NIM",
+      "provider": "nvidia",
+      "tier": "external",
+      "aliases": ["nemotron", "nvidia-nim"]
+    },
+    {
+      "id": "novita/deepseek-ai/deepseek-r1",
+      "label": "DeepSeek R1 via NovitaAI",
+      "provider": "novita",
+      "tier": "external",
+      "aliases": ["novita", "novita-r1"]
+    },
+    {
+      "id": "tencent/hunyuan-turbo",
+      "label": "HunYuan Turbo via Tencent",
+      "provider": "tencent",
+      "tier": "external",
+      "aliases": ["tencent", "hunyuan"]
+    },
+    {
+      "id": "xiaomi/MiMo-7B-RL",
+      "label": "Xiaomi MiMo 7B",
+      "provider": "xiaomi",
+      "tier": "external",
+      "aliases": ["mimo", "xiaomi-mimo"]
+    },
+    {
+      "id": "arcee/arcee-ai/ARCeNES-32B",
+      "label": "ARCeNES 32B via Arcee",
+      "provider": "arcee",
+      "tier": "external",
+      "aliases": ["arcee", "arcenes"]
     }
   ]
 }

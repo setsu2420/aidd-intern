@@ -372,3 +372,135 @@ async def test_memu_memorize_handler_works(mock_amemorize, monkeypatch):
     assert ok is True
     data = json.loads(output)
     assert data["status"] == "SUCCESS"
+
+
+# ==================== Reusable Connection Pool and Cache Eviction Tests ====================
+
+
+def test_memu_client_connection_pooling():
+    client = MemUClient(api_key="test_key")
+    
+    # Verify synchronous client reuse
+    c1 = client.get_client()
+    c2 = client.get_client()
+    assert c1 is c2
+    assert isinstance(c1, httpx.Client)
+
+    # Verify asynchronous client reuse
+    ac1 = client.get_aclient()
+    ac2 = client.get_aclient()
+    assert ac1 is ac2
+    assert isinstance(ac1, httpx.AsyncClient)
+
+
+def test_memu_client_cache_eviction():
+    client = MemUClient(api_key="test_key")
+    
+    # Fill cache up to the 128 limit
+    for i in range(128):
+        client._add_to_cache(f"key_{i}", f"val_{i}")
+    
+    assert len(client._cache) == 128
+    assert "key_0" in client._cache
+
+    # Add 129th item, which should trigger eviction of "key_0" (the oldest item)
+    client._add_to_cache("key_128", "val_128")
+    assert len(client._cache) == 128
+    assert "key_0" not in client._cache
+    assert "key_128" in client._cache
+    assert "key_1" in client._cache
+
+
+# ==================== Fallback Cache and Timeout Tests ====================
+
+
+def test_memu_fallback_cache_save_and_load(tmp_path, monkeypatch):
+    from agent.core import memu
+    
+    # Override local memories fallback path to a temporary file
+    temp_fallback_path = tmp_path / "local_memories_fallback.json"
+    monkeypatch.setattr(memu, "LOCAL_MEMORIES_FALLBACK_PATH", temp_fallback_path)
+    
+    dummy_res = {
+        "rewritten_query": "What are hobbies?",
+        "categories": [{"name": "sports", "summary": "John plays tennis."}],
+        "items": [],
+        "resources": [],
+    }
+    
+    # Save cache
+    memu._save_local_fallback_cache("user_dummy", "agent_dummy", dummy_res)
+    
+    # Load cache
+    loaded = memu._load_local_fallback_cache("user_dummy", "agent_dummy")
+    assert loaded is not None
+    assert loaded["rewritten_query"] == "What are hobbies?"
+    assert len(loaded["categories"]) == 1
+    
+    # Load cache for non-existent key
+    assert memu._load_local_fallback_cache("other", "other") is None
+
+
+@patch("agent.core.memu.httpx.Client")
+def test_memu_retrieve_fallback_on_network_failure(mock_client_class, tmp_path, monkeypatch):
+    from agent.core import memu
+    
+    temp_fallback_path = tmp_path / "local_memories_fallback.json"
+    monkeypatch.setattr(memu, "LOCAL_MEMORIES_FALLBACK_PATH", temp_fallback_path)
+    
+    # Save a known cache
+    dummy_res = {
+        "rewritten_query": "hobbies",
+        "categories": [{"name": "sports", "summary": "tennis"}],
+        "items": [],
+        "resources": [],
+    }
+    memu._save_local_fallback_cache("user_test", "agent_test", dummy_res)
+    
+    # Mock network client to throw timeout exception
+    mock_client_instance = MagicMock()
+    mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+    mock_client_instance.request.side_effect = httpx.TimeoutException("Connection timed out")
+    mock_client_class.return_value = mock_client_instance
+    
+    client = MemUClient(api_key="test_key")
+    
+    # Call retrieve - should catch exception and fallback
+    res = client.retrieve("user_test", "agent_test", query="hobbies")
+    
+    assert res["rewritten_query"] == "hobbies"
+    assert res["categories"][0]["summary"] == "tennis"
+
+
+@pytest.mark.asyncio
+@patch("agent.core.memu.httpx.AsyncClient")
+async def test_memu_aretrieve_fallback_on_network_failure(mock_aclient_class, tmp_path, monkeypatch):
+    from agent.core import memu
+    
+    temp_fallback_path = tmp_path / "local_memories_fallback.json"
+    monkeypatch.setattr(memu, "LOCAL_MEMORIES_FALLBACK_PATH", temp_fallback_path)
+    
+    # Save a known cache
+    dummy_res = {
+        "rewritten_query": "hobbies async",
+        "categories": [{"name": "sports", "summary": "tennis async"}],
+        "items": [],
+        "resources": [],
+    }
+    memu._save_local_fallback_cache("user_test", "agent_test", dummy_res)
+    
+    # Mock network client to throw error
+    mock_aclient_instance = MagicMock()
+    mock_aclient_instance.__aenter__ = AsyncMock(return_value=mock_aclient_instance)
+    mock_aclient_instance.request.side_effect = httpx.ConnectError("Failed to connect")
+    mock_aclient_class.return_value = mock_aclient_instance
+    
+    client = MemUClient(api_key="test_key")
+    
+    # Call aretrieve - should catch exception and fallback
+    res = await client.aretrieve("user_test", "agent_test", query="hobbies async")
+    
+    assert res["rewritten_query"] == "hobbies async"
+    assert res["categories"][0]["summary"] == "tennis async"
+
+

@@ -198,7 +198,24 @@ def _provider_from_model_id(model_id: str) -> str:
     if "/" not in model_id:
         return "custom"
     prefix = model_id.split("/", 1)[0]
-    if prefix in {"openai", "anthropic", "bedrock", "openrouter", "siliconflow"}:
+    if prefix in {
+        "openai",
+        "anthropic",
+        "bedrock",
+        "openrouter",
+        "siliconflow",
+        "novita",
+        "nvidia",
+        "kimi",
+        "minimax",
+        "xai",
+        "deepseek",
+        "gemini",
+        "dashscope",
+        "tencent",
+        "xiaomi",
+        "arcee",
+    }:
         return prefix
     if prefix in {"ollama", "vllm", "lm_studio", "llamacpp"}:
         return prefix
