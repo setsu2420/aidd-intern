@@ -203,6 +203,7 @@ async def test_short_term_mermaid_injection():
     class DummyTaskCanvas:
         def __init__(self):
             self.nodes = {"PXDesign": {"status": "SUCCESS", "details": "1.2s"}}
+
         def render_mermaid(self):
             return "mermaid_code_block"
 
@@ -219,10 +220,10 @@ async def test_short_term_mermaid_injection():
     session.task_canvas = DummyTaskCanvas()
     session.layered_long_term_memory_prompt = ""
     session.is_cancelled = False
-    
+
     # We mock _call_llm_streaming and _call_llm_non_streaming to return dummy values and capture parameters
     captured_messages = []
-    
+
     async def mock_call_llm(session, messages, tools, params):
         nonlocal captured_messages
         captured_messages = list(messages)
@@ -231,16 +232,21 @@ async def test_short_term_mermaid_injection():
         mock_result.tool_calls = []
         return mock_result
 
-    with patch("agent.core.agent_loop._call_llm_non_streaming", side_effect=mock_call_llm), \
-         patch("agent.core.agent_loop._compact_and_notify", return_value=None):
-        
-        session.context_manager.get_messages.return_value = [Message(role="user", content="hello")]
+    with (
+        patch(
+            "agent.core.agent_loop._call_llm_non_streaming", side_effect=mock_call_llm
+        ),
+        patch("agent.core.agent_loop._compact_and_notify", return_value=None),
+    ):
+        session.context_manager.get_messages.return_value = [
+            Message(role="user", content="hello")
+        ]
         session.tool_router.get_tool_specs_for_llm.return_value = []
         session.effective_effort_for.return_value = None
         session.stream = False
-        
+
         await Handlers.run_agent(session, "hello")
-        
+
         # Verify that our captured messages contains the system mermaid injection
         assert len(captured_messages) > 1
         last_msg = captured_messages[-1]
@@ -270,26 +276,31 @@ async def test_long_term_layered_memory_auto_retrieve():
     session.is_cancelled = False
 
     # We mock MemUClient to return configured
-    with patch("agent.core.memu.MemUClient.is_configured", return_value=True), \
-         patch("agent.core.memory.LayeredMemoryPipeline.aretrieve_layered") as mock_aretrieve, \
-         patch("agent.core.agent_loop._call_llm_non_streaming") as mock_call, \
-         patch("agent.core.agent_loop._compact_and_notify", return_value=None):
-        
-        mock_aretrieve.return_value = {"formatted_prompt": "Layered Long Term Memory Context"}
+    with (
+        patch("agent.core.memu.MemUClient.is_configured", return_value=True),
+        patch(
+            "agent.core.memory.LayeredMemoryPipeline.aretrieve_layered"
+        ) as mock_aretrieve,
+        patch("agent.core.agent_loop._call_llm_non_streaming") as mock_call,
+        patch("agent.core.agent_loop._compact_and_notify", return_value=None),
+    ):
+        mock_aretrieve.return_value = {
+            "formatted_prompt": "Layered Long Term Memory Context"
+        }
         mock_call.return_value = MagicMock(content="reply", tool_calls=[])
         session.context_manager.get_messages.return_value = []
-        
+
         await Handlers.run_agent(session, "hi")
-        
+
         # Verify that aretrieve_layered was called with correct parameters
         mock_aretrieve.assert_called_once_with(
-            user_id="test_user_id",
-            agent_id="test-model",
-            query="hi",
-            user_name="Bob"
+            user_id="test_user_id", agent_id="test-model", query="hi", user_name="Bob"
         )
         # Verify it was successfully cached
-        assert session.layered_long_term_memory_prompt == "Layered Long Term Memory Context"
+        assert (
+            session.layered_long_term_memory_prompt
+            == "Layered Long Term Memory Context"
+        )
         assert session._long_term_memory_loaded is True
 
 
@@ -313,6 +324,7 @@ async def test_long_term_layered_memory_injection():
     session.is_cancelled = False
 
     captured_messages = []
+
     async def mock_call_llm(session, messages, tools, params):
         nonlocal captured_messages
         captured_messages = list(messages)
@@ -321,17 +333,20 @@ async def test_long_term_layered_memory_injection():
         mock_result.tool_calls = []
         return mock_result
 
-    with patch("agent.core.agent_loop._call_llm_non_streaming", side_effect=mock_call_llm), \
-         patch("agent.core.agent_loop._compact_and_notify", return_value=None):
-        
+    with (
+        patch(
+            "agent.core.agent_loop._call_llm_non_streaming", side_effect=mock_call_llm
+        ),
+        patch("agent.core.agent_loop._compact_and_notify", return_value=None),
+    ):
         session.context_manager.get_messages.return_value = [
             Message(role="system", content="Default system instructions"),
-            Message(role="user", content="hello")
+            Message(role="user", content="hello"),
         ]
         session.stream = False
-        
+
         await Handlers.run_agent(session, "hello")
-        
+
         # Verify that layered long-term memory was prepended or appended to the system message
         assert len(captured_messages) >= 2
         sys_msg = captured_messages[0]
@@ -363,24 +378,27 @@ async def test_layered_memory_async_background_memorize():
     session.context_manager.items = [
         MagicMock(role="user", content="hi"),
         MagicMock(role="assistant", content="hello"),
-        MagicMock(role="user", content="bye")
+        MagicMock(role="user", content="bye"),
     ]
 
     # Mock MemUClient's is_configured and amemorize
-    with patch("agent.core.memu.MemUClient.is_configured", return_value=True), \
-         patch("agent.core.memu.MemUClient.amemorize", new_callable=AsyncMock) as mock_amemorize, \
-         patch("agent.core.agent_loop._call_llm_non_streaming") as mock_call, \
-         patch("agent.core.agent_loop._compact_and_notify", return_value=None):
-        
+    with (
+        patch("agent.core.memu.MemUClient.is_configured", return_value=True),
+        patch(
+            "agent.core.memu.MemUClient.amemorize", new_callable=AsyncMock
+        ) as mock_amemorize,
+        patch("agent.core.agent_loop._call_llm_non_streaming") as mock_call,
+        patch("agent.core.agent_loop._compact_and_notify", return_value=None),
+    ):
         mock_call.return_value = MagicMock(content="reply", tool_calls=[])
         session.context_manager.get_messages.return_value = []
-        
+
         # We call run_agent
         await Handlers.run_agent(session, "hi")
-        
+
         # We yield control to let background tasks execute
         await asyncio.sleep(0.05)
-        
+
         # amemorize should be dispatched in the background
         mock_amemorize.assert_called_once()
         kwargs = mock_amemorize.call_args[1]

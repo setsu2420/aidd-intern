@@ -236,7 +236,7 @@ def load_config(
 
     config_with_env = substitute_env_vars(raw_config)
     config = Config.model_validate(config_with_env)
-    
+
     # Merge whitelist from environment variable
     env_whitelist = _env_list("AIDD_INTERN_DANGEROUS_COMMANDS_WHITELIST")
     if env_whitelist:

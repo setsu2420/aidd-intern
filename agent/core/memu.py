@@ -24,7 +24,9 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
-LOCAL_MEMORIES_FALLBACK_PATH = Path("~/.gemini/antigravity-cli/local_memories_fallback.json").expanduser()
+LOCAL_MEMORIES_FALLBACK_PATH = Path(
+    "~/.gemini/antigravity-cli/local_memories_fallback.json"
+).expanduser()
 
 
 try:
@@ -33,6 +35,7 @@ try:
         json_dumps_sorted,
         save_json_atomic,
     )
+
     _RUST_AVAILABLE = True
 except ImportError:
     _RUST_AVAILABLE = False
@@ -53,7 +56,7 @@ def _load_local_fallback_cache(user_id: str, agent_id: str) -> Dict[str, Any] | 
             else:
                 with open(LOCAL_MEMORIES_FALLBACK_PATH, "r", encoding="utf-8") as f:
                     content = f.read()
-            
+
             if content:
                 data = json.loads(content)
                 key = f"{user_id}:{agent_id}"
@@ -64,7 +67,9 @@ def _load_local_fallback_cache(user_id: str, agent_id: str) -> Dict[str, Any] | 
     return None
 
 
-def _save_local_fallback_cache(user_id: str, agent_id: str, raw_res: Dict[str, Any]) -> None:
+def _save_local_fallback_cache(
+    user_id: str, agent_id: str, raw_res: Dict[str, Any]
+) -> None:
     """Save user-agent specific memory cache to local fallback storage, using Rust if available."""
     try:
         LOCAL_MEMORIES_FALLBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +81,9 @@ def _save_local_fallback_cache(user_id: str, agent_id: str, raw_res: Dict[str, A
                     try:
                         content = read_file_utf8(str(LOCAL_MEMORIES_FALLBACK_PATH))
                     except Exception:
-                        with open(LOCAL_MEMORIES_FALLBACK_PATH, "r", encoding="utf-8") as f:
+                        with open(
+                            LOCAL_MEMORIES_FALLBACK_PATH, "r", encoding="utf-8"
+                        ) as f:
                             content = f.read()
                 else:
                     with open(LOCAL_MEMORIES_FALLBACK_PATH, "r", encoding="utf-8") as f:
@@ -96,17 +103,20 @@ def _save_local_fallback_cache(user_id: str, agent_id: str, raw_res: Dict[str, A
                 # 使用 Rust 极速无 GIL 锁的 JSON 转换
                 json_str = json_dumps_sorted(data)
                 # 使用 Rust 的原子级原子写（tempfile + rename，安全高防灾）
-                save_json_atomic(str(LOCAL_MEMORIES_FALLBACK_PATH), json_str.encode("utf-8"))
+                save_json_atomic(
+                    str(LOCAL_MEMORIES_FALLBACK_PATH), json_str.encode("utf-8")
+                )
                 return
             except Exception as we:
-                logger.warning("Rust JSON serialization/write failed, falling back: %s", we)
+                logger.warning(
+                    "Rust JSON serialization/write failed, falling back: %s", we
+                )
 
         # 纯 Python 兜底持久化
         with open(LOCAL_MEMORIES_FALLBACK_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.warning("Failed to save local fallback memory cache: %s", e)
-
 
 
 BASE_URL = "https://api.memu.so"
@@ -378,7 +388,6 @@ class MemUClient:
             "resources": [],
         }
 
-
     def delete_memories(
         self, user_id: str, agent_id: str | None = None
     ) -> Union[str, Dict[str, Any]]:
@@ -558,7 +567,6 @@ class MemUClient:
             "items": [],
             "resources": [],
         }
-
 
     async def adelete_memories(
         self, user_id: str, agent_id: str | None = None

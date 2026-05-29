@@ -1243,9 +1243,7 @@ async def get_pdb_structure(
     return StreamingResponse(
         stream_and_cache_generator(),
         media_type="text/plain",
-        headers={
-            "Content-Disposition": f"attachment; filename={pdb_id}.{file_format}"
-        },
+        headers={"Content-Disposition": f"attachment; filename={pdb_id}.{file_format}"},
     )
 
 
@@ -1284,7 +1282,4 @@ async def get_local_structure(
             detail="Structure file not found in current workspace.",
         )
 
-    return FileResponse(
-        path=str(path), media_type="text/plain", filename=path.name
-    )
-
+    return FileResponse(path=str(path), media_type="text/plain", filename=path.name)

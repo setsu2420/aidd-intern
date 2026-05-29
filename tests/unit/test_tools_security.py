@@ -1,7 +1,3 @@
-import pytest
-import re
-from unittest.mock import patch
-from typing import Any
 from agent.core.tools import (
     _check_path_traversal,
     _check_command_injection,
@@ -15,22 +11,22 @@ SAFE_ARGS = {
     "params": {
         "work_dir": "/tmp/job_123",
         "nested": ["value1", "value2"],
-        "metadata": {"author": "Alice"}
-    }
+        "metadata": {"author": "Alice"},
+    },
 }
 
 PATH_TRAVERSAL_ARGS = {
     "name": "harmless",
     "nested": {
         "bad_path": "/home/user/../../etc/passwd",  # path traversal pattern
-        "good_path": "/tmp/harmless.txt"
-    }
+        "good_path": "/tmp/harmless.txt",
+    },
 }
 
 COMMAND_INJECTION_ARGS = {
     "commands": [
         "echo 'Running boltzgen...'",
-        "rm -rf /"  # command injection pattern
+        "rm -rf /",  # command injection pattern
     ]
 }
 

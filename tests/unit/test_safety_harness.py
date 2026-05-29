@@ -1,6 +1,4 @@
 import pytest
-import os
-import tempfile
 from pathlib import Path
 from agent.tools.local_tools import (
     _bash_handler,
@@ -10,6 +8,7 @@ from agent.tools.local_tools import (
     _check_path_safety,
     _files_read,
 )
+
 
 @pytest.mark.asyncio
 async def test_bash_handler_blocks_dangerous_commands():
@@ -60,16 +59,20 @@ async def test_filesystem_handlers_block_outside_paths():
     assert "Permission denied" in res_read
 
     # Attempt to write out of bounds
-    res_write, ok_write = await _write_handler({"path": "/etc/arbitrary_write", "content": "malicious"})
+    res_write, ok_write = await _write_handler(
+        {"path": "/etc/arbitrary_write", "content": "malicious"}
+    )
     assert not ok_write
     assert "Permission denied" in res_write
 
     # Attempt to edit out of bounds
-    res_edit, ok_edit = await _edit_handler({
-        "path": "/etc/passwd",
-        "old_str": "root",
-        "new_str": "hacked",
-    })
+    res_edit, ok_edit = await _edit_handler(
+        {
+            "path": "/etc/passwd",
+            "old_str": "root",
+            "new_str": "hacked",
+        }
+    )
     assert not ok_edit
     assert "Permission denied" in res_edit
 
@@ -78,20 +81,24 @@ async def test_filesystem_handlers_block_outside_paths():
 async def test_filesystem_handlers_allow_workspace_paths(tmp_path):
     # Use workspace folder for simulated file operations
     # Create a test file inside workspace root
-    workspace_test_file = Path("/home/xxue/aidd-intern/temp_test_safety_harness_file.txt")
-    
+    workspace_test_file = Path(
+        "/home/xxue/aidd-intern/temp_test_safety_harness_file.txt"
+    )
+
     try:
         # We must bypass the read-before-write constraint initially or read a dummy
         # Clean up files read cache for test isolation
         _files_read.clear()
-        
+
         # Test write (which resolves path safety)
         # Note: write fails if existing and not read. Here we create a new file.
         # But if it exists, it needs read. So we do _files_read.add first to simulate it's allowed or simulate new write.
-        res_write, ok_write = await _write_handler({
-            "path": str(workspace_test_file),
-            "content": "Line 1: Hello Workspace\nLine 2: Safety First"
-        })
+        res_write, ok_write = await _write_handler(
+            {
+                "path": str(workspace_test_file),
+                "content": "Line 1: Hello Workspace\nLine 2: Safety First",
+            }
+        )
         assert ok_write
         assert "Wrote" in res_write
 
@@ -101,16 +108,20 @@ async def test_filesystem_handlers_allow_workspace_paths(tmp_path):
         assert "Hello Workspace" in res_read
 
         # Now test edit (requires file to have been read)
-        res_edit, ok_edit = await _edit_handler({
-            "path": str(workspace_test_file),
-            "old_str": "Safety First",
-            "new_str": "Safety Ensured",
-        })
+        res_edit, ok_edit = await _edit_handler(
+            {
+                "path": str(workspace_test_file),
+                "old_str": "Safety First",
+                "new_str": "Safety Ensured",
+            }
+        )
         assert ok_edit
         assert "Edited" in res_edit
 
         # Verify read contains edited value
-        res_read_final, ok_read_final = await _read_handler({"path": str(workspace_test_file)})
+        res_read_final, ok_read_final = await _read_handler(
+            {"path": str(workspace_test_file)}
+        )
         assert "Safety Ensured" in res_read_final
 
     finally:
@@ -124,17 +135,17 @@ async def test_filesystem_handlers_allow_workspace_paths(tmp_path):
 async def test_bash_handler_dangerous_command_with_whitelist(monkeypatch):
     # Set whitelist environment variable to bypass
     monkeypatch.setenv("AIDD_INTERN_DANGEROUS_COMMANDS_WHITELIST", "rm")
-    
+
     # Mock subprocess.run to avoid actual execution while verifying it bypasses
     import subprocess
     from unittest.mock import MagicMock
-    
+
     mock_run = MagicMock()
     mock_run.return_value.returncode = 0
     mock_run.return_value.stdout = "whitelisted execution bypassed"
     mock_run.return_value.stderr = ""
     monkeypatch.setattr(subprocess, "run", mock_run)
-    
+
     res, ok = await _bash_handler({"command": "rm -rf ~"})
     assert ok
     assert "whitelisted execution bypassed" in res
@@ -145,18 +156,18 @@ async def test_bash_handler_interactive_approval_accept(monkeypatch):
     import sys
     import subprocess
     from unittest.mock import MagicMock
-    
+
     # Mock stdin to be a TTY (interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     # Mock user typing 'y' for yes
     monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "y")
-    
+
     mock_run = MagicMock()
     mock_run.return_value.returncode = 0
     mock_run.return_value.stdout = "interactive user approved run"
     mock_run.return_value.stderr = ""
     monkeypatch.setattr(subprocess, "run", mock_run)
-    
+
     res, ok = await _bash_handler({"command": "rm -rf ~"})
     assert ok
     assert "interactive user approved run" in res
@@ -165,12 +176,12 @@ async def test_bash_handler_interactive_approval_accept(monkeypatch):
 @pytest.mark.asyncio
 async def test_bash_handler_interactive_approval_reject(monkeypatch):
     import sys
-    
+
     # Mock stdin to be a TTY (interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     # Mock user typing 'n' for no
     monkeypatch.setattr("builtins.input", lambda *args, **kwargs: "n")
-    
+
     res, ok = await _bash_handler({"command": "rm -rf ~"})
     assert not ok
     assert "rejected by the user" in res

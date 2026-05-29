@@ -714,25 +714,33 @@ async def _proteinmpnn_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         combined = f"{output}\n{errors}".strip()
         if proc.returncode != 0:
             hw = _parse_hardware_errors(combined)
-            return _format_result({
-                "status": "failed",
-                "returncode": proc.returncode,
+            return _format_result(
+                {
+                    "status": "failed",
+                    "returncode": proc.returncode,
+                    "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+                    "hardware_errors": hw,
+                }
+            ), False
+        return _format_result(
+            {
+                "status": "completed",
+                "output_dir": output_dir,
+                "num_sequences": num_sequences,
                 "output": combined[:MAX_TOOL_OUTPUT_CHARS],
-                "hardware_errors": hw,
-            }), False
-        return _format_result({
-            "status": "completed",
-            "output_dir": output_dir,
-            "num_sequences": num_sequences,
-            "output": combined[:MAX_TOOL_OUTPUT_CHARS],
-        }), True
+            }
+        ), True
     except asyncio.TimeoutError:
-        return _format_result({"status": "timeout", "timeout_s": arguments.get("timeout_s")}), False
+        return _format_result(
+            {"status": "timeout", "timeout_s": arguments.get("timeout_s")}
+        ), False
     except FileNotFoundError:
-        return _format_result({
-            "status": "failed",
-            "error": "ProteinMPNN not found. Install with: pip install proteinmpnn",
-        }), False
+        return _format_result(
+            {
+                "status": "failed",
+                "error": "ProteinMPNN not found. Install with: pip install proteinmpnn",
+            }
+        ), False
     except Exception as exc:
         return _format_result({"status": "failed", "error": str(exc)}), False
 
@@ -759,7 +767,9 @@ async def _esmfold_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             "print(f'pTM: {output[\"ptm\"].item():.2f}')\n"
         )
         proc = await asyncio.create_subprocess_exec(
-            "python", "-c", script,
+            "python",
+            "-c",
+            script,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -772,19 +782,25 @@ async def _esmfold_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         combined = f"{output}\n{errors}".strip()
         if proc.returncode != 0:
             hw = _parse_hardware_errors(combined)
-            return _format_result({
-                "status": "failed",
-                "returncode": proc.returncode,
+            return _format_result(
+                {
+                    "status": "failed",
+                    "returncode": proc.returncode,
+                    "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+                    "hardware_errors": hw,
+                }
+            ), False
+        return _format_result(
+            {
+                "status": "completed",
+                "output_pdb": output_pdb,
                 "output": combined[:MAX_TOOL_OUTPUT_CHARS],
-                "hardware_errors": hw,
-            }), False
-        return _format_result({
-            "status": "completed",
-            "output_pdb": output_pdb,
-            "output": combined[:MAX_TOOL_OUTPUT_CHARS],
-        }), True
+            }
+        ), True
     except asyncio.TimeoutError:
-        return _format_result({"status": "timeout", "timeout_s": arguments.get("timeout_s")}), False
+        return _format_result(
+            {"status": "timeout", "timeout_s": arguments.get("timeout_s")}
+        ), False
     except Exception as exc:
         return _format_result({"status": "failed", "error": str(exc)}), False
 
@@ -798,26 +814,42 @@ async def _foldseek_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 
     if mode == "cluster":
         cmd = [
-            "foldseek", "easy-cluster",
-            input_path, output_path, "tmp",
-            "--min-seq-id", str(min_seq_id),
-            "-e", "0.001",
-            "--alignment-type", "1",  # 3Di alignment
+            "foldseek",
+            "easy-cluster",
+            input_path,
+            output_path,
+            "tmp",
+            "--min-seq-id",
+            str(min_seq_id),
+            "-e",
+            "0.001",
+            "--alignment-type",
+            "1",  # 3Di alignment
         ]
     elif mode == "search":
         db_path = arguments.get("db_path")
         if not db_path:
-            return _format_result({"status": "failed", "error": "db_path required for search mode"}), False
+            return _format_result(
+                {"status": "failed", "error": "db_path required for search mode"}
+            ), False
         cmd = [
-            "foldseek", "easy-search",
-            input_path, db_path, output_path, "tmp",
-            "-e", "0.001",
-            "--alignment-type", "1",
+            "foldseek",
+            "easy-search",
+            input_path,
+            db_path,
+            output_path,
+            "tmp",
+            "-e",
+            "0.001",
+            "--alignment-type",
+            "1",
         ]
     elif mode == "createdb":
         cmd = ["foldseek", "createdb", input_path, output_path]
     else:
-        return _format_result({"status": "failed", "error": f"Unknown mode: {mode}"}), False
+        return _format_result(
+            {"status": "failed", "error": f"Unknown mode: {mode}"}
+        ), False
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -833,24 +865,32 @@ async def _foldseek_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         errors = stderr.decode(errors="replace")
         combined = f"{output}\n{errors}".strip()
         if proc.returncode != 0:
-            return _format_result({
-                "status": "failed",
-                "returncode": proc.returncode,
+            return _format_result(
+                {
+                    "status": "failed",
+                    "returncode": proc.returncode,
+                    "output": combined[:MAX_TOOL_OUTPUT_CHARS],
+                }
+            ), False
+        return _format_result(
+            {
+                "status": "completed",
+                "mode": mode,
+                "output_path": output_path,
                 "output": combined[:MAX_TOOL_OUTPUT_CHARS],
-            }), False
-        return _format_result({
-            "status": "completed",
-            "mode": mode,
-            "output_path": output_path,
-            "output": combined[:MAX_TOOL_OUTPUT_CHARS],
-        }), True
+            }
+        ), True
     except asyncio.TimeoutError:
-        return _format_result({"status": "timeout", "timeout_s": arguments.get("timeout_s")}), False
+        return _format_result(
+            {"status": "timeout", "timeout_s": arguments.get("timeout_s")}
+        ), False
     except FileNotFoundError:
-        return _format_result({
-            "status": "failed",
-            "error": "Foldseek not found. Install: https://github.com/steineggerlab/foldseek",
-        }), False
+        return _format_result(
+            {
+                "status": "failed",
+                "error": "Foldseek not found. Install: https://github.com/steineggerlab/foldseek",
+            }
+        ), False
     except Exception as exc:
         return _format_result({"status": "failed", "error": str(exc)}), False
 
@@ -858,7 +898,12 @@ async def _foldseek_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
 async def _sequence_analysis_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     """Analyse protein sequence properties: hydrophobicity, charge, aggregation, ESM2 PLL."""
     sequence = arguments["sequence"]
-    analyses = arguments.get("analyses") or ["hydrophobicity", "charge", "aggregation", "esm2_pll"]
+    analyses = arguments.get("analyses") or [
+        "hydrophobicity",
+        "charge",
+        "aggregation",
+        "esm2_pll",
+    ]
     if isinstance(analyses, str):
         analyses = [a.strip() for a in analyses.split(",")]
 
@@ -867,12 +912,30 @@ async def _sequence_analysis_tool(arguments: dict[str, Any]) -> tuple[str, bool]
     # Hydrophobicity (Kyte-Doolittle scale)
     if "hydrophobicity" in analyses:
         kd_scale = {
-            "A": 1.8, "R": -4.5, "N": -3.5, "D": -3.5, "C": 2.5,
-            "Q": -3.5, "E": -3.5, "G": -0.4, "H": -3.2, "I": 4.5,
-            "L": 3.8, "K": -3.9, "M": 1.9, "F": 2.8, "P": -1.6,
-            "S": -0.8, "T": -0.7, "W": -0.9, "Y": -1.3, "V": 4.2,
+            "A": 1.8,
+            "R": -4.5,
+            "N": -3.5,
+            "D": -3.5,
+            "C": 2.5,
+            "Q": -3.5,
+            "E": -3.5,
+            "G": -0.4,
+            "H": -3.2,
+            "I": 4.5,
+            "L": 3.8,
+            "K": -3.9,
+            "M": 1.9,
+            "F": 2.8,
+            "P": -1.6,
+            "S": -0.8,
+            "T": -0.7,
+            "W": -0.9,
+            "Y": -1.3,
+            "V": 4.2,
         }
-        scores = [kd_scale.get(aa.upper(), 0.0) for aa in sequence if aa.upper() in kd_scale]
+        scores = [
+            kd_scale.get(aa.upper(), 0.0) for aa in sequence if aa.upper() in kd_scale
+        ]
         avg_hydro = sum(scores) / len(scores) if scores else 0.0
         results["hydrophobicity"] = {
             "average_gravy": round(avg_hydro, 3),
@@ -903,7 +966,11 @@ async def _sequence_analysis_tool(arguments: dict[str, Any]) -> tuple[str, bool]
                 hydro_stretch = 0
         results["aggregation"] = {
             "max_hydrophobic_stretch": max_stretch,
-            "aggregation_risk": "high" if max_stretch >= 7 else "moderate" if max_stretch >= 5 else "low",
+            "aggregation_risk": "high"
+            if max_stretch >= 7
+            else "moderate"
+            if max_stretch >= 5
+            else "low",
         }
 
     # ESM2 pseudo-log-likelihood (PLL)
@@ -926,12 +993,15 @@ async def _sequence_analysis_tool(arguments: dict[str, Any]) -> tuple[str, bool]
                 f"print(f'PLL:{{pll:.4f}}')\n"
             )
             proc = await asyncio.create_subprocess_exec(
-                "python", "-c", script,
+                "python",
+                "-c",
+                script,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
             import re as _re
+
             pll_match = _re.search(r"PLL:([-0-9.]+)", stdout.decode())
             if pll_match:
                 results["esm2_pll"] = {"pll": float(pll_match.group(1))}

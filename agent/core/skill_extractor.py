@@ -23,6 +23,19 @@ from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
 
+try:
+    from aidd_intern_core import (
+        is_binder_design_session_rust as _rust_is_binder,
+        search_skills_rust as _rust_search_skills,
+    )
+
+    _RUST_AVAILABLE = True
+except ImportError:
+    _rust_is_binder = None
+    _rust_search_skills = None
+    _RUST_AVAILABLE = False
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -276,6 +289,15 @@ class SkillExtractor:
 
         Returns paths with a relevance score (higher = better match).
         """
+        if _RUST_AVAILABLE and _rust_search_skills is not None:
+            try:
+                res = _rust_search_skills(str(self.skills_dir), query, top_k)
+                return [(Path(path_str), score) for path_str, score in res]
+            except Exception as e:
+                logger.warning(
+                    f"Rust search_skills failed, falling back to Python: {e}"
+                )
+
         query_lower = query.lower()
         query_terms = set(query_lower.split())
         results: list[tuple[Path, float]] = []
@@ -328,6 +350,15 @@ class SkillExtractor:
 
     def _is_binder_design_session(self, messages: Sequence[dict[str, Any]]) -> bool:
         """Heuristic: does this conversation involve binder design tools?"""
+        if _RUST_AVAILABLE and _rust_is_binder is not None:
+            try:
+                contents = [str(m.get("content", "")) for m in messages]
+                return _rust_is_binder(contents)
+            except Exception as e:
+                logger.warning(
+                    f"Rust is_binder_design_session failed, falling back to Python: {e}"
+                )
+
         binder_keywords = [
             "binder",
             "bindcraft",

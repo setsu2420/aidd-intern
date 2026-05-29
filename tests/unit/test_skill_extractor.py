@@ -85,7 +85,10 @@ def _make_oom_session_messages() -> list[dict]:
 
 class TestSkillEntry:
     def test_skill_id_format(self):
-        entry = SkillEntry(title="PD-L1 Binder via BindCraft", trigger="When designing binders against PD-L1")
+        entry = SkillEntry(
+            title="PD-L1 Binder via BindCraft",
+            trigger="When designing binders against PD-L1",
+        )
         assert entry.skill_id.startswith("skill-pd-l1-binder-via-bindcraft-")
 
     def test_to_markdown_has_sections(self):
@@ -123,7 +126,11 @@ class TestSkillExtractor:
         skill = skills[0]
         # Target should be either PDB id "4ZQK" or "PD-L1" (both valid extractions)
         assert skill.target is not None
-        assert "PD-L1" in skill.target or "4ZQK" in skill.target or "pd-l1" in skill.title.lower()
+        assert (
+            "PD-L1" in skill.target
+            or "4ZQK" in skill.target
+            or "pd-l1" in skill.title.lower()
+        )
         assert "run_bindcraft" in skill.tool_chain
         assert "run_chai1" in skill.tool_chain
         assert "run_protenix" in skill.tool_chain
@@ -160,9 +167,7 @@ class TestSkillExtractor:
 
     def test_short_session_skipped(self, tmp_path: Path):
         extractor = SkillExtractor(skills_dir=tmp_path)
-        skills = extractor.extract_from_session(
-            [{"role": "user", "content": "hello"}]
-        )
+        skills = extractor.extract_from_session([{"role": "user", "content": "hello"}])
         assert skills == []
 
     def test_non_binder_session_skipped(self, tmp_path: Path):

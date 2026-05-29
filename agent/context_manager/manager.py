@@ -578,10 +578,10 @@ class ContextManager:
             if msg.role == "system":
                 out.append(msg)
                 continue
-            
+
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             limit = getattr(self, "max_tokens_per_message", _MAX_TOKENS_PER_MESSAGE)
-            
+
             # Fast pre-check: if char length > limit * 6, it is guaranteed oversized.
             # Bypass slow token_counter to avoid OOM or high latency.
             if len(content) > limit * 6:

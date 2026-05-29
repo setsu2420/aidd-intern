@@ -64,7 +64,9 @@ def _make_binder_messages() -> list[dict]:
 
 class TestKnowledgeEntry:
     def test_entry_id_format(self):
-        entry = KnowledgeEntry(id="wiki-abc123", title="PD-L1 Binder Strategy", category="strategy")
+        entry = KnowledgeEntry(
+            id="wiki-abc123", title="PD-L1 Binder Strategy", category="strategy"
+        )
         assert entry.id.startswith("wiki-")
         assert entry.title == "PD-L1 Binder Strategy"
 
@@ -124,8 +126,12 @@ class TestKnowledgeWiki:
 
     def test_ingest_deduplication(self, tmp_path: Path):
         wiki = KnowledgeWiki(wiki_dir=tmp_path)
-        entry1 = wiki.ingest(title="Same Title", target="SameTarget", category="strategy")
-        entry2 = wiki.ingest(title="Same Title", target="SameTarget", category="strategy")
+        entry1 = wiki.ingest(
+            title="Same Title", target="SameTarget", category="strategy"
+        )
+        entry2 = wiki.ingest(
+            title="Same Title", target="SameTarget", category="strategy"
+        )
         # Should merge rather than create duplicate
         assert entry1.id == entry2.id
         assert wiki.entry_count == 1
@@ -209,10 +215,7 @@ class TestKnowledgeWiki:
         # Should extract at least one entry from a binder design session
         assert len(entries) >= 1
         # Entry should reference the target (PDB id or target name)
-        all_text = " ".join(
-            (e.target or "") + " " + e.title
-            for e in entries
-        ).lower()
+        all_text = " ".join((e.target or "") + " " + e.title for e in entries).lower()
         assert "pd-l1" in all_text or "4zqk" in all_text or "binder" in all_text
 
     def test_wiki_persistence(self, tmp_path: Path):

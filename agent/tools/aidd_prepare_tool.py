@@ -344,12 +344,12 @@ def _parse_literature_markdown(text: str) -> list[dict[str, Any]]:
     """Parse literature search markdown text back into structured dictionary records."""
     records = []
     current = None
-    
+
     for line in text.splitlines():
         line_str = line.strip()
         if not line_str:
             continue
-            
+
         if line_str.startswith("## ") and "." in line_str:
             if current:
                 records.append(current)
@@ -363,7 +363,7 @@ def _parse_literature_markdown(text: str) -> list[dict[str, Any]]:
                 "date": "",
                 "url": "",
                 "authors": "",
-                "abstract": ""
+                "abstract": "",
             }
         elif current is not None:
             if " | " in line_str:
@@ -384,7 +384,7 @@ def _parse_literature_markdown(text: str) -> list[dict[str, Any]]:
                 current["authors"] = line_str.split(":", 1)[1].strip()
             elif line_str.startswith("Abstract:"):
                 current["abstract"] = line_str.split(":", 1)[1].strip()
-                
+
     if current:
         records.append(current)
     return records
@@ -394,28 +394,32 @@ def _calculate_budget_hints(abstract: str) -> dict[str, Any]:
     """Calculate token budget estimation and reading recommendation based on abstract length."""
     word_count = len(abstract.split()) if abstract else 0
     abstract_tokens = int(word_count * 1.3)
-    
+
     # 6000 words is a typical full paper size estimate
     est_full_words = 6000
     est_full_tokens = int(est_full_words * 1.3)
-    
+
     if abstract_tokens < 200:
-        recommendation = "Recommended to read abstract directly (extremely low overhead)."
+        recommendation = (
+            "Recommended to read abstract directly (extremely low overhead)."
+        )
         cost_level = "LOW"
     elif abstract_tokens < 800:
         recommendation = "Scan abstract and focus on listed target proteins or methods."
         cost_level = "MEDIUM"
     else:
-        recommendation = "Abstract is detailed. Scan for numeric metrics and benchmark baselines."
+        recommendation = (
+            "Abstract is detailed. Scan for numeric metrics and benchmark baselines."
+        )
         cost_level = "HIGH"
-        
+
     return {
         "abstract_words": word_count,
         "abstract_tokens": abstract_tokens,
         "est_full_words": est_full_words,
         "est_full_tokens": est_full_tokens,
         "cost_level": cost_level,
-        "recommendation": recommendation
+        "recommendation": recommendation,
     }
 
 
@@ -442,7 +446,7 @@ async def _literature_research(args: dict[str, Any]) -> tuple[str, bool]:
             "limit": limit,
         }
     )
-    
+
     if not ok:
         output_path = literature_dir / "literature_sources.md"
         output_path.write_text(text, encoding="utf-8")
@@ -457,7 +461,7 @@ async def _literature_research(args: dict[str, Any]) -> tuple[str, bool]:
 
     # Parse formatting results to structured dictionary
     records = _parse_literature_markdown(text)
-    
+
     # Phase 2: On-demand progressive detail fetch for top 2 candidates
     details_map = {}
     for record in records[:2]:
@@ -469,7 +473,7 @@ async def _literature_research(args: dict[str, Any]) -> tuple[str, bool]:
                 {
                     "operation": "details",
                     "identifier": identifier,
-                    "source": record.get("source") or "all"
+                    "source": record.get("source") or "all",
                 }
             )
             if detail_ok:
@@ -481,7 +485,7 @@ async def _literature_research(args: dict[str, Any]) -> tuple[str, bool]:
     # Phase 3: Construct structured DeepXiv-SDK report with Budget cues & Progressive navigation
     md_lines = [
         "# 📚 Progressive Scientific Literature Research Report",
-        f"*Inspired by DeepXiv-SDK (arXiv:2603.00084) — Optimized for Progressive & Budget-Aware Agent Reading.*",
+        "*Inspired by DeepXiv-SDK (arXiv:2603.00084) — Optimized for Progressive & Budget-Aware Agent Reading.*",
         "",
         f"**Research Target**: `{target_name}`",
         f"**Search Query**: `{query}`",
@@ -491,33 +495,43 @@ async def _literature_research(args: dict[str, Any]) -> tuple[str, bool]:
         "",
         "## 🔍 Part 1: Header Screening & Budget Cues (文献初筛与预算提示)",
         f"We have screened the top {len(records)} relevant papers. For each, we provide progressive reading recommendations and token budget hints to prevent context window bloat.",
-        ""
+        "",
     ]
 
     for idx, r in enumerate(records, 1):
         budget = _calculate_budget_hints(r.get("abstract") or "")
         md_lines.append(f"### {idx}. {r.get('title') or '(untitled)'}")
-        
+
         meta = []
-        if r.get("source"): meta.append(f"Source: **{r['source']}**")
-        if r.get("id"): meta.append(f"arXiv ID: `{r['id']}`")
-        if r.get("doi"): meta.append(f"DOI: `{r['doi']}`")
-        if r.get("date"): meta.append(f"Date: *{r['date']}*")
-        
+        if r.get("source"):
+            meta.append(f"Source: **{r['source']}**")
+        if r.get("id"):
+            meta.append(f"arXiv ID: `{r['id']}`")
+        if r.get("doi"):
+            meta.append(f"DOI: `{r['doi']}`")
+        if r.get("date"):
+            meta.append(f"Date: *{r['date']}*")
+
         md_lines.append("* " + " | ".join(meta))
         if r.get("url"):
             md_lines.append(f"* **URL**: {r['url']}")
         if r.get("authors"):
             md_lines.append(f"* **Authors**: {r['authors']}")
-            
+
         md_lines.append("")
-        md_lines.append(f"> **📊 [DeepXiv-SDK Budget Cue]**")
-        md_lines.append(f"> * **Abstract Size**: ~{budget['abstract_words']} words (~{budget['abstract_tokens']} tokens) ➔ **Cost: {budget['cost_level']}**")
-        md_lines.append(f"> * **Estimated Full Paper**: ~{budget['est_full_words']} words (~{budget['est_full_tokens']} tokens) ➔ **Cost: HIGH** (Recommended to read selectively)")
-        md_lines.append(f"> * **TOC/Section Navigation Cost**: **MEDIUM** (~150 tokens) ➔ (Recommended to orient structure)")
+        md_lines.append("> **📊 [DeepXiv-SDK Budget Cue]**")
+        md_lines.append(
+            f"> * **Abstract Size**: ~{budget['abstract_words']} words (~{budget['abstract_tokens']} tokens) ➔ **Cost: {budget['cost_level']}**"
+        )
+        md_lines.append(
+            f"> * **Estimated Full Paper**: ~{budget['est_full_words']} words (~{budget['est_full_tokens']} tokens) ➔ **Cost: HIGH** (Recommended to read selectively)"
+        )
+        md_lines.append(
+            "> * **TOC/Section Navigation Cost**: **MEDIUM** (~150 tokens) ➔ (Recommended to orient structure)"
+        )
         md_lines.append(f"> * **Action Guide**: {budget['recommendation']}")
         md_lines.append("")
-        
+
         if r.get("abstract"):
             md_lines.append(f"**Abstract**: {r['abstract']}")
         md_lines.append("")
@@ -525,33 +539,49 @@ async def _literature_research(args: dict[str, Any]) -> tuple[str, bool]:
         md_lines.append("")
 
     md_lines.append("## 🧭 Part 2: Progressive Detail Navigation (渐进式详情结构)")
-    md_lines.append("Below are the structure maps or full XML details fetched on-demand for the top primary candidates to guide targeted reading.")
+    md_lines.append(
+        "Below are the structure maps or full XML details fetched on-demand for the top primary candidates to guide targeted reading."
+    )
     md_lines.append("")
-    
+
     has_details = False
     for i, r in enumerate(records[:2], 1):
         identifier = r.get("id") or r.get("doi")
         if identifier and identifier in details_map:
             has_details = True
-            md_lines.append(f"### Deep details for candidate #{i}: \"{r.get('title')}\"")
+            md_lines.append(f'### Deep details for candidate #{i}: "{r.get("title")}"')
             md_lines.append(f"```markdown\n{details_map[identifier]}\n```")
             md_lines.append("")
-            
+
     if not has_details:
-        md_lines.append("*No secondary details fetched or API details were identical to search metadata.*")
+        md_lines.append(
+            "*No secondary details fetched or API details were identical to search metadata.*"
+        )
         md_lines.append("")
 
-    md_lines.append("## 💡 Part 3: Budget-Aware Agentic Reading Guide (智能体长文本阅读行动指南)")
-    md_lines.append("When you (the Agent) need to retrieve specific methods, datasets, or residue hotspot definitions from the literature, **DO NOT** attempt to ingest the entire full-text raw papers. Instead, follow this progressive approach:")
-    md_lines.append("1. **Verify via Abstract**: First inspect the abstracts in **Part 1** to ensure the paper covers the correct target protein and binder system.")
-    md_lines.append("2. **Retrieve Paper TOC**: For papers with an arXiv ID, run `hf_papers(operation=\"read_paper\", arxiv_id=\"[id]\")` to check the Table of Contents (TOC).")
-    md_lines.append("3. **Targeted Section Reading**: Based on the TOC, only retrieve the specific methodology or experimental sections, such as `section=\"3\"` (Methodology) or `section=\"4\"` (Experiments) using `hf_papers(operation=\"read_paper\", arxiv_id=\"[id]\", section=\"[num]\")`. This strategy cuts token overhead by **over 80%** while ensuring accurate data grounding.")
+    md_lines.append(
+        "## 💡 Part 3: Budget-Aware Agentic Reading Guide (智能体长文本阅读行动指南)"
+    )
+    md_lines.append(
+        "When you (the Agent) need to retrieve specific methods, datasets, or residue hotspot definitions from the literature, **DO NOT** attempt to ingest the entire full-text raw papers. Instead, follow this progressive approach:"
+    )
+    md_lines.append(
+        "1. **Verify via Abstract**: First inspect the abstracts in **Part 1** to ensure the paper covers the correct target protein and binder system."
+    )
+    md_lines.append(
+        '2. **Retrieve Paper TOC**: For papers with an arXiv ID, run `hf_papers(operation="read_paper", arxiv_id="[id]")` to check the Table of Contents (TOC).'
+    )
+    md_lines.append(
+        '3. **Targeted Section Reading**: Based on the TOC, only retrieve the specific methodology or experimental sections, such as `section="3"` (Methodology) or `section="4"` (Experiments) using `hf_papers(operation="read_paper", arxiv_id="[id]", section="[num]")`. This strategy cuts token overhead by **over 80%** while ensuring accurate data grounding.'
+    )
     md_lines.append("")
-    md_lines.append("Use `hf_papers` for Semantic Scholar citation graph/snippet search when an arXiv id is available.")
+    md_lines.append(
+        "Use `hf_papers` for Semantic Scholar citation graph/snippet search when an arXiv id is available."
+    )
 
     output_path = literature_dir / "literature_sources.md"
     output_path.write_text("\n".join(md_lines), encoding="utf-8")
-    
+
     return _ok(
         {
             "status": "researched" if ok else "research_failed",

@@ -899,11 +899,275 @@ fn check_prompt_injection(_py: Python<'_>, args_obj: &Bound<'_, PyAny>) -> PyRes
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Parallel Wiki Entry Search & Scoring
+// ═══════════════════════════════════════════════════════════════════════
+
+#[derive(serde::Deserialize)]
+struct WikiEntryRaw {
+    id: String,
+    title: String,
+    category: String,
+    target: Option<String>,
+    #[serde(default)]
+    tool_chain: Vec<String>,
+    #[serde(default)]
+    params: serde_json::Value,
+    #[serde(default)]
+    outcome: serde_json::Value,
+    #[serde(default)]
+    lessons: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    created_at: String,
+    #[serde(default)]
+    helpful_count: i64,
+    #[serde(default)]
+    harmful_count: i64,
+}
+
+fn parse_date_to_days(date_str: &str) -> Option<i64> {
+    if date_str.len() < 10 {
+        return None;
+    }
+    let parts: Vec<&str> = date_str[..10].split('-').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year = parts[0].parse::<i64>().ok()?;
+    let month = parts[1].parse::<i64>().ok()?;
+    let day = parts[2].parse::<i64>().ok()?;
+    Some(year * 365 + month * 30 + day)
+}
+
+#[pyfunction]
+#[pyo3(signature = (entries_dir, query, current_time_iso, category=None, target=None, top_k=5))]
+fn search_wiki_entries_rust(
+    py: Python<'_>,
+    entries_dir: &str,
+    query: &str,
+    current_time_iso: &str,
+    category: Option<String>,
+    target: Option<String>,
+    top_k: usize,
+) -> PyResult<Vec<String>> {
+    let query_lower = query.to_lowercase();
+    let query_terms: Vec<String> = query_lower.split_whitespace().map(|s| s.to_string()).collect();
+
+    let scored_entries: Vec<(String, f64)> = py.allow_threads(|| -> PyResult<Vec<(String, f64)>> {
+        let dir_path = Path::new(entries_dir);
+        if !dir_path.exists() || !dir_path.is_dir() {
+            return Ok(Vec::new());
+        }
+
+        let paths: Vec<std::path::PathBuf> = std::fs::read_dir(dir_path)
+            .map_err(|e| PyIOError::new_err(format!("Failed to read entries directory: {e}")))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+
+        use rayon::prelude::*;
+        let mut results: Vec<(String, f64)> = paths
+            .par_iter()
+            .filter_map(|path| {
+                let content = std::fs::read_to_string(path).ok()?;
+                let entry: WikiEntryRaw = serde_json::from_str(&content).ok()?;
+
+                if let Some(ref cat) = category {
+                    if entry.category != *cat {
+                        return None;
+                    }
+                }
+
+                if let Some(ref tgt) = target {
+                    if let Some(ref entry_tgt) = entry.target {
+                        if !entry_tgt.to_lowercase().contains(&tgt.to_lowercase()) {
+                            return None;
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+
+                let mut score = 0.0;
+                let searchable = format!(
+                    "{} {} {}",
+                    entry.title,
+                    entry.target.as_deref().unwrap_or(""),
+                    entry.tags.join(" ")
+                )
+                .to_lowercase();
+
+                if searchable.contains(&query_lower) {
+                    score += 5.0;
+                }
+
+                let params_str = serde_json::to_string(&entry.params).unwrap_or_default().to_lowercase();
+                let lessons_str = entry.lessons.join(" ").to_lowercase();
+
+                for term in &query_terms {
+                    if searchable.contains(term) {
+                        score += 1.0;
+                    }
+                    if params_str.contains(term) {
+                        score += 0.5;
+                    }
+                    if lessons_str.contains(term) {
+                        score += 1.0;
+                    }
+                    if !entry.tool_chain.is_empty() && entry.tool_chain.iter().any(|t| t.to_lowercase().contains(term)) {
+                        score += 1.0;
+                    }
+                }
+
+                if entry.helpful_count > 0 {
+                    let total = entry.helpful_count + entry.harmful_count;
+                    let effectiveness_score = if total == 0 {
+                        0.0
+                    } else {
+                        (entry.helpful_count - entry.harmful_count) as f64 / total as f64
+                    };
+                    score += effectiveness_score * 2.0;
+                }
+
+                let current_days = parse_date_to_days(current_time_iso).unwrap_or(0);
+                let entry_days = parse_date_to_days(&entry.created_at).unwrap_or(0);
+                let age_days = current_days.saturating_sub(entry_days);
+                if age_days < 7 {
+                    score += 1.0;
+                } else if age_days < 30 {
+                    score += 0.5;
+                }
+
+                if score > 0.0 {
+                    Some((content, score))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(results)
+    })?;
+
+    let limit = std::cmp::min(top_k, scored_entries.len());
+    let top_jsons: Vec<String> = scored_entries[..limit]
+        .iter()
+        .map(|(content, _)| content.clone())
+        .collect();
+
+    Ok(top_jsons)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Parallel Skill Detection & Search
+// ═══════════════════════════════════════════════════════════════════════
+
+#[pyfunction]
+fn is_binder_design_session_rust(_py: Python<'_>, contents: Vec<String>) -> PyResult<bool> {
+    let binder_keywords = [
+        "binder",
+        "bindcraft",
+        "pxdesign",
+        "rfd3",
+        "boltzgen",
+        "iptm",
+        "plddt",
+        "interface_residues",
+        "target_pdb",
+        "protein design",
+    ];
+
+    let mut matched_count = 0;
+    use rayon::prelude::*;
+    let kw_matches: Vec<bool> = binder_keywords
+        .par_iter()
+        .map(|kw| {
+            contents.iter().any(|c| c.to_lowercase().contains(kw))
+        })
+        .collect();
+
+    for matched in kw_matches {
+        if matched {
+            matched_count += 1;
+            if matched_count >= 2 {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+#[pyfunction]
+fn search_skills_rust(
+    py: Python<'_>,
+    skills_dir: &str,
+    query: &str,
+    top_k: usize,
+) -> PyResult<Vec<(String, f64)>> {
+    let query_lower = query.to_lowercase();
+    let query_terms: Vec<String> = query_lower.split_whitespace().map(|s| s.to_string()).collect();
+
+    let matches: Vec<(String, f64)> = py.allow_threads(|| -> PyResult<Vec<(String, f64)>> {
+        let dir_path = Path::new(skills_dir);
+        if !dir_path.exists() || !dir_path.is_dir() {
+            return Ok(Vec::new());
+        }
+
+        let paths: Vec<std::path::PathBuf> = std::fs::read_dir(dir_path)
+            .map_err(|e| PyIOError::new_err(format!("Failed to read skills directory: {e}")))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md"))
+            .collect();
+
+        use rayon::prelude::*;
+        let mut results: Vec<(String, f64)> = paths
+            .par_iter()
+            .filter_map(|path| {
+                let content = std::fs::read_to_string(path).ok()?.to_lowercase();
+                
+                let mut score = 0.0;
+                for term in &query_terms {
+                    if content.contains(term) {
+                        score += 1.0;
+                    }
+                }
+                
+                if content.contains(&query_lower) {
+                    score += 3.0;
+                }
+
+                if score > 0.0 {
+                    let path_str = path.to_string_lossy().to_string();
+                    Some((path_str, score))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(results)
+    })?;
+
+    let limit = std::cmp::min(top_k, matches.len());
+    Ok(matches[..limit].to_vec())
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Module registration
 // ═══════════════════════════════════════════════════════════════════════
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Parallel Skill Detection & Search
+    m.add_function(wrap_pyfunction!(is_binder_design_session_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(search_skills_rust, m)?)?;
+    // Parallel Wiki Entry Search & Scoring
+    m.add_function(wrap_pyfunction!(search_wiki_entries_rust, m)?)?;
     // File I/O
     m.add_function(wrap_pyfunction!(save_json_atomic, m)?)?;
     // JSON normalisation + hashing

@@ -573,3 +573,121 @@ def test_benchmark_file_io():
             f"\n[file_io] Python: {py_time:.4f}s | Rust: {rust_time:.4f}s | "
             f"Speedup: {py_time / max(rust_time, 1e-9):.2f}x"
         )
+
+
+def test_search_wiki_entries_rust():
+    """Verify search_wiki_entries_rust correctness and filter matches."""
+    if not RUST_AVAILABLE:
+        pytest.skip("Rust not available")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a few entry JSON files
+        entry_a = {
+            "id": "wiki-a",
+            "title": "PD-L1 high temperature optimization",
+            "category": "strategy",
+            "target": "PD-L1",
+            "tool_chain": ["run_bindcraft", "run_esmfold"],
+            "params": {"temperature": 0.5, "num_samples": 20},
+            "outcome": {"ipTM": "0.85"},
+            "lessons": ["Keep temperature high.", "Monitor clashes."],
+            "tags": ["strategy", "pd-l1", "run_bindcraft"],
+            "created_at": "2026-05-20T12:00:00Z",
+            "helpful_count": 5,
+            "harmful_count": 1,
+        }
+        entry_b = {
+            "id": "wiki-b",
+            "title": "HER2 binding clash resolution",
+            "category": "failure_mode",
+            "target": "HER2",
+            "tool_chain": ["run_pxdesign"],
+            "params": {"iterations": 5},
+            "outcome": {"clashes": "12"},
+            "lessons": ["Clashes detected under default run.", "Reduce temperature."],
+            "tags": ["failure_mode", "her2", "run_pxdesign"],
+            "created_at": "2026-05-25T12:00:00Z",
+            "helpful_count": 2,
+            "harmful_count": 0,
+        }
+
+        with open(os.path.join(tmpdir, "wiki-a.json"), "w") as f:
+            json.dump(entry_a, f)
+        with open(os.path.join(tmpdir, "wiki-b.json"), "w") as f:
+            json.dump(entry_b, f)
+
+        current_time_iso = "2026-05-29T12:00:00Z"
+
+        # 1. Search with common term
+        results = aidd_intern_core.search_wiki_entries_rust(
+            tmpdir, "temperature", current_time_iso, top_k=5
+        )
+        assert (
+            len(results) == 2
+        )  # Both mention temperature (entry_a in title/lessons, entry_b in lessons)
+
+        parsed_results = [json.loads(r) for r in results]
+        assert (
+            parsed_results[0]["id"] == "wiki-a"
+        )  # wiki-a has higher match (title + effectiveness + helpful)
+
+        # 2. Filter by category
+        results_cat = aidd_intern_core.search_wiki_entries_rust(
+            tmpdir, "temperature", current_time_iso, category="failure_mode", top_k=5
+        )
+        assert len(results_cat) == 1
+        assert json.loads(results_cat[0])["id"] == "wiki-b"
+
+        # 3. Filter by target
+        results_tgt = aidd_intern_core.search_wiki_entries_rust(
+            tmpdir, "PD-L1", current_time_iso, target="PD-L1", top_k=5
+        )
+        assert len(results_tgt) == 1
+        assert json.loads(results_tgt[0])["id"] == "wiki-a"
+
+
+def test_skill_extraction_rust():
+    """Verify is_binder_design_session_rust and search_skills_rust."""
+    if not RUST_AVAILABLE:
+        pytest.skip("Rust not available")
+
+    # 1. Test binder design session heuristic
+    msg_a = ["Hello", "Let's plan binder design campaign on target_pdb"]
+    assert (
+        aidd_intern_core.is_binder_design_session_rust(msg_a) is True
+    )  # keywords: binder, target_pdb
+
+    msg_b = ["How are you?", "I like programming in Python"]
+    assert aidd_intern_core.is_binder_design_session_rust(msg_b) is False
+
+    # 2. Test parallel skill search
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skill_a_content = """# PD-L1 bindcraft optimization
+## Trigger
+pd-l1 target bindcraft run
+## Metadata
+- **Target:** PD-L1
+- **Tool Chain:** run_bindcraft
+"""
+        skill_b_content = """# HER2 clash recovery
+## Trigger
+her2 target pxdesign run
+## Metadata
+- **Target:** HER2
+- **Tool Chain:** run_pxdesign
+"""
+        with open(os.path.join(tmpdir, "skill-a.md"), "w") as f:
+            f.write(skill_a_content)
+        with open(os.path.join(tmpdir, "skill-b.md"), "w") as f:
+            f.write(skill_b_content)
+
+        # Search term in metadata
+        res = aidd_intern_core.search_skills_rust(tmpdir, "bindcraft", top_k=5)
+        assert len(res) == 1
+        assert "skill-a.md" in res[0][0]
+        assert res[0][1] >= 1.0
+
+        # Search term in target
+        res_her2 = aidd_intern_core.search_skills_rust(tmpdir, "HER2", top_k=5)
+        assert len(res_her2) == 1
+        assert "skill-b.md" in res_her2[0][0]

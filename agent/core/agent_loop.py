@@ -245,7 +245,7 @@ def _detect_repeated_malformed(
 def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
     """
     Validate tool arguments structure.
-    
+
     Performs comprehensive security checks including:
     - Argument structure validation
     - Path traversal detection
@@ -268,7 +268,7 @@ def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
             False,
             f"Tool call error: 'args' must be a JSON object. You passed type: {type(args).__name__}",
         )
-    
+
     # Security checks (AHE Execution and Validation layers)
     from agent.core.tools import (
         _check_path_traversal,
@@ -276,27 +276,27 @@ def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
         _check_ansi_escapes,
         _check_prompt_injection,
     )
-    
+
     # Check path traversal - BLOCK if detected
     path_error = _check_path_traversal(args)
     if path_error:
         return (False, path_error)
-    
+
     # Check command injection - BLOCK if detected
     cmd_error = _check_command_injection(args)
     if cmd_error:
         return (False, cmd_error)
-    
+
     # Check ANSI escapes - WARN if detected
     ansi_error = _check_ansi_escapes(args)
     if ansi_error:
         return (True, ansi_error)  # Allow but warn
-    
+
     # Check prompt injection - BLOCK if detected
     prompt_error = _check_prompt_injection(args)
     if prompt_error:
         return (False, prompt_error)
-    
+
     return True, None
 
 

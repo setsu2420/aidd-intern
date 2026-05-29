@@ -37,9 +37,7 @@ def test_get_pdb_structure_success():
     assert cache_file.exists()
 
     # Second fetch (should hit cache)
-    response_cached = client.get(
-        f"/api/v3/structure/pdb/{pdb_id}?file_format=pdb"
-    )
+    response_cached = client.get(f"/api/v3/structure/pdb/{pdb_id}?file_format=pdb")
     assert response_cached.status_code == 200
     assert response_cached.content == response.content
 
@@ -66,7 +64,8 @@ def test_get_local_structure_success(tmp_path):
         response = client.get(f"/api/v3/structure/local?filepath={test_pdb}")
         assert response.status_code == 200
         assert (
-            response.content == b"ATOM      1  N   ASP A   1      33.916  18.917  11.524"
+            response.content
+            == b"ATOM      1  N   ASP A   1      33.916  18.917  11.524"
         )
     finally:
         if test_pdb.exists():

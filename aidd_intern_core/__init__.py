@@ -20,6 +20,9 @@ try:
         visible_width,
         detect_doom_loop_rust,
         format_layered_memories_rust,
+        search_wiki_entries_rust,
+        search_skills_rust,
+        is_binder_design_session_rust,
     )
 
     RUST_AVAILABLE = True

@@ -30,6 +30,15 @@ from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
 
+try:
+    from aidd_intern_core import search_wiki_entries_rust as _rust_search_wiki
+
+    _RUST_AVAILABLE = True
+except ImportError:
+    _rust_search_wiki = None
+    _RUST_AVAILABLE = False
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -307,6 +316,28 @@ class KnowledgeWiki:
         top_k:
             Maximum number of results.
         """
+        if _RUST_AVAILABLE and _rust_search_wiki is not None:
+            try:
+                current_time = datetime.now(timezone.utc).isoformat()
+                jsons = _rust_search_wiki(
+                    str(self.entries_dir),
+                    query,
+                    current_time,
+                    category=category,
+                    target=target,
+                    top_k=top_k,
+                )
+                entries = []
+                for entry_json in jsons:
+                    try:
+                        data = json.loads(entry_json)
+                        entries.append(KnowledgeEntry(**data))
+                    except Exception as e:
+                        logger.warning(f"Failed to parse Rust-returned entry JSON: {e}")
+                return entries
+            except Exception as e:
+                logger.warning(f"Rust search_wiki failed, falling back to Python: {e}")
+
         query_lower = query.lower()
         query_terms = set(query_lower.split())
         scored: list[tuple[KnowledgeEntry, float]] = []

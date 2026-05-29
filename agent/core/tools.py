@@ -45,31 +45,31 @@ _UNRESOLVED = object()
 
 # Command injection patterns (pre-compiled for performance)
 _INJECTION_PATTERNS = [
-    re.compile(r';\s*\w+'),           # semicolon followed by command
-    re.compile(r'\|\|\s*\w+'),        # OR operator
-    re.compile(r'&&\s*\w+'),          # AND operator  
-    re.compile(r'\|\s*\w+'),          # pipe to command
-    re.compile(r'`[^`]+`'),           # backtick command substitution
-    re.compile(r'\$\([^)]+\)'),      # $() command substitution
-    re.compile(r'\$\{[^}]+\}'),      # ${} variable expansion
-    re.compile(r'>\s*/\w+'),         # redirect to system file
-    re.compile(r'<\s*/\w+'),         # redirect from system file
+    re.compile(r";\s*\w+"),  # semicolon followed by command
+    re.compile(r"\|\|\s*\w+"),  # OR operator
+    re.compile(r"&&\s*\w+"),  # AND operator
+    re.compile(r"\|\s*\w+"),  # pipe to command
+    re.compile(r"`[^`]+`"),  # backtick command substitution
+    re.compile(r"\$\([^)]+\)"),  # $() command substitution
+    re.compile(r"\$\{[^}]+\}"),  # ${} variable expansion
+    re.compile(r">\s*/\w+"),  # redirect to system file
+    re.compile(r"<\s*/\w+"),  # redirect from system file
 ]
 
 # ANSI escape pattern (pre-compiled)
-_ANSI_PATTERN = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+_ANSI_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 # Prompt injection patterns (pre-compiled)
 _PROMPT_INJECTION_PATTERNS = re.compile(
-    r'ignore previous (?:instructions?|commands?)|'
-    r'ignore all (?:instructions?|guidelines?)|'
-    r'you are now (?:a|an)|'
-    r'disregard (?:all|previous)|'
-    r'change your system prompt|'
-    r'reveal your system prompt|'
-    r'system prompt|'
-    r'break character',
-    re.IGNORECASE
+    r"ignore previous (?:instructions?|commands?)|"
+    r"ignore all (?:instructions?|guidelines?)|"
+    r"you are now (?:a|an)|"
+    r"disregard (?:all|previous)|"
+    r"change your system prompt|"
+    r"reveal your system prompt|"
+    r"system prompt|"
+    r"break character",
+    re.IGNORECASE,
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -95,6 +95,7 @@ except ImportError:
     def _json_dumps_rust(args: dict[str, Any]) -> str:
         """Fallback Python JSON serialization."""
         return _json.dumps(args, default=str)
+
 
 # ── MCP Safety Constants ──────────────────────────────────────────────────
 _MCP_TOOL_DESCRIPTION_MAX_LEN = 2000
@@ -136,7 +137,9 @@ def _check_path_traversal(args: dict[str, Any]) -> Optional[str]:
         try:
             return _check_path_traversal_rust(args)
         except Exception as e:
-            logger.warning(f"Rust check_path_traversal failed, falling back to Python: {e}")
+            logger.warning(
+                f"Rust check_path_traversal failed, falling back to Python: {e}"
+            )
 
     suspicious_paths: list[str] = []
     dangerous_patterns = ["../", "..\\\\", "..\\", "file://", "data://", "phar://"]
@@ -145,7 +148,9 @@ def _check_path_traversal(args: dict[str, Any]) -> Optional[str]:
         if isinstance(value, str):
             for pattern in dangerous_patterns:
                 if pattern in value:
-                    suspicious_paths.append(f"{key_path or '<value>'} (pattern: {pattern})")
+                    suspicious_paths.append(
+                        f"{key_path or '<value>'} (pattern: {pattern})"
+                    )
                     break  # Only report once per value
         elif isinstance(value, dict):
             for key, val in value.items():
@@ -166,7 +171,7 @@ def _check_path_traversal(args: dict[str, Any]) -> Optional[str]:
 
 def _check_command_injection(args: dict[str, Any]) -> Optional[str]:
     """Recursively check for command injection patterns.
-    
+
     Blocks execution to prevent shell/command injection attacks.
     Detects common injection vectors and dangerous command patterns.
     """
@@ -174,45 +179,78 @@ def _check_command_injection(args: dict[str, Any]) -> Optional[str]:
         try:
             return _check_command_injection_rust(args)
         except Exception as e:
-            logger.warning(f"Rust check_command_injection failed, falling back to Python: {e}")
+            logger.warning(
+                f"Rust check_command_injection failed, falling back to Python: {e}"
+            )
 
     suspicious_entries: list[str] = []
-    
+
     # Dangerous command keywords
     dangerous_commands = [
-        "rm -rf", "format", "del", "rd", "mkdir", "rmdir",
-        "wget", "curl", "nc", "netcat", "ssh", "scp", "rsync",
-        "python -c", "python3 -c", "perl -e", "ruby -e", "lua -e",
-        "eval", "exec", "source", ".", "bash -c", "sh -c",
-        "chmod", "chown", "passwd", "sudo", "su -",
-        "mkfifo", "mknod", ">>", ">",
+        "rm -rf",
+        "format",
+        "del",
+        "rd",
+        "mkdir",
+        "rmdir",
+        "wget",
+        "curl",
+        "nc",
+        "netcat",
+        "ssh",
+        "scp",
+        "rsync",
+        "python -c",
+        "python3 -c",
+        "perl -e",
+        "ruby -e",
+        "lua -e",
+        "eval",
+        "exec",
+        "source",
+        ".",
+        "bash -c",
+        "sh -c",
+        "chmod",
+        "chown",
+        "passwd",
+        "sudo",
+        "su -",
+        "mkfifo",
+        "mknod",
+        ">>",
+        ">",
     ]
-    
+
     def _scan(value: Any, key_path: str = "") -> None:
         if isinstance(value, str):
             # Check for injection patterns (pre-compiled, cached)
             for pattern in _INJECTION_PATTERNS:
                 if pattern.search(value):
-                    suspicious_entries.append(f"{key_path or '<value>'} (pattern: {pattern.pattern})")
+                    suspicious_entries.append(
+                        f"{key_path or '<value>'} (pattern: {pattern.pattern})"
+                    )
                     break
-            
+
             # Check for dangerous commands
             value_lower = value.lower()
             for cmd in dangerous_commands:
                 if cmd in value_lower:
-                    suspicious_entries.append(f"{key_path or '<value>'} (dangerous command: {cmd})")
+                    suspicious_entries.append(
+                        f"{key_path or '<value>'} (dangerous command: {cmd})"
+                    )
                     break
-        
+
         elif isinstance(value, dict):
             for key, val in value.items():
                 _scan(val, f"{key_path}.{key}" if key_path else key)
-        
+
         elif isinstance(value, list):
             for idx, item in enumerate(value):
                 _scan(item, f"{key_path}[{idx}]")
-    
+
     _scan(args)
-    
+
     if suspicious_entries:
         return (
             f"⚠️  Command injection detected in: {', '.join(suspicious_entries)}. "
@@ -224,33 +262,35 @@ def _check_command_injection(args: dict[str, Any]) -> Optional[str]:
 
 def _check_ansi_escapes(args: dict[str, Any]) -> Optional[str]:
     """Check for ANSI escape sequences which could be used for prompt injection.
-    
+
     Detects and warns about ANSI codes that might be used maliciously.
     """
     if _check_ansi_escapes_rust is not None:
         try:
             return _check_ansi_escapes_rust(args)
         except Exception as e:
-            logger.warning(f"Rust check_ansi_escapes failed, falling back to Python: {e}")
+            logger.warning(
+                f"Rust check_ansi_escapes failed, falling back to Python: {e}"
+            )
 
     suspicious_entries: list[str] = []
-    
+
     def _scan(value: Any, key_path: str = "") -> None:
         if isinstance(value, str):
             # Use pre-compiled pattern (cached at module level)
             if _ANSI_PATTERN.search(value):
                 suspicious_entries.append(f"{key_path or '<value>'}")
-        
+
         elif isinstance(value, dict):
             for key, val in value.items():
                 _scan(val, f"{key_path}.{key}" if key_path else key)
-        
+
         elif isinstance(value, list):
             for idx, item in enumerate(value):
                 _scan(item, f"{key_path}[{idx}]")
-    
+
     _scan(args)
-    
+
     if suspicious_entries:
         return (
             f"⚠️  ANSI escape sequences detected in: {', '.join(suspicious_entries)}. "
@@ -261,39 +301,42 @@ def _check_ansi_escapes(args: dict[str, Any]) -> Optional[str]:
 
 def _check_prompt_injection(args: dict[str, Any]) -> Optional[str]:
     """Check for prompt injection patterns in tool arguments.
-    
+
     Detects attempts to modify system behavior or bypass security.
     """
     if _check_prompt_injection_rust is not None:
         try:
             return _check_prompt_injection_rust(args)
         except Exception as e:
-            logger.warning(f"Rust check_prompt_injection failed, falling back to Python: {e}")
+            logger.warning(
+                f"Rust check_prompt_injection failed, falling back to Python: {e}"
+            )
 
     suspicious_entries: list[str] = []
-    
+
     def _scan(value: Any, key_path: str = "") -> None:
         if isinstance(value, str):
             # Use pre-compiled pattern (cached at module level)
             if _PROMPT_INJECTION_PATTERNS.search(value):
                 suspicious_entries.append(f"{key_path or '<value>'}")
-        
+
         elif isinstance(value, dict):
             for key, val in value.items():
                 _scan(val, f"{key_path}.{key}" if key_path else key)
-        
+
         elif isinstance(value, list):
             for idx, item in enumerate(value):
                 _scan(item, f"{key_path}[{idx}]")
-    
+
     _scan(args)
-    
+
     if suspicious_entries:
         return (
             f"⚠️  Prompt injection pattern detected in: {', '.join(suspicious_entries)}. "
             f"This may be a security attempt. Block execution."
         )
     return None
+
 
 _OPENAPI_SEARCH_TOOL_SPEC = {
     "name": "find_hf_api",
@@ -1243,7 +1286,7 @@ class ToolRouter:
     ):
         """
         Initialize ToolRouter.
-        
+
         Args:
             mcp_servers: MCP server configurations
             hf_token: Hugging Face token for authentication
@@ -1291,7 +1334,10 @@ class ToolRouter:
 
             # Safety: truncate overly long descriptions
             if len(description) > _MCP_TOOL_DESCRIPTION_MAX_LEN:
-                description = description[:_MCP_TOOL_DESCRIPTION_MAX_LEN] + " [truncated for safety]"
+                description = (
+                    description[:_MCP_TOOL_DESCRIPTION_MAX_LEN]
+                    + " [truncated for safety]"
+                )
 
             # Safety: detect prompt-injection patterns in description
             description_lower = description.lower()
@@ -1305,7 +1351,9 @@ class ToolRouter:
 
             metadata: dict[str, Any] = {}
             if has_suspicious:
-                metadata["safety_note"] = "[SAFETY: description contained suspicious patterns]"
+                metadata["safety_note"] = (
+                    "[SAFETY: description contained suspicious patterns]"
+                )
 
             registered_names.append(tool.name)
             self.register_tool(
@@ -1389,27 +1437,31 @@ class ToolRouter:
 
         For MCP tools, converts the CallToolResult content blocks to a string.
         For built-in tools, calls their handler directly.
-        
+
         Implements comprehensive security checks according to AHE:
         - Execution layer: argument validation, command injection blocking
         - Tooling layer: parameter size limits, schema validation
         - Validation layer: ANSI escape detection, prompt injection blocking
-        
+
         Args:
             tool_name: Name of the tool to call
             arguments: Tool arguments as a dictionary
             session: Optional session object for stateful tools
             tool_call_id: Optional tool call ID for MCP protocol
             timeout_seconds: Optional timeout override (default: instance default)
-        
+
         Returns:
             Tuple of (output_string, success_bool)
-        
+
         Raises:
             asyncio.TimeoutError: If tool execution exceeds timeout
         """
         # Use provided timeout or default
-        timeout = timeout_seconds if timeout_seconds is not None else self._tool_timeout_seconds
+        timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else self._tool_timeout_seconds
+        )
         # Parameter size validation (Tooling layer)
         size_error = _check_args_size(arguments)
         if size_error:
@@ -1422,20 +1474,20 @@ class ToolRouter:
             _check_ansi_escapes,
             _check_prompt_injection,
         )
-        
+
         # Path traversal - BLOCK (Execution layer)
         path_error = _check_path_traversal(arguments)
         if path_error:
             return path_error, False
-        
+
         # Command injection - BLOCK (Execution layer)
         cmd_error = _check_command_injection(arguments)
         if cmd_error:
             return cmd_error, False
-        
+
         # ANSI escapes - WARN (Validation layer)
         ansi_warning = _check_ansi_escapes(arguments)
-        
+
         # Prompt injection - BLOCK (Validation layer)
         prompt_error = _check_prompt_injection(arguments)
         if prompt_error:
@@ -1448,15 +1500,17 @@ class ToolRouter:
             try:
                 async with asyncio.timeout(timeout):
                     # Check if handler accepts session argument
-                    params = getattr(tool.handler, '_tool_param_names', None)
-                    accepts_kwargs = getattr(tool.handler, '_tool_accepts_kwargs', False)
+                    params = getattr(tool.handler, "_tool_param_names", None)
+                    accepts_kwargs = getattr(
+                        tool.handler, "_tool_accepts_kwargs", False
+                    )
                     if params is None:
                         import inspect
-            
+
                         params = set(inspect.signature(tool.handler).parameters)
-                    if 'session' in params or accepts_kwargs:
+                    if "session" in params or accepts_kwargs:
                         # Check if handler also accepts tool_call_id parameter
-                        if 'tool_call_id' in params or accepts_kwargs:
+                        if "tool_call_id" in params or accepts_kwargs:
                             output, ok = await tool.handler(
                                 arguments, session=session, tool_call_id=tool_call_id
                             )
@@ -1466,12 +1520,12 @@ class ToolRouter:
                         output, ok = await tool.handler(arguments)
                     # Append ANSI warning if present
                     if ansi_warning:
-                        output = ansi_warning + '\n' + output
+                        output = ansi_warning + "\n" + output
                     return output, ok
             except asyncio.TimeoutError:
                 return (
-                    f'❌ Tool execution timeout after {timeout}s. '
-                    f'Consider increasing the timeout or optimizing the tool.'
+                    f"❌ Tool execution timeout after {timeout}s. "
+                    f"Consider increasing the timeout or optimizing the tool."
                 ), False
 
         # Otherwise, use MCP client
@@ -1483,16 +1537,16 @@ class ToolRouter:
                     output = convert_mcp_content_to_string(result.content)
                     # Append ANSI warning if present
                     if ansi_warning:
-                        output = ansi_warning + '\n' + output
+                        output = ansi_warning + "\n" + output
                     return output, not result.is_error
             except asyncio.TimeoutError:
                 return (
-                    f'❌ MCP tool execution timeout after {timeout}s. '
-                    f'Consider increasing the timeout or using a faster tool.'
+                    f"❌ MCP tool execution timeout after {timeout}s. "
+                    f"Consider increasing the timeout or using a faster tool."
                 ), False
             except ToolError as e:
                 # Catch MCP tool errors and return them to the agent
-                error_msg = f'Tool error: {str(e)}'
+                error_msg = f"Tool error: {str(e)}"
                 return error_msg, False
         else:
             return "MCP client not initialized", False

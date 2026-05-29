@@ -362,11 +362,21 @@ def _difficulty(requirements: dict[str, Any]) -> str:
 
 def _campaign_modality(requirements: dict[str, Any]) -> str:
     """Identify the campaign type (modality) matching the Latent-Y architecture."""
-    if requirements.get("publication") or requirements.get("paper") or requirements.get("doi"):
+    if (
+        requirements.get("publication")
+        or requirements.get("paper")
+        or requirements.get("doi")
+    ):
         return "design_from_publication"
-    if requirements.get("species_cross_reactivity") or requirements.get("cross_species"):
+    if requirements.get("species_cross_reactivity") or requirements.get(
+        "cross_species"
+    ):
         return "cross_species_design"
-    if requirements.get("epitope") or requirements.get("functional_blockade") or requirements.get("indication"):
+    if (
+        requirements.get("epitope")
+        or requirements.get("functional_blockade")
+        or requirements.get("indication")
+    ):
         return "epitope_discovery"
     return "standard_design"
 
@@ -375,65 +385,77 @@ def _hitl_steering_options(requirements: dict[str, Any]) -> list[dict[str, Any]]
     """Generates strategic design options for Human-in-the-Loop (HITL) steering, modeled after Latent-Y."""
     options = []
     modality = _campaign_modality(requirements)
-    
+
     if modality == "design_from_publication":
-        options.append({
-            "option_id": "publication_direct_extract",
-            "name": "Auto-Extract from Scientific Paper",
-            "gpu_cost": "low",
-            "success_probability": "85%",
-            "pros": "Highly autonomous; directly parses published hotspot constraints and active residue IDs.",
-            "cons": "Highly dependent on OCR accuracy and target UniProt residue numbering consistency.",
-            "steering_command": "Run direct extraction on the provided literature to auto-fill binder hotspots."
-        })
-        options.append({
-            "option_id": "publication_manual_hotspot",
-            "name": "Hybrid Alignment & Manual Hotspot Input",
-            "gpu_cost": "low",
-            "success_probability": "95%",
-            "pros": "Guarantees highly precise docking vector and eliminates any numbering drift.",
-            "cons": "Requires the researcher to verify residue indexes in PyMOL first.",
-            "steering_command": "Use the paper for biological context, but override hotspots manually with residues: [list]."
-        })
+        options.append(
+            {
+                "option_id": "publication_direct_extract",
+                "name": "Auto-Extract from Scientific Paper",
+                "gpu_cost": "low",
+                "success_probability": "85%",
+                "pros": "Highly autonomous; directly parses published hotspot constraints and active residue IDs.",
+                "cons": "Highly dependent on OCR accuracy and target UniProt residue numbering consistency.",
+                "steering_command": "Run direct extraction on the provided literature to auto-fill binder hotspots.",
+            }
+        )
+        options.append(
+            {
+                "option_id": "publication_manual_hotspot",
+                "name": "Hybrid Alignment & Manual Hotspot Input",
+                "gpu_cost": "low",
+                "success_probability": "95%",
+                "pros": "Guarantees highly precise docking vector and eliminates any numbering drift.",
+                "cons": "Requires the researcher to verify residue indexes in PyMOL first.",
+                "steering_command": "Use the paper for biological context, but override hotspots manually with residues: [list].",
+            }
+        )
     elif modality == "cross_species_design":
-        options.append({
-            "option_id": "cross_species_conserved_only",
-            "name": "Conserved Epitope Targeting Only",
-            "gpu_cost": "moderate",
-            "success_probability": "70%",
-            "pros": "Designs bind both orthologs with identical geometric binding mode.",
-            "cons": "Limits sampling search space to highly conserved target surface blocks.",
-            "steering_command": "Filter all hotspots to only residues sharing 100% homology across target species."
-        })
-        options.append({
-            "option_id": "cross_species_dual_optimization",
-            "name": "Dual-Homolog Co-evolution (BindCraft)",
-            "gpu_cost": "high",
-            "success_probability": "90%",
-            "pros": "Achieves high affinity designs by co-optimizing and folding binders against both species structures.",
-            "cons": "Increases AlphaFold recycling time and compute costs by 2.5x.",
-            "steering_command": "Run BindCraft campaign co-evolving the binder against both Human and Cyno PDB structures."
-        })
+        options.append(
+            {
+                "option_id": "cross_species_conserved_only",
+                "name": "Conserved Epitope Targeting Only",
+                "gpu_cost": "moderate",
+                "success_probability": "70%",
+                "pros": "Designs bind both orthologs with identical geometric binding mode.",
+                "cons": "Limits sampling search space to highly conserved target surface blocks.",
+                "steering_command": "Filter all hotspots to only residues sharing 100% homology across target species.",
+            }
+        )
+        options.append(
+            {
+                "option_id": "cross_species_dual_optimization",
+                "name": "Dual-Homolog Co-evolution (BindCraft)",
+                "gpu_cost": "high",
+                "success_probability": "90%",
+                "pros": "Achieves high affinity designs by co-optimizing and folding binders against both species structures.",
+                "cons": "Increases AlphaFold recycling time and compute costs by 2.5x.",
+                "steering_command": "Run BindCraft campaign co-evolving the binder against both Human and Cyno PDB structures.",
+            }
+        )
     else:  # epitope_discovery or standard_design
-        options.append({
-            "option_id": "epitope_boltzgen_constraint",
-            "name": "Microenvironment Constrained Sampling (BoltzGen)",
-            "gpu_cost": "moderate",
-            "success_probability": "80%",
-            "pros": "Extremely fast generation localized specifically to the functional binding pocket.",
-            "cons": "May miss novel highly-stable folding topologies outside the constraint box.",
-            "steering_command": "Constrain generation to pocket residues using BoltzGen with force-field boundary calibration."
-        })
-        options.append({
-            "option_id": "epitope_rfd3_de_novo",
-            "name": "Atom-Level complementary All-Atom Sampling (RFD3)",
-            "gpu_cost": "high",
-            "success_probability": "85%",
-            "pros": "Designs novel highly-stable folding topologies with robust physical complementarity.",
-            "cons": "Requires longer post-generation screening and orthogonal AlphaFold filtering batches.",
-            "steering_command": "Execute RFD3 all-atom de novo campaign targeting the functional surface."
-        })
-        
+        options.append(
+            {
+                "option_id": "epitope_boltzgen_constraint",
+                "name": "Microenvironment Constrained Sampling (BoltzGen)",
+                "gpu_cost": "moderate",
+                "success_probability": "80%",
+                "pros": "Extremely fast generation localized specifically to the functional binding pocket.",
+                "cons": "May miss novel highly-stable folding topologies outside the constraint box.",
+                "steering_command": "Constrain generation to pocket residues using BoltzGen with force-field boundary calibration.",
+            }
+        )
+        options.append(
+            {
+                "option_id": "epitope_rfd3_de_novo",
+                "name": "Atom-Level complementary All-Atom Sampling (RFD3)",
+                "gpu_cost": "high",
+                "success_probability": "85%",
+                "pros": "Designs novel highly-stable folding topologies with robust physical complementarity.",
+                "cons": "Requires longer post-generation screening and orthogonal AlphaFold filtering batches.",
+                "steering_command": "Execute RFD3 all-atom de novo campaign targeting the functional surface.",
+            }
+        )
+
     return options
 
 

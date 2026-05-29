@@ -21,7 +21,6 @@ from agent.core.hub_artifacts import wrap_shell_command_with_hub_artifact_bootst
 logger = logging.getLogger(__name__)
 
 
-
 MAX_OUTPUT_CHARS = 25_000
 MAX_LINE_LENGTH = 4000
 DEFAULT_READ_LINES = 2000
@@ -34,7 +33,10 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07")
 # ── Dangerous command detection ────────────────────────────────────────
 
 _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"rm\s+(-[^\s]*\s+)*-rf\s+/(?!\S)"), "recursive force-delete root filesystem"),
+    (
+        re.compile(r"rm\s+(-[^\s]*\s+)*-rf\s+/(?!\S)"),
+        "recursive force-delete root filesystem",
+    ),
     (re.compile(r"rm\s+(-[^\s]*\s+)*-rf\s+~"), "recursive force-delete home directory"),
     (re.compile(r"curl\s.*\|\s*(?:ba)?sh"), "piping remote script to shell"),
     (re.compile(r"wget\s.*\|\s*(?:ba)?sh"), "piping remote script to shell"),
@@ -69,12 +71,12 @@ def _check_path_safety(path_str: str) -> tuple[bool, str]:
         return False, "No path provided."
     try:
         p = Path(path_str).resolve()
-        
+
         # Allowed roots
         workspace_root = Path("/home/xxue/aidd-intern").resolve()
         tmp_dir = Path("/tmp").resolve()
         var_tmp_dir = Path("/var/tmp").resolve()
-        
+
         # Helper to check if a path is under a parent
         def is_under(path: Path, parent: Path) -> bool:
             try:
@@ -82,10 +84,11 @@ def _check_path_safety(path_str: str) -> tuple[bool, str]:
                 return True
             except ValueError:
                 return False
-                
+
         # Also allow path matching temporary directory from tempfile
         try:
             import tempfile
+
             sys_tmp = Path(tempfile.gettempdir()).resolve()
             if is_under(p, sys_tmp) or p == sys_tmp:
                 return True, ""
@@ -98,8 +101,11 @@ def _check_path_safety(path_str: str) -> tuple[bool, str]:
             return True, ""
         if is_under(p, var_tmp_dir) or p == var_tmp_dir:
             return True, ""
-            
-        return False, f"❌ Permission denied: Access restricted. Path '{path_str}' is outside the allowed workspace '/home/xxue/aidd-intern' or '/tmp' boundaries."
+
+        return (
+            False,
+            f"❌ Permission denied: Access restricted. Path '{path_str}' is outside the allowed workspace '/home/xxue/aidd-intern' or '/tmp' boundaries.",
+        )
     except Exception as e:
         return False, f"❌ Path validation error: {e}"
 
@@ -194,44 +200,59 @@ async def _bash_handler(
     is_dangerous, reason = _check_dangerous_command(command)
     if is_dangerous:
         import os
+
         # 1. Parse env whitelist
         whitelist_raw = os.environ.get("AIDD_INTERN_DANGEROUS_COMMANDS_WHITELIST", "")
         whitelist = [item.strip() for item in whitelist_raw.split(",") if item.strip()]
-        
+
         # 2. Parse session config whitelist
         if session and getattr(session, "config", None):
-            session_whitelist = getattr(session.config, "dangerous_commands_whitelist", [])
+            session_whitelist = getattr(
+                session.config, "dangerous_commands_whitelist", []
+            )
             if session_whitelist:
                 whitelist.extend(session_whitelist)
-                
+
         # 3. Whitelist check
         is_whitelisted = False
         for item in whitelist:
             if item in command:
                 is_whitelisted = True
                 break
-                
+
         if is_whitelisted:
             logger.info(f"Dangerous command bypassed by whitelist: {command}")
         else:
             # 4. Interactive Console Confirmation (Claude Code style)
             import sys
+
             if sys.stdin.isatty():
-                print(f"\n⚠️  WARNING: Potentially dangerous command detected ({reason}).")
+                print(
+                    f"\n⚠️  WARNING: Potentially dangerous command detected ({reason})."
+                )
                 print(f"Command: {command}")
                 try:
                     sys.stdout.flush()
-                    response = input("Are you sure you want to run this? (y/N): ").strip().lower()
+                    response = (
+                        input("Are you sure you want to run this? (y/N): ")
+                        .strip()
+                        .lower()
+                    )
                     if response in ("y", "yes"):
-                        logger.info("Dangerous command approved by user via interactive console.")
+                        logger.info(
+                            "Dangerous command approved by user via interactive console."
+                        )
                     else:
                         return (
                             f"❌ Execution blocked: Potentially dangerous command ({reason}) "
                             f"was rejected by the user.",
-                            False
+                            False,
                         )
                 except Exception as e:
-                    return f"❌ Execution blocked: Failed to get user approval in console: {e}", False
+                    return (
+                        f"❌ Execution blocked: Failed to get user approval in console: {e}",
+                        False,
+                    )
             else:
                 # 5. Non-interactive fallback block
                 return (
@@ -239,11 +260,11 @@ async def _bash_handler(
                     f"Execution was blocked because the terminal is non-interactive. "
                     f"To run this command, configure it in your whitelist via "
                     f"AIDD_INTERN_DANGEROUS_COMMANDS_WHITELIST environment variable or config.json.",
-                    False
+                    False,
                 )
     command = wrap_shell_command_with_hub_artifact_bootstrap(command, session)
     work_dir = args.get("work_dir", ".")
-    
+
     # Also validate path safety of work_dir
     is_safe_dir, dir_err = _check_path_safety(work_dir)
     if not is_safe_dir:
@@ -281,7 +302,7 @@ async def _read_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     file_path = args.get("path", "")
     if not file_path:
         return "No path provided.", False
-    
+
     # Path safety validation
     is_safe, err_msg = _check_path_safety(file_path)
     if not is_safe:
@@ -318,7 +339,7 @@ async def _write_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
     content = args.get("content", "")
     if not file_path:
         return "No path provided.", False
-    
+
     # Path safety validation
     is_safe, err_msg = _check_path_safety(file_path)
     if not is_safe:
@@ -359,7 +380,7 @@ async def _edit_handler(args: dict[str, Any], **_kw) -> tuple[str, bool]:
 
     if not file_path:
         return "No path provided.", False
-    
+
     # Path safety validation
     is_safe, err_msg = _check_path_safety(file_path)
     if not is_safe:
