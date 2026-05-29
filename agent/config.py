@@ -61,6 +61,7 @@ class Config(BaseModel):
     confirm_cpu_jobs: bool = True
     auto_file_upload: bool = False
     tool_runtime: Literal["local", "sandbox"] = "local"
+    dangerous_commands_whitelist: list[str] = []
 
     # Reasoning effort *preference* — the ceiling the user wants. The probe
     # on `/model` walks a cascade down from here (``max`` → ``xhigh`` → ``high``
@@ -235,6 +236,13 @@ def load_config(
 
     config_with_env = substitute_env_vars(raw_config)
     config = Config.model_validate(config_with_env)
+    
+    # Merge whitelist from environment variable
+    env_whitelist = _env_list("AIDD_INTERN_DANGEROUS_COMMANDS_WHITELIST")
+    if env_whitelist:
+        combined = list(set(config.dangerous_commands_whitelist + env_whitelist))
+        config.dangerous_commands_whitelist = combined
+
     from agent.core.model_catalog import apply_catalog_default
 
     apply_catalog_default(config)

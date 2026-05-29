@@ -27,7 +27,7 @@ class NotificationGateway:
         self._providers: dict[str, NotificationProvider] = {
             "slack": SlackProvider(),
         }
-        self._queue: asyncio.Queue[NotificationRequest] = asyncio.Queue()
+        self._queue: asyncio.Queue[NotificationRequest] = asyncio.Queue(maxsize=1000)
         self._worker_task: asyncio.Task | None = None
         self._client: httpx.AsyncClient | None = None
 
@@ -104,8 +104,18 @@ class NotificationGateway:
     async def enqueue(self, request: NotificationRequest) -> bool:
         if not self.enabled or self._worker_task is None:
             return False
-        await self._queue.put(request)
-        return True
+        if self._queue.full():
+            logger.warning(
+                "Notification queue full (%d items); dropping notification to prevent memory leak",
+                self._queue.qsize(),
+            )
+            return False
+        try:
+            self._queue.put_nowait(request)
+            return True
+        except asyncio.QueueFull:
+            logger.warning("Notification queue full; dropping notification")
+            return False
 
     async def _worker(self) -> None:
         while True:

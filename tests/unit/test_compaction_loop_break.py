@@ -60,6 +60,7 @@ def _make_cm(
     cm.untouched_messages = untouched_messages
     cm.items = [Message(role="system", content="system")]
     cm.on_message_added = None
+    cm._compaction_count = 0
     return cm
 
 
@@ -96,8 +97,9 @@ def test_truncate_oversized_replaces_content_above_threshold():
         out = cm._truncate_oversized(msgs, "anthropic/claude-opus-4-6")
     assert len(out) == 1
     assert out[0].content != big
-    assert "[truncated for compaction" in out[0].content
-    assert str(_MAX_TOKENS_PER_MESSAGE * 2) in out[0].content
+    # Smart truncation keeps head + tail with an ellipsis marker in the middle
+    assert "[... content truncated:" in out[0].content
+    assert "chars total" in out[0].content
 
 
 def test_truncate_oversized_preserves_thinking_blocks():

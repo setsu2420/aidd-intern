@@ -75,7 +75,8 @@ def test_unknown_local_model_context_defaults_to_65k(monkeypatch):
         raise Exception("unknown model")
 
     monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
-    monkeypatch.setattr("litellm.get_model_info", missing_model_info)
+    monkeypatch.delenv("AIDD_INTERN_LOCAL_MODEL_MAX_TOKENS", raising=False)
+    monkeypatch.setattr("litellm.main.get_model_info", missing_model_info)
 
     assert _get_max_tokens_safe("vllm/local-small") == 65_536
 
@@ -125,7 +126,7 @@ def test_openai_compatible_litellm_lookup_strips_app_prefix(monkeypatch):
         raise Exception("unknown model")
 
     monkeypatch.delenv("AIDD_INTERN_MODEL_MAX_TOKENS", raising=False)
-    monkeypatch.setattr("litellm.get_model_info", fake_model_info)
+    monkeypatch.setattr("litellm.main.get_model_info", fake_model_info)
 
     assert _get_max_tokens_safe("openrouter/openai/gpt-5.2") == 272_000
     assert seen == [

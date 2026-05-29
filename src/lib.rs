@@ -12,6 +12,58 @@ use serde_json::Value;
 use tempfile::NamedTempFile;
 
 // ═══════════════════════════════════════════════════════════════════════
+// Parallel processing and performance optimization dependencies
+// ═══════════════════════════════════════════════════════════════════════
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
+#[cfg(feature = "parallel")]
+use num_cpus;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Pre-compiled regex patterns for security checks (Rust implementation)
+// ═══════════════════════════════════════════════════════════════════════
+
+// Path traversal patterns
+static PATH_TRAVERSAL_PATTERNS: &[&str] = &[
+    "../", "..\\\\", "..\\/", "file://", "data://", "phar://"
+];
+
+// Command injection patterns
+static COMMAND_INJECTION_PATTERNS: &[&str] = &[
+    ";\\s*\\w+",           // semicolon followed by command
+    "\\|\\|\\s*\\w+",        // OR operator
+    "&&\\s*\\w+",          // AND operator  
+    "\\|\\s*\\w+",          // pipe to command
+    "`[^`]+`",           // backtick command substitution
+    "\\$\\([^)]+\\)",      // $() command substitution
+    "\\$\\{[^}]+\\}",      // ${} variable expansion
+    ">\\s*/\\w+",         // redirect to system file
+    "<\\s*/\\w+",         // redirect from system file
+];
+
+// ANSI escape pattern
+static ANSI_PATTERN: &str = r"\x1B(?:[@-_Z]|\[[0-?]*[ -/]*[@-~])";
+
+// Prompt injection patterns
+static PROMPT_INJECTION_PATTERNS: &str = r"(?i)ignore previous (?:instructions?|commands?)|ignore all (?:instructions?|guidelines?)|you are now (?:a|an)|disregard (?:all|previous)|change your system prompt|reveal your system prompt|system prompt|break character";
+
+// Dangerous commands (lowercase for matching)
+static DANGEROUS_COMMANDS: &[&str] = &[
+    "rm -rf", "format", "del", "rd", "mkdir", "rmdir",
+    "wget", "curl", "nc", "netcat", "ssh", "scp", "rsync",
+    "python -c", "python3 -c", "perl -e", "ruby -e", "lua -e",
+    "eval", "exec", "source", ".", "bash -c", "sh -c",
+    "chmod", "chown", "passwd", "sudo", "su -",
+    "mkfifo", "mknod", ">>", ">",
+];
+
+// ═══════════════════════════════════════════════════════════════════════
+// Security check functions (Rust implementation)
+// ═══════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════
 // Pre-compiled regex patterns for secret redaction
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -669,6 +721,184 @@ fn format_layered_memories_rust(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Internal helper: Recursively scan Python objects for string values
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Recursively extract all string values from a Python object for security checking.
+fn extract_strings_for_scan(obj: &Bound<'_, PyAny>) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    
+    if let Ok(s) = obj.extract::<String>() {
+        return vec![("".to_string(), s)];
+    }
+    
+    if let Ok(dict) = obj.downcast::<PyDict>() {
+        for (key, value) in dict.iter() {
+            let key_str: String = key.extract().unwrap_or_default();
+            let value_results = extract_strings_for_scan(&value);
+            for (path, value) in value_results {
+                let new_path = if path.is_empty() {
+                    key_str.clone()
+                } else {
+                    format!("{}.{}", path, key_str)
+                };
+                results.push((new_path, value));
+            }
+        }
+    } else if let Ok(list) = obj.downcast::<PyList>() {
+        for (idx, item) in list.iter().enumerate() {
+            let value_results = extract_strings_for_scan(&item);
+            for (path, value) in value_results {
+                let new_path = if path.is_empty() {
+                    format!("[{}]", idx)
+                } else {
+                    format!("{}.{}", path, idx)
+                };
+                results.push((new_path, value));
+            }
+        }
+    }
+    
+    results
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Security check: path traversal detection
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Check for path traversal patterns in tool arguments (Rust implementation).
+/// Returns Some(error_message) if dangerous patterns found, None otherwise.
+#[pyfunction]
+fn check_path_traversal(_py: Python<'_>, args_obj: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let suspicious_paths: Vec<String> = extract_strings_for_scan(args_obj)
+        .into_iter()
+        .filter(|(_, value)| {
+            PATH_TRAVERSAL_PATTERNS.iter().any(|pattern| value.contains(pattern))
+        })
+        .map(|(path, _)| path)
+        .collect();
+    
+    if suspicious_paths.is_empty() {
+        Ok(None)
+    } else {
+        let paths_str = suspicious_paths.join(", ");
+        let error_msg = format!("❌ Path traversal detected in: {}. Execution blocked for security.", paths_str);
+        Ok(Some(error_msg))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Security check: command injection detection
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Compile regex patterns for command injection detection.
+fn compile_injection_patterns() -> Vec<Regex> {
+    COMMAND_INJECTION_PATTERNS
+        .iter()
+        .filter_map(|pattern| Regex::new(pattern).ok())
+        .collect()
+}
+
+static COMMAND_INJECTION_REGEXES: once_cell::sync::OnceCell<Vec<Regex>> =
+    once_cell::sync::OnceCell::new();
+
+fn get_injection_regexes() -> &'static [Regex] {
+    COMMAND_INJECTION_REGEXES.get_or_init(compile_injection_patterns).as_slice()
+}
+
+/// Check for command injection patterns in tool arguments (Rust implementation).
+#[pyfunction]
+fn check_command_injection(_py: Python<'_>, args_obj: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let suspicious_entries: Vec<String> = extract_strings_for_scan(args_obj)
+        .into_iter()
+        .filter(|(_, value)| {
+            let value_lower = value.to_lowercase();
+            let regexes = get_injection_regexes();
+            
+            // Check injection patterns
+            let has_pattern = regexes.iter().any(|regex| regex.is_match(value));
+            
+            // Check dangerous commands
+            let has_dangerous_cmd = DANGEROUS_COMMANDS
+                .iter()
+                .any(|cmd| value_lower.contains(cmd));
+            
+            has_pattern || has_dangerous_cmd
+        })
+        .map(|(path, _)| format!("{} (value: {{...}})", path))
+        .collect();
+    
+    if suspicious_entries.is_empty() {
+        Ok(None)
+    } else {
+        let entries_str = suspicious_entries.join(", ");
+        let error_msg = format!("⚠️  Command injection detected in: {}. Execution blocked for security.", entries_str);
+        Ok(Some(error_msg))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Security check: ANSI escape sequences detection
+// ═══════════════════════════════════════════════════════════════════════
+
+static ANSI_REGEX: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
+
+fn get_ansi_regex() -> &'static Regex {
+    ANSI_REGEX.get_or_init(|| {
+        Regex::new(ANSI_PATTERN).expect("Failed to compile ANSI regex")
+    })
+}
+
+/// Check for ANSI escape sequences in tool arguments (Rust implementation).
+#[pyfunction]
+fn check_ansi_escapes(_py: Python<'_>, args_obj: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let suspicious_entries: Vec<String> = extract_strings_for_scan(args_obj)
+        .into_iter()
+        .filter(|(_, value)| get_ansi_regex().is_match(value))
+        .map(|(path, _)| path)
+        .collect();
+    
+    if suspicious_entries.is_empty() {
+        Ok(None)
+    } else {
+        let entries_str = suspicious_entries.join(", ");
+        let error_msg = format!("⚠️  ANSI escape sequences detected in: {}. These may be used for prompt injection.", entries_str);
+        Ok(Some(error_msg))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Security check: prompt injection detection
+// ═══════════════════════════════════════════════════════════════════════
+
+static PROMPT_INJECTION_REGEX: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
+
+fn get_prompt_injection_regex() -> &'static Regex {
+    PROMPT_INJECTION_REGEX.get_or_init(|| {
+        Regex::new(PROMPT_INJECTION_PATTERNS)
+            .expect("Failed to compile prompt injection regex")
+    })
+}
+
+/// Check for prompt injection patterns in tool arguments (Rust implementation).
+#[pyfunction]
+fn check_prompt_injection(_py: Python<'_>, args_obj: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let suspicious_entries: Vec<String> = extract_strings_for_scan(args_obj)
+        .into_iter()
+        .filter(|(_, value)| get_prompt_injection_regex().is_match(value))
+        .map(|(path, _)| path)
+        .collect();
+    
+    if suspicious_entries.is_empty() {
+        Ok(None)
+    } else {
+        let entries_str = suspicious_entries.join(", ");
+        let error_msg = format!("⚠️  Prompt injection pattern detected in: {}. This may be a security attempt.", entries_str);
+        Ok(Some(error_msg))
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Module registration
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -692,5 +922,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(detect_doom_loop_rust, m)?)?;
     // Layered memories formatting
     m.add_function(wrap_pyfunction!(format_layered_memories_rust, m)?)?;
+    // Security checks (new in Rust optimization)
+    m.add_function(wrap_pyfunction!(check_path_traversal, m)?)?;
+    m.add_function(wrap_pyfunction!(check_command_injection, m)?)?;
+    m.add_function(wrap_pyfunction!(check_ansi_escapes, m)?)?;
+    m.add_function(wrap_pyfunction!(check_prompt_injection, m)?)?;
     Ok(())
 }

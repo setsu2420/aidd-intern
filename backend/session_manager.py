@@ -182,6 +182,7 @@ class SessionManager:
         tool_router = ToolRouter(
             self.config.mcpServers,
             hf_token=hf_token,
+            tool_timeout_seconds=30.0,  # Default 30s timeout for all tools
         )
         # Deep-copy config so each session's model switches independently —
         # tab A picking GLM doesn't flip tab B off Claude.

@@ -2,6 +2,7 @@
 Context management for conversation history
 """
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -261,6 +262,8 @@ class ContextManager:
         self.untouched_messages = untouched_messages
         self.items: list[Message] = [Message(role="system", content=self.system_prompt)]
         self.on_message_added = None
+        self._message_lock = asyncio.Lock()
+        self._compaction_count: int = 0
 
     def apply_context_policy(self, model_max_tokens: int) -> None:
         """Apply model-window-specific context and compaction settings."""
@@ -281,9 +284,31 @@ class ContextManager:
                 messages=[m.model_dump() for m in self.items],
             )
         except Exception as e:
-            logger.warning("token_counter failed (%s); rough estimate", e)
-            # Rough fallback: 4 chars per token.
-            return sum(len(getattr(m, "content", "") or "") for m in self.items) // 4
+            logger.warning("token_counter failed (%s); using content-aware estimate", e)
+            # Content-aware fallback: CJK characters average ~2.5 chars/token,
+            # Latin/ASCII averages ~4 chars/token
+            total_chars = 0
+            cjk_chars = 0
+            for msg in self.items:
+                content = getattr(msg, "content", "") or ""
+                if isinstance(content, list):
+                    content = " ".join(
+                        part.get("text", "")
+                        for part in content
+                        if isinstance(part, dict)
+                    )
+                total_chars += len(content)
+                # Count CJK characters (Unicode ranges for CJK Unified Ideographs)
+                cjk_chars += sum(
+                    1
+                    for ch in content
+                    if "\u4e00" <= ch <= "\u9fff"
+                    or "\u3040" <= ch <= "\u30ff"
+                    or "\uac00" <= ch <= "\ud7af"
+                )
+            non_cjk_chars = total_chars - cjk_chars
+            estimated = int(cjk_chars / 2.5 + non_cjk_chars / 4)
+            return max(estimated, 1)
 
     def refresh_system_prompt(
         self,
@@ -356,20 +381,45 @@ class ContextManager:
             )
             static_prompt += local_context
 
-        return (
+        rendered_prompt = (
             f"{static_prompt}\n\n"
             f"[Session context: Date={current_date}, Time={current_time}, "
             f"Timezone={current_timezone}, User={hf_user_info}, "
             f"Tools={len(tool_specs)}]"
         )
 
+        # Validate system prompt size (should not exceed 30% of model context window)
+        prompt_tokens = len(rendered_prompt) // 4  # rough estimate
+        max_system_tokens = (
+            int(self.model_max_tokens * 0.3)
+            if hasattr(self, "model_max_tokens")
+            else 40000
+        )
+        if prompt_tokens > max_system_tokens:
+            logger.warning(
+                "System prompt is very large (~%d tokens, limit %d). Consider reducing tool count or prompt size.",
+                prompt_tokens,
+                max_system_tokens,
+            )
+
+        return rendered_prompt
+
     def add_message(self, message: Message, token_count: int = None) -> None:
-        """Add a message to the history"""
+        """Add a message to the history.
+
+        Note: For async contexts with concurrent access, prefer
+        ``add_message_safe()`` which wraps this method with a lock.
+        """
         if token_count:
             self.running_context_usage = token_count
         self.items.append(message)
         if self.on_message_added:
             self.on_message_added(message)
+
+    async def add_message_safe(self, message: Message, token_count: int = None) -> None:
+        """Thread-safe message addition with lock protection."""
+        async with self._message_lock:
+            self.add_message(message, token_count)
 
     def get_messages(self) -> list[Message]:
         """Get all messages for sending to LLM.
@@ -528,6 +578,41 @@ class ContextManager:
             if msg.role == "system":
                 out.append(msg)
                 continue
+            
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            limit = getattr(self, "max_tokens_per_message", _MAX_TOKENS_PER_MESSAGE)
+            
+            # Fast pre-check: if char length > limit * 6, it is guaranteed oversized.
+            # Bypass slow token_counter to avoid OOM or high latency.
+            if len(content) > limit * 6:
+                logger.warning(
+                    "Skipping slow token_counter for extremely large %s message (%d chars), truncating immediately",
+                    msg.role,
+                    len(content),
+                )
+                head_chars = 2000
+                tail_chars = 2000
+                truncated_content = (
+                    content[:head_chars]
+                    + f"\n\n[... content truncated: {len(content)} chars total, "
+                    f"~{len(content) // 4} tokens. Extremely large message skipped token counting to prevent OOM ...]\n\n"
+                    + content[-tail_chars:]
+                )
+                kept = {
+                    k: getattr(msg, k, None)
+                    for k in (
+                        "tool_call_id",
+                        "tool_calls",
+                        "name",
+                        "thinking_blocks",
+                        "reasoning_content",
+                        "provider_specific_fields",
+                    )
+                    if getattr(msg, k, None) is not None
+                }
+                out.append(Message(role=msg.role, content=truncated_content, **kept))
+                continue
+
             try:
                 n = token_counter(model=model_name, messages=[msg.model_dump()])
             except Exception:
@@ -535,19 +620,28 @@ class ContextManager:
                 # don't drop the message, just keep it as-is.
                 out.append(msg)
                 continue
-            limit = getattr(self, "max_tokens_per_message", _MAX_TOKENS_PER_MESSAGE)
             if n <= limit:
                 out.append(msg)
                 continue
-            placeholder = (
-                f"[truncated for compaction — original was {n} tokens, "
-                f"removed to keep context under {self.compaction_threshold} tokens]"
-            )
+            # Smart truncation: keep head + tail with ellipsis
+            head_chars = 2000
+            tail_chars = 2000
+            if len(content) > head_chars + tail_chars + 100:
+                truncated_content = (
+                    content[:head_chars]
+                    + f"\n\n[... content truncated: {len(content)} chars total, "
+                    f"~{len(content) // 4} tokens. Middle section omitted to fit context window ...]\n\n"
+                    + content[-tail_chars:]
+                )
+            else:
+                truncated_content = (
+                    content  # Already small enough after some other reduction
+                )
             logger.warning(
-                "Truncating %s message: %d -> %d tokens for compaction",
+                "Truncating %s message: %d -> ~%d tokens for compaction",
                 msg.role,
                 n,
-                len(placeholder) // 4,
+                len(truncated_content) // 4,
             )
             # Preserve all known assistant-side fields (tool_calls, thinking_blocks,
             # reasoning_content, provider_specific_fields) even when content is
@@ -566,7 +660,7 @@ class ContextManager:
                 )
                 if getattr(msg, k, None) is not None
             }
-            out.append(Message(role=msg.role, content=placeholder, **kept))
+            out.append(Message(role=msg.role, content=truncated_content, **kept))
         return out
 
     def _recompute_usage(self, model_name: str) -> None:
@@ -595,6 +689,13 @@ class ContextManager:
         """
         if not self.needs_compaction:
             return
+
+        self._compaction_count += 1
+        if self._compaction_count > 3:
+            logger.warning(
+                "Context compacted %d times this session; information loss is likely",
+                self._compaction_count,
+            )
 
         system_msg = (
             self.items[0] if self.items and self.items[0].role == "system" else None
@@ -687,6 +788,19 @@ class ContextManager:
         # killed — invisible to the dataset because the session never
         # finished cleanly.
         if self.running_context_usage > self.compaction_threshold:
+            # Emergency compaction: keep only system + last 2 messages
+            if len(self.items) > 3:
+                logger.warning(
+                    "Attempting emergency compaction: keeping system + last 2 messages"
+                )
+                emergency_items = [self.items[0]] + self.items[-2:]
+                self.items = emergency_items
+                # Re-check if we're now under threshold
+                new_usage = self.estimate_usage(model_name)
+                if new_usage < self.compaction_threshold:
+                    self._compaction_count += 1
+                    logger.info("Emergency compaction succeeded: %d tokens", new_usage)
+                    return
             raise CompactionFailedError(
                 f"Compaction ineffective: {self.running_context_usage} tokens "
                 f"still over threshold {self.compaction_threshold} after summarize "

@@ -326,9 +326,7 @@ class SkillExtractor:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _is_binder_design_session(
-        self, messages: Sequence[dict[str, Any]]
-    ) -> bool:
+    def _is_binder_design_session(self, messages: Sequence[dict[str, Any]]) -> bool:
         """Heuristic: does this conversation involve binder design tools?"""
         binder_keywords = [
             "binder",
@@ -342,9 +340,7 @@ class SkillExtractor:
             "target_pdb",
             "protein design",
         ]
-        text = " ".join(
-            str(m.get("content", "")) for m in messages
-        ).lower()
+        text = " ".join(str(m.get("content", "")) for m in messages).lower()
         return sum(1 for kw in binder_keywords if kw in text) >= 2
 
     def _extract_target(self, messages: Sequence[dict[str, Any]]) -> str | None:
@@ -370,7 +366,12 @@ class SkillExtractor:
             content = str(msg.get("content", ""))
             # PDB first (most reliable)
             m = pdb_re.search(content)
-            if m and m.group(1).lower() not in {"output", "result", "binder", "complex"}:
+            if m and m.group(1).lower() not in {
+                "output",
+                "result",
+                "binder",
+                "complex",
+            }:
                 return m.group(1)
             # "against X" pattern
             m = against_re.search(content)
@@ -385,9 +386,7 @@ class SkillExtractor:
                 return m.group(1)
         return None
 
-    def _extract_tool_chain(
-        self, messages: Sequence[dict[str, Any]]
-    ) -> list[str]:
+    def _extract_tool_chain(self, messages: Sequence[dict[str, Any]]) -> list[str]:
         """Detect the sequence of design tools used, in order."""
         chain: list[str] = []
         seen: set[str] = set()
@@ -418,9 +417,7 @@ class SkillExtractor:
                     params[key] = m.group(1)
         return params
 
-    def _extract_metrics(
-        self, messages: Sequence[dict[str, Any]]
-    ) -> dict[str, str]:
+    def _extract_metrics(self, messages: Sequence[dict[str, Any]]) -> dict[str, str]:
         """Extract final outcome metrics."""
         metrics: dict[str, str] = {}
         # Scan in reverse order to get the latest values
@@ -433,15 +430,22 @@ class SkillExtractor:
                         metrics[metric_name] = m.group(1)
         return metrics
 
-    def _extract_lessons(
-        self, messages: Sequence[dict[str, Any]]
-    ) -> list[str]:
-        """Extract key lessons from assistant messages."""
+    def _extract_lessons(self, messages: Sequence[dict[str, Any]]) -> list[str]:
+        """Extract key lessons from assistant messages (ACE-enhanced)."""
         lessons: list[str] = []
         lesson_patterns = [
-            re.compile(r"(?:lesson|key\s*takeaway|note|important|learned)[:\s]+(.+)", re.I),
+            re.compile(
+                r"(?:lesson|key\s*takeaway|note|important|learned)[:\s]+(.+)", re.I
+            ),
             re.compile(r"(?:recommend|suggest|best\s*practice)[:\s]+(.+)", re.I),
             re.compile(r"(?:worked\s*well|successful|effective)[:\s]*(.+)", re.I),
+            # ACE: additional patterns for richer extraction
+            re.compile(r"(?:conclusion|finding|observation)[:\s]+(.+)", re.I),
+            re.compile(r"(?:avoid|don'?t|never|prevent)[:\s]+(.+)", re.I),
+            re.compile(
+                r"(?:optimal|best\s*(?:result|outcome|performance))[:\s]*(.+)", re.I
+            ),
+            re.compile(r"(?:increase|decrease|improve|reduce)\w*\s+(.+)", re.I),
         ]
         for msg in messages:
             if msg.get("role") != "assistant":
@@ -450,9 +454,10 @@ class SkillExtractor:
             for pattern in lesson_patterns:
                 for m in pattern.finditer(content):
                     lesson = m.group(1).strip().rstrip(".")
-                    if len(lesson) > 10 and lesson not in lessons:
+                    # ACE: enforce minimum length to avoid trivial lessons
+                    if len(lesson) > 15 and lesson not in lessons:
                         lessons.append(lesson)
-        return lessons[:10]
+        return lessons[:15]
 
     def _extract_failure_recovery(
         self, messages: Sequence[dict[str, Any]]
@@ -489,16 +494,12 @@ class SkillExtractor:
                 snippets.append(content[:500])
         return snippets[:8]
 
-    def _build_title(
-        self, target: str | None, tool_chain: list[str]
-    ) -> str:
+    def _build_title(self, target: str | None, tool_chain: list[str]) -> str:
         target_label = target or "Generic"
         chain_label = "+".join(tool_chain[:3])
         return f"{target_label} Binder Design via {chain_label}"
 
-    def _build_trigger(
-        self, target: str | None, tool_chain: list[str]
-    ) -> str:
+    def _build_trigger(self, target: str | None, tool_chain: list[str]) -> str:
         parts = ["When designing protein binders"]
         if target:
             parts.append(f"against target {target}")
@@ -512,9 +513,7 @@ class SkillExtractor:
             content = path.read_text(encoding="utf-8").lower()
             # Match on title + tool chain overlap
             if skill.title.lower() in content:
-                chain_overlap = sum(
-                    1 for t in skill.tool_chain if t.lower() in content
-                )
+                chain_overlap = sum(1 for t in skill.tool_chain if t.lower() in content)
                 if chain_overlap >= len(skill.tool_chain) * 0.7:
                     return True
         return False

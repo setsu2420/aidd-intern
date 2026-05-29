@@ -1,11 +1,18 @@
 """
 Knowledge Wiki — LLM Wiki pattern for accumulating binder-design experience.
 
-Architecture (inspired by Karpathy's LLM Wiki / nashsu/llm_wiki):
+Architecture (inspired by Karpathy's LLM Wiki / nashsu/llm_wiki + ACE paper):
   Raw Layer    → Ingest from session logs, MemU records, and tool outputs.
   Wiki Layer   → Process into atomic, self-contained knowledge units
                   (one entry per target / tool chain / strategy).
   Index Layer  → Keyword + tag-based structured index for fast retrieval.
+
+ACE (Agentic Context Engineering) enhancements:
+  • Bullet-style entries with helpful/harmful effectiveness tracking
+  • Incremental Delta updates instead of full rewrites
+  • Grow-and-Refine with anti-collapse guards (content fingerprint + min length)
+  • Reflector-driven ingestion: structured reflection reports → wiki updates
+  • Playbook context mode for session injection
 
 Each knowledge entry is stored as a YAML file with a standard schema so the
 agent can search, load, and apply historical experience during new sessions.
@@ -31,6 +38,10 @@ WIKI_DIR = Path(__file__).resolve().parent.parent / "knowledge_wiki"
 ENTRIES_DIR = WIKI_DIR / "entries"
 INDEX_FILE = WIKI_DIR / "index.json"
 
+# ACE: minimum content length to prevent context collapse
+_MIN_LESSON_LENGTH = 8
+_MIN_CONTENT_FINGERPRINT_LEN = 20
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -38,14 +49,33 @@ INDEX_FILE = WIKI_DIR / "index.json"
 
 
 @dataclass
+class DeltaRecord:
+    """ACE-inspired incremental update record for a knowledge entry."""
+
+    action: (
+        str  # "add_lesson" | "update_param" | "update_outcome" | "add_tag" | "refine"
+    )
+    field: str
+    old_value: Any = None
+    new_value: Any = None
+    source: str = ""  # "reflector" | "session" | "manual"
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+@dataclass
 class KnowledgeEntry:
     """
     An atomic, self-contained knowledge unit in the Wiki.
 
-    Schema follows the LLM-Wiki principle:
+    Schema follows the LLM-Wiki principle + ACE Bullet enhancements:
     - Each entry is fully self-describing
     - Context travels with the entry (metadata)
     - Format is consistent across all entries
+    - helpful/harmful counters track real-world effectiveness
+    - delta_history records incremental changes
+    - content_fingerprint guards against context collapse
     """
 
     id: str
@@ -65,11 +95,16 @@ class KnowledgeEntry:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     version: int = 1
+    # --- ACE Bullet enhancements ---
+    helpful_count: int = 0
+    harmful_count: int = 0
+    delta_history: list[dict[str, Any]] = field(default_factory=list)
+    content_fingerprint: str = ""
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialise to a dict suitable for YAML/JSON output."""
         d = asdict(self)
-        # Remove None values for cleaner output
+        # Remove None values and empty collections for cleaner output
         return {k: v for k, v in d.items() if v is not None and v != [] and v != {}}
 
     def to_json(self) -> str:
@@ -85,7 +120,63 @@ class KnowledgeEntry:
         if self.outcome:
             metrics = ", ".join(f"{k}={v}" for k, v in list(self.outcome.items())[:3])
             parts.append(metrics)
+        if self.helpful_count or self.harmful_count:
+            parts.append(f"↗{self.helpful_count}↘{self.harmful_count}")
         return " | ".join(parts)
+
+    # ---- ACE effectiveness tracking ----
+
+    @property
+    def effectiveness_score(self) -> float:
+        """Net effectiveness: helpful − harmful, normalised to [−1, 1]."""
+        total = self.helpful_count + self.harmful_count
+        if total == 0:
+            return 0.0
+        return (self.helpful_count - self.harmful_count) / total
+
+    def mark_helpful(self) -> None:
+        self.helpful_count += 1
+
+    def mark_harmful(self) -> None:
+        self.harmful_count += 1
+
+    # ---- ACE anti-collapse guards ----
+
+    def compute_fingerprint(self) -> str:
+        """Compute a content fingerprint to detect collapse."""
+        raw = (
+            self.title
+            + "|"
+            + " ".join(self.lessons)
+            + "|"
+            + json.dumps(self.params, sort_keys=True)
+            + "|"
+            + json.dumps(self.outcome, sort_keys=True)
+        )
+        return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+    def check_collapse(self) -> bool:
+        """Return True if the entry appears to have collapsed."""
+        total_lesson_len = sum(len(lesson) for lesson in self.lessons)
+        if self.lessons and total_lesson_len < _MIN_LESSON_LENGTH * len(self.lessons):
+            return True
+        fp = self.compute_fingerprint()
+        if (
+            self.content_fingerprint
+            and fp == self.content_fingerprint
+            and self.version > 3
+        ):
+            # Fingerprint unchanged across many versions → possible stale/collapsed
+            return True
+        return False
+
+    def record_delta(self, delta: DeltaRecord) -> None:
+        """Append a delta record to the history (keeps last 50)."""
+        self.delta_history.append(asdict(delta))
+        # Trim to avoid unbounded growth
+        if len(self.delta_history) > 50:
+            self.delta_history = self.delta_history[-50:]
+        self.content_fingerprint = self.compute_fingerprint()
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +446,314 @@ class KnowledgeWiki:
             tags_index.setdefault(tag, []).append(entry.id)
         self._save_index()
 
+    def apply_delta(
+        self,
+        entry_id: str,
+        *,
+        action: str,
+        field_name: str,
+        new_value: Any,
+        old_value: Any = None,
+        source: str = "session",
+    ) -> KnowledgeEntry | None:
+        """
+        ACE-inspired incremental Delta update.
+
+        Apply a single, targeted edit to an existing entry instead of
+        rewriting the whole entry.  Records the change in ``delta_history``
+        and updates the content fingerprint.
+
+        Parameters
+        ----------
+        entry_id:
+            Target entry ID.
+        action:
+            One of ``add_lesson``, ``update_param``, ``update_outcome``,
+            ``add_tag``, ``refine``, ``remove_lesson``.
+        field_name:
+            The entry field being edited (e.g. ``"lessons"``, ``"params"``).
+        new_value:
+            The new value to apply.
+        old_value:
+            Previous value (for the delta record).
+        source:
+            Origin of the change (``"reflector"``, ``"session"``, ``"manual"``).
+
+        Returns the updated entry, or ``None`` if the entry was not found.
+        """
+        existing = self._find_by_id(entry_id)
+        if existing is None:
+            logger.warning("apply_delta: entry %s not found", entry_id)
+            return None
+
+        delta = DeltaRecord(
+            action=action,
+            field=field_name,
+            old_value=old_value,
+            new_value=new_value,
+            source=source,
+        )
+
+        # Apply the edit
+        if action == "add_lesson" and isinstance(new_value, str):
+            if len(new_value) < _MIN_LESSON_LENGTH:
+                logger.debug("Skipping short lesson (%d chars)", len(new_value))
+                return existing
+            if new_value not in existing.lessons:
+                existing.lessons.append(new_value)
+        elif action == "remove_lesson" and isinstance(new_value, str):
+            existing.lessons = [
+                lesson for lesson in existing.lessons if lesson != new_value
+            ]
+        elif action == "update_param":
+            old = existing.params.get(field_name)
+            existing.params[field_name] = new_value
+            delta.old_value = old
+        elif action == "update_outcome":
+            old = existing.outcome.get(field_name)
+            existing.outcome[field_name] = new_value
+            delta.old_value = old
+        elif action == "add_tag" and isinstance(new_value, str):
+            if new_value not in existing.tags:
+                existing.tags.append(new_value)
+        elif action == "refine":
+            # General refinement: replace field value entirely
+            if hasattr(existing, field_name):
+                delta.old_value = getattr(existing, field_name)
+                setattr(existing, field_name, new_value)
+
+        existing.record_delta(delta)
+        existing.version += 1
+        existing.updated_at = datetime.now(timezone.utc).isoformat()
+
+        # Anti-collapse: reject update if it would collapse the entry
+        if existing.check_collapse():
+            logger.warning(
+                "Delta rejected: entry '%s' collapse detected after %s on %s",
+                existing.title,
+                action,
+                field_name,
+            )
+            # Revert the delta from history but keep the version bump
+            if existing.delta_history:
+                existing.delta_history.pop()
+
+        self._save_entry(existing)
+        self._update_index(existing)
+        logger.info(
+            "Delta applied (%s.%s, v%d) to '%s'",
+            action,
+            field_name,
+            existing.version,
+            existing.title,
+        )
+        return existing
+
+    def ingest_reflector_report(
+        self,
+        report: Any,
+        *,
+        source_session: str | None = None,
+    ) -> list[KnowledgeEntry]:
+        """
+        Ingest a :class:`~agent.core.reflector.ReflectionReport` into the wiki.
+
+        This is the ACE Curator role: take structured reflections and turn
+        them into incremental wiki updates rather than raw session dumps.
+
+        Parameters
+        ----------
+        report:
+            A ``ReflectionReport`` instance (or duck-typed dict).
+        source_session:
+            Optional session identifier.
+
+        Returns list of created/updated entries.
+        """
+        # Accept both dataclass and dict
+        if hasattr(report, "insights"):
+            insights = report.insights
+            strategy_updates = getattr(report, "strategy_updates", [])
+            new_strategies = getattr(report, "new_strategies", [])
+            anti_patterns = getattr(report, "anti_patterns", [])
+        elif isinstance(report, dict):
+            insights = report.get("insights", [])
+            strategy_updates = report.get("strategy_updates", [])
+            new_strategies = report.get("new_strategies", [])
+            anti_patterns = report.get("anti_patterns", [])
+        else:
+            return []
+
+        entries: list[KnowledgeEntry] = []
+
+        # 1. Apply insights as lessons to matching entries
+        for insight in insights:
+            if not isinstance(insight, dict):
+                continue
+            category = insight.get("category", "strategy")
+            target = insight.get("target")
+            content = insight.get("content", "")
+            if not content:
+                continue
+
+            entry_id = self._make_id(insight.get("title", content[:60]), target)
+            existing = self._find_by_id(entry_id)
+            if existing:
+                updated = self.apply_delta(
+                    entry_id,
+                    action="add_lesson",
+                    field_name="lessons",
+                    new_value=content,
+                    source="reflector",
+                )
+                if updated:
+                    entries.append(updated)
+            else:
+                entry = self.ingest(
+                    title=insight.get("title", content[:60]),
+                    category=category,
+                    target=target,
+                    lessons=[content],
+                    source_session=source_session,
+                )
+                entries.append(entry)
+
+        # 2. Strategy updates → apply as deltas to existing entries
+        for update in strategy_updates:
+            if not isinstance(update, dict):
+                continue
+            entry_id = update.get("entry_id")
+            if not entry_id:
+                continue
+            for lesson in update.get("add_lessons", []):
+                self.apply_delta(
+                    entry_id,
+                    action="add_lesson",
+                    field_name="lessons",
+                    new_value=lesson,
+                    source="reflector",
+                )
+            for key, val in update.get("update_params", {}).items():
+                self.apply_delta(
+                    entry_id,
+                    action="update_param",
+                    field_name=key,
+                    new_value=val,
+                    source="reflector",
+                )
+
+        # 3. New strategies → create fresh entries
+        for strategy in new_strategies:
+            if not isinstance(strategy, dict):
+                continue
+            entry = self.ingest(
+                title=strategy.get("title", "Reflected strategy"),
+                category="strategy",
+                target=strategy.get("target"),
+                tool_chain=strategy.get("tool_chain", []),
+                params=strategy.get("params", {}),
+                lessons=strategy.get("lessons", []),
+                source_session=source_session,
+            )
+            entries.append(entry)
+
+        # 4. Anti-patterns → create failure_mode entries
+        for pattern in anti_patterns:
+            if not isinstance(pattern, dict):
+                continue
+            entry = self.ingest(
+                title=f"Anti-pattern: {pattern.get('description', 'unknown')[:50]}",
+                category="failure_mode",
+                target=pattern.get("target"),
+                lessons=[
+                    f"Avoid: {pattern.get('description', '')}",
+                    f"Instead: {pattern.get('recommendation', '')}",
+                ],
+                source_session=source_session,
+            )
+            entries.append(entry)
+
+        logger.info(
+            "Reflector report ingested: %d entries created/updated", len(entries)
+        )
+        return entries
+
+    def get_playbook_prompt(
+        self,
+        query: str,
+        *,
+        target: str | None = None,
+        top_k: int = 5,
+        min_effectiveness: float = -0.5,
+    ) -> str:
+        """
+        ACE playbook mode: generate a structured, effectiveness-ranked
+        context block for session injection.
+
+        Unlike :meth:`get_context_prompt`, this ranks entries by
+        ``effectiveness_score`` and filters out entries with poor track
+        records (harmful > helpful by a wide margin).
+
+        Parameters
+        ----------
+        query:
+            Search query.
+        target:
+            Optional target filter.
+        top_k:
+            Maximum entries to include.
+        min_effectiveness:
+            Minimum effectiveness score to include. Set to ``-1.0`` to
+            include all entries.
+        """
+        entries = self.search(query, target=target, top_k=top_k * 2)
+
+        # Filter by effectiveness and sort
+        entries = [e for e in entries if e.effectiveness_score >= min_effectiveness]
+        # Sort: effectiveness first, then version (proxy for maturity)
+        entries.sort(
+            key=lambda e: (e.effectiveness_score, e.version),
+            reverse=True,
+        )
+        entries = entries[:top_k]
+
+        if not entries:
+            return ""
+
+        lines: list[str] = [
+            "==================================================",
+            "📋 BINDER DESIGN PLAYBOOK — Verified Strategies (ACE)",
+            "==================================================",
+        ]
+
+        for i, entry in enumerate(entries, 1):
+            eff_label = f"[↗{entry.helpful_count}" + (
+                f"/↘{entry.harmful_count}]" if entry.harmful_count else "]"
+            )
+            lines.append(f"\n### #{i}: {entry.title}  {eff_label}")
+            if entry.target:
+                lines.append(f"  Target: {entry.target}")
+            if entry.tool_chain:
+                lines.append(f"  Tool Chain: {' → '.join(entry.tool_chain)}")
+            if entry.params:
+                params_str = ", ".join(f"{k}={v}" for k, v in entry.params.items())
+                lines.append(f"  Recommended Params: {params_str}")
+            if entry.outcome:
+                outcome_str = ", ".join(f"{k}={v}" for k, v in entry.outcome.items())
+                lines.append(f"  Typical Outcome: {outcome_str}")
+            if entry.lessons:
+                lines.append("  Key Lessons:")
+                for lesson in entry.lessons[:5]:
+                    lines.append(f"    • {lesson}")
+
+        lines.append("\n==================================================")
+        lines.append(
+            "These strategies are ranked by verified effectiveness. "
+            "Prefer higher-ranked strategies for new designs."
+        )
+        lines.append("==================================================")
+        return "\n".join(lines)
+
     def _merge_entry(
         self,
         existing: KnowledgeEntry,
@@ -364,29 +763,54 @@ class KnowledgeWiki:
         lessons: list[str] | None = None,
         tags: list[str] | None = None,
     ) -> KnowledgeEntry:
-        """Grow-and-refine: merge new data into existing entry."""
+        """Grow-and-refine: merge new data into existing entry via deltas."""
         if params:
-            existing.params.update(params)
+            for key, val in params.items():
+                self.apply_delta(
+                    existing.id,
+                    action="update_param",
+                    field_name=key,
+                    new_value=val,
+                    old_value=existing.params.get(key),
+                    source="session",
+                )
         if outcome:
-            existing.outcome.update(outcome)
+            for key, val in outcome.items():
+                self.apply_delta(
+                    existing.id,
+                    action="update_outcome",
+                    field_name=key,
+                    new_value=val,
+                    old_value=existing.outcome.get(key),
+                    source="session",
+                )
         if lessons:
             for lesson in lessons:
-                if lesson not in existing.lessons:
-                    existing.lessons.append(lesson)
+                self.apply_delta(
+                    existing.id,
+                    action="add_lesson",
+                    field_name="lessons",
+                    new_value=lesson,
+                    source="session",
+                )
         if tags:
             for tag in tags:
-                if tag not in existing.tags:
-                    existing.tags.append(tag)
+                self.apply_delta(
+                    existing.id,
+                    action="add_tag",
+                    field_name="tags",
+                    new_value=tag,
+                    source="session",
+                )
 
-        existing.version += 1
-        existing.updated_at = datetime.now(timezone.utc).isoformat()
-
-        self._save_entry(existing)
-        self._update_index(existing)
+        # Reload to get the final state after all deltas
+        updated = self._find_by_id(existing.id)
+        if updated is None:
+            return existing
         logger.info(
-            "Merged update (v%d) into entry: %s", existing.version, existing.title
+            "Merged update (v%d) into entry: %s", updated.version, updated.title
         )
-        return existing
+        return updated
 
     def _score_entry(
         self,
@@ -394,11 +818,13 @@ class KnowledgeWiki:
         query_terms: set[str],
         query_lower: str,
     ) -> float:
-        """Score an entry against a query."""
+        """Score an entry against a query (ACE: includes effectiveness)."""
         score = 0.0
 
         # Full query match (high weight)
-        searchable = f"{entry.title} {entry.target or ''} {' '.join(entry.tags)}".lower()
+        searchable = (
+            f"{entry.title} {entry.target or ''} {' '.join(entry.tags)}".lower()
+        )
         if query_lower in searchable:
             score += 5.0
 
@@ -412,6 +838,10 @@ class KnowledgeWiki:
                 score += 1.0
             if entry.tool_chain and any(term in t.lower() for t in entry.tool_chain):
                 score += 1.0
+
+        # ACE: effectiveness bonus — proven strategies score higher
+        if entry.helpful_count > 0:
+            score += entry.effectiveness_score * 2.0
 
         # Recency bonus (newer entries slightly preferred)
         try:
@@ -474,7 +904,13 @@ KNOWLEDGE_WIKI_TOOL_SPEC = {
             },
             "category": {
                 "type": "string",
-                "enum": ["target", "tool_chain", "strategy", "failure_mode", "benchmark"],
+                "enum": [
+                    "target",
+                    "tool_chain",
+                    "strategy",
+                    "failure_mode",
+                    "benchmark",
+                ],
                 "description": "Optional category filter.",
             },
             "top_k": {

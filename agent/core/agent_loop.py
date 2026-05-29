@@ -68,39 +68,79 @@ async def teardown_session_sandbox(session: Session) -> None:
 
 async def _run_self_evolution_on_shutdown(session: Session) -> None:
     """
-    Hermes-inspired self-evolution loop: extract skills and ingest knowledge
-    from the completed session.  Runs as fire-and-forget during shutdown so
-    it never blocks the user.
+    ACE-inspired three-stage self-evolution pipeline.
+
+    Generator  → SkillExtractor extracts raw patterns (regex + heuristics)
+    Reflector  → LLM-driven deep reflection on session trajectory
+    Curator    → KnowledgeWiki ingests deltas from both sources
+
+    Runs as fire-and-forget during shutdown so it never blocks the user.
     """
     try:
         from agent.core.skill_extractor import SkillExtractor
         from agent.core.knowledge_wiki import KnowledgeWiki
+        from agent.core.reflector import Reflector
 
         messages = getattr(session, "messages", None) or []
         if len(messages) < 6:
             return
 
-        # 1. Extract skills
-        extractor = SkillExtractor()
-        saved_skills = extractor.extract_and_save(
-            messages, session_id=getattr(session, "session_id", None)
-        )
-        if saved_skills:
-            logger.info(
-                "Self-evolution: extracted %d skill(s) from session", len(saved_skills)
-            )
+        session_id = getattr(session, "session_id", None)
 
-        # 2. Ingest into knowledge wiki
+        # --- Stage 1: Generator (fast, regex-based) ---
+        extractor = SkillExtractor()
+        saved_skills = extractor.extract_and_save(messages, session_id=session_id)
+        if saved_skills:
+            logger.info("ACE Generator: extracted %d skill(s)", len(saved_skills))
+
+        # --- Stage 2: Reflector (LLM-driven deep analysis) ---
         wiki = KnowledgeWiki()
-        entries = wiki.ingest_from_session(
-            messages, session_id=getattr(session, "session_id", None)
-        )
-        if entries:
-            logger.info(
-                "Self-evolution: ingested %d knowledge entries", len(entries)
+        reflector_report = None
+        try:
+            reflector = Reflector()
+            existing_entries = wiki.list_entries() if wiki.entry_count > 0 else None
+            reflector_report = await reflector.reflect(
+                messages,
+                session_id=session_id,
+                existing_entries=existing_entries,
             )
+            if reflector_report and not reflector_report.is_empty:
+                logger.info(
+                    "ACE Reflector: %d insights, %d anti-patterns",
+                    len(reflector_report.insights),
+                    len(reflector_report.anti_patterns),
+                )
+        except Exception as exc:
+            logger.debug("ACE Reflector skipped (non-fatal): %s", exc)
+
+        # --- Stage 3: Curator (ingest into wiki with deltas) ---
+        # 3a. Ingest reflector report (structured deltas)
+        if reflector_report and not reflector_report.is_empty:
+            try:
+                reflected_entries = wiki.ingest_reflector_report(
+                    reflector_report, source_session=session_id
+                )
+                if reflected_entries:
+                    logger.info(
+                        "ACE Curator: ingested %d entries from reflector",
+                        len(reflected_entries),
+                    )
+            except Exception as exc:
+                logger.debug("ACE Curator reflector ingest skipped: %s", exc)
+
+        # 3b. Ingest raw session skills (traditional path)
+        try:
+            entries = wiki.ingest_from_session(messages, session_id=session_id)
+            if entries:
+                logger.info(
+                    "ACE Curator: ingested %d entries from session",
+                    len(entries),
+                )
+        except Exception as exc:
+            logger.debug("ACE Curator session ingest skipped: %s", exc)
+
     except Exception as exc:
-        logger.warning("Self-evolution loop failed (non-fatal): %s", exc)
+        logger.warning("Self-evolution pipeline failed (non-fatal): %s", exc)
 
 
 class LocalLLMConnectionError(ConnectionError):
@@ -205,6 +245,13 @@ def _detect_repeated_malformed(
 def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
     """
     Validate tool arguments structure.
+    
+    Performs comprehensive security checks including:
+    - Argument structure validation
+    - Path traversal detection
+    - Command injection detection
+    - ANSI escape sequence detection
+    - Prompt injection detection
 
     Returns:
         (is_valid, error_message)
@@ -221,6 +268,35 @@ def _validate_tool_args(tool_args: dict) -> tuple[bool, str | None]:
             False,
             f"Tool call error: 'args' must be a JSON object. You passed type: {type(args).__name__}",
         )
+    
+    # Security checks (AHE Execution and Validation layers)
+    from agent.core.tools import (
+        _check_path_traversal,
+        _check_command_injection,
+        _check_ansi_escapes,
+        _check_prompt_injection,
+    )
+    
+    # Check path traversal - BLOCK if detected
+    path_error = _check_path_traversal(args)
+    if path_error:
+        return (False, path_error)
+    
+    # Check command injection - BLOCK if detected
+    cmd_error = _check_command_injection(args)
+    if cmd_error:
+        return (False, cmd_error)
+    
+    # Check ANSI escapes - WARN if detected
+    ansi_error = _check_ansi_escapes(args)
+    if ansi_error:
+        return (True, ansi_error)  # Allow but warn
+    
+    # Check prompt injection - BLOCK if detected
+    prompt_error = _check_prompt_injection(args)
+    if prompt_error:
+        return (False, prompt_error)
+    
     return True, None
 
 
@@ -1538,6 +1614,7 @@ class Handlers:
             and not getattr(session, "_long_term_memory_loaded", False)
         ):
             from agent.core.memu import MemUClient
+
             client = MemUClient()
             if client.is_configured():
                 try:
@@ -1545,23 +1622,30 @@ class Handlers:
                     agent_id = session.config.model_name or "default_agent"
                     user_name = session.hf_username or "User"
                     query = text or "general user profile, preferences and context"
-                    
+
                     from agent.core.memory import LayeredMemoryPipeline
+
                     pipeline = LayeredMemoryPipeline(client=client)
-                    
+
                     # We fetch memories semantically using our asynchronous method
                     res = await pipeline.aretrieve_layered(
                         user_id=user_id,
                         agent_id=agent_id,
                         query=query,
-                        user_name=user_name
+                        user_name=user_name,
                     )
-                    
-                    session.layered_long_term_memory_prompt = res.get("formatted_prompt", "")
+
+                    session.layered_long_term_memory_prompt = res.get(
+                        "formatted_prompt", ""
+                    )
                     session._long_term_memory_loaded = True
-                    logger.info("Successfully pre-loaded layered long-term memories from MemU.")
+                    logger.info(
+                        "Successfully pre-loaded layered long-term memories from MemU."
+                    )
                 except Exception as e:
-                    logger.warning("Failed to auto-retrieve MemU long-term memories: %s", e)
+                    logger.warning(
+                        "Failed to auto-retrieve MemU long-term memories: %s", e
+                    )
                     # Mark loaded to avoid repeat failed calls in the same turn
                     session._long_term_memory_loaded = True
 
@@ -1649,18 +1733,18 @@ class Handlers:
                         orig_content = getattr(msg, "content", "")
                         messages[idx] = Message(
                             role="system",
-                            content=f"{orig_content}\n\n{session.layered_long_term_memory_prompt}"
+                            content=f"{orig_content}\n\n{session.layered_long_term_memory_prompt}",
                         )
                         inserted = True
                         break
-                
+
                 if not inserted:
                     messages.insert(
                         0,
                         Message(
                             role="system",
-                            content=session.layered_long_term_memory_prompt
-                        )
+                            content=session.layered_long_term_memory_prompt,
+                        ),
                     )
 
             # 🧠 Symbolic Short-Term Memory (Mermaid Task Canvas) Context Injection
@@ -1680,7 +1764,7 @@ class Handlers:
                             "for this task. Use this visual representation to avoid repeating failed actions, maintain "
                             "direction, and track dependencies:\n\n"
                             f"{mermaid_str}\n"
-                        )
+                        ),
                     )
                 )
             tools = session.tool_router.get_tool_specs_for_llm()
@@ -2221,13 +2305,15 @@ class Handlers:
             and final_response
         ):
             from agent.core.memu import MemUClient
+
             client = MemUClient()
             if client.is_configured():
+
                 async def _save_memory_bg():
                     try:
                         user_id = session.user_id or "default_user"
                         agent_id = session.config.model_name or "default_agent"
-                        
+
                         last_convo = []
                         all_items = session.context_manager.items
                         # Extract the last few messages to satisfy the 3-message minimum required by MemU API
@@ -2236,25 +2322,29 @@ class Handlers:
                                 content = getattr(item, "content", "")
                                 role = getattr(item, "role", "user")
                                 if content and role in ("user", "assistant"):
-                                    last_convo.append({"role": role, "content": content})
+                                    last_convo.append(
+                                        {"role": role, "content": content}
+                                    )
                             except Exception:
                                 pass
-                        
+
                         if len(last_convo) >= 3:
                             user_name = session.hf_username or "User"
                             agent_name = session.config.model_name or "AIDD-Intern"
-                            
+
                             await client.amemorize(
                                 conversation=last_convo,
                                 user_id=user_id,
                                 agent_id=agent_id,
                                 user_name=user_name,
-                                agent_name=agent_name
+                                agent_name=agent_name,
                             )
-                            logger.info("Successfully registered background memorization task with MemU.")
+                            logger.info(
+                                "Successfully registered background memorization task with MemU."
+                            )
                     except Exception as ex:
                         logger.debug("Background memorization task failed: %s", ex)
-                
+
                 asyncio.create_task(_save_memory_bg())
 
         return final_response
@@ -2670,28 +2760,29 @@ async def submission_loop(
         start_cpu_sandbox_preload(session)
     logger.info("Agent loop started")
 
-    # --- Hermes self-evolution: inject historical knowledge at session start ---
+    # --- ACE playbook injection: verified strategies ranked by effectiveness ---
     try:
         from agent.core.knowledge_wiki import KnowledgeWiki
 
         _wiki = KnowledgeWiki()
         if _wiki.entry_count > 0:
-            _wiki_ctx = _wiki.get_context_prompt(
+            # ACE: prefer playbook mode (effectiveness-ranked) over raw context
+            _wiki_ctx = _wiki.get_playbook_prompt(
                 "binder design protein strategy",
-                top_k=3,
+                top_k=5,
             )
             if _wiki_ctx:
                 session.context_manager.add_message(
-                    Message(role="user", content=f"[SYSTEM: KNOWLEDGE WIKI CONTEXT]\n{_wiki_ctx}")
+                    Message(role="user", content=f"[SYSTEM: ACE PLAYBOOK]\n{_wiki_ctx}")
                 )
                 logger.info(
-                    "Injected %d wiki entries into session context",
-                    min(_wiki.entry_count, 3),
+                    "ACE playbook injected (%d entries)",
+                    min(_wiki.entry_count, 5),
                 )
     except Exception as exc:
-        logger.debug("Knowledge wiki injection skipped: %s", exc)
+        logger.debug("ACE playbook injection skipped: %s", exc)
 
-    # --- Hermes self-evolution: inject learned skills at session start ---
+    # --- ACE Generator memory: inject learned skills at session start ---
     try:
         from agent.core.skill_extractor import SkillExtractor
 
@@ -2704,7 +2795,9 @@ async def submission_loop(
             )
             if _skills_ctx:
                 session.context_manager.add_message(
-                    Message(role="user", content=f"[SYSTEM: SKILLS MEMORY]\n{_skills_ctx}")
+                    Message(
+                        role="user", content=f"[SYSTEM: SKILLS MEMORY]\n{_skills_ctx}"
+                    )
                 )
                 logger.info(
                     "Injected %d skill files into session context",

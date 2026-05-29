@@ -62,6 +62,7 @@ def test_tool_router_does_not_construct_mcp_client_when_all_servers_skipped(
         },
         hf_token=None,
         local_mode=True,
+        tool_timeout_seconds=30.0,  # Default timeout for tests
     )
 
     assert router.mcp_client is None
@@ -80,6 +81,7 @@ def test_tool_router_forwards_hf_token_as_bearer_header(monkeypatch):
         {"hf-mcp-server": _server(transport="http", url="https://hf.co/mcp")},
         hf_token="hf-token",
         local_mode=True,
+        tool_timeout_seconds=30.0,  # Default timeout for tests
     )
 
     config = seen["payload"]["mcpServers"]["hf-mcp-server"]

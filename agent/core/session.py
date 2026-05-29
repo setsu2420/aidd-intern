@@ -63,7 +63,7 @@ def _get_max_tokens_safe(model_name: str) -> int:
     no catalog entry. Local OpenAI-compatible servers remain conservative by
     default because they often reject requests at much smaller windows.
     """
-    from litellm import get_model_info
+    from litellm.main import get_model_info
 
     forced_override = _env_positive_int(_FORCE_MODEL_MAX_TOKENS_ENV)
     if forced_override is not None:
@@ -228,6 +228,7 @@ class Session:
         self.is_running = True
         self.current_plan: list[dict[str, str]] = []
         self._cancelled = asyncio.Event()
+        self._cancel_epoch: int = 0  # Monotonically increasing cancel generation
         self.pending_approval: Optional[dict[str, Any]] = None
         self.sandbox = None
         self.sandbox_hardware: Optional[str] = None
@@ -418,15 +419,29 @@ class Session:
 
     def cancel(self) -> None:
         """Signal cancellation to the running agent loop."""
+        self._cancel_epoch += 1
         self._cancelled.set()
 
     def reset_cancel(self) -> None:
         """Clear the cancellation flag before a new run."""
         self._cancelled.clear()
+        # Note: _cancel_epoch is NOT reset - it only ever increases
 
     @property
     def is_cancelled(self) -> bool:
         return self._cancelled.is_set()
+
+    def get_cancel_epoch(self) -> int:
+        """Get current cancel epoch for safe cancellation checking.
+
+        Usage pattern:
+            epoch = session.get_cancel_epoch()
+            # ... do work ...
+            if session._cancel_epoch > epoch:
+                # Cancellation happened during our work
+                handle_cancellation()
+        """
+        return self._cancel_epoch
 
     def update_model(self, model_name: str) -> None:
         """Switch the active model and update the context window limit."""

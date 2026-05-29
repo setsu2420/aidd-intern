@@ -186,6 +186,7 @@ def test_default_cli_config_registers_proteinmcp_and_local_model(monkeypatch):
 
 
 def test_model_catalog_default_applies_when_env_default_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent.config.load_dotenv", lambda *a, **k: None)
     config_path = tmp_path / "config.json"
     models_path = tmp_path / "models.json"
     _write_json(
